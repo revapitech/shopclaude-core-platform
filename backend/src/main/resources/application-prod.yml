@@ -1,0 +1,49 @@
+spring:
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:noreply@theshopclaude.com}
+    password: ${MAIL_PASSWORD:dummy}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/gosuas_core_db
+    username: gosuas_user
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+server:
+  port: 8081
+  servlet:
+    context-path: /gosuas-core
+
+upload:
+  dir: /var/www/gosuas/uploads
+
+razorpay:
+  key:
+    id: ${RAZORPAY_KEY_ID}
+    secret: ${RAZORPAY_KEY_SECRET}
+
+jwt:
+  secret: ${JWT_SECRET:gosuas-super-secret-jwt-signing-key-for-dev-only-2026}
+  expiration-ms: 86400000
+
+gosuas:
+  init:
+    admin-email: ${GOSUAS_ADMIN_EMAIL:admin@gosuas.com}
+    admin-password: ${GOSUAS_ADMIN_PASSWORD:admin@123}
+    superadmin-email: ${SC_SUPERADMIN_EMAIL:owner@theshopclaude.com}
+    superadmin-password: ${SC_SUPERADMIN_PASSWORD:Sc@Admin2026#}

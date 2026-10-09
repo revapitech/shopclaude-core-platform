@@ -1,0 +1,21 @@
+[Unit]
+Description=GOSUAS Core Backend
+After=network.target postgresql.service
+
+[Service]
+User=root
+WorkingDirectory=/var/www/gosuas/app
+ExecStart=/usr/lib/jvm/java-21-openjdk-amd64/bin/java -Dspring.profiles.active=prod \
+  -Dserver.port=8081 \
+  -Dupload.dir=/var/www/gosuas/uploads \
+  -jar /var/www/gosuas/app/gosuas.jar
+Environment="DB_PASSWORD=Gosuas@2024Secure"
+Environment="RAZORPAY_KEY_ID=rzp_test_T1DLy98ruFoOhH"
+Environment="RAZORPAY_KEY_SECRET=Zlv5OofDcpQ7ClQNUCpe943O"
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
