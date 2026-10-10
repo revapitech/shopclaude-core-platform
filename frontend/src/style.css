@@ -140,6 +140,11 @@ button:disabled { background: #aaa; cursor: default; }
 .colour-photo-tile img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 2px solid #1E3A5F; }
 .colour-photo-plus { width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 2px dashed #A8C4E0; color: #4A78B0; font-size: 22px; }
 .colour-photo-label { font-size: 11px; color: #555; text-align: center; display: flex; align-items: center; gap: 4px; }
+.colour-stock-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.colour-stock-item { display: flex; align-items: center; gap: 8px; }
+.colour-stock-name { font-size: 13px; color: #374151; min-width: 80px; }
+.colour-stock-input { width: 80px; padding: 5px 8px; border: 1.5px solid #d1d5db; border-radius: 7px; font-size: 13px; text-align: center; outline: none; }
+.colour-stock-input:focus { border-color: #1E3A5F; }
 
 /* ── POS Billing ── */
 .barcode-row { display: flex; gap: 8px; align-items: center; }
@@ -902,6 +907,9 @@ img { width: 140px; height: 44px; object-fit: contain; }
   border-color: #1E3A5F !important; background: #EEF4FF !important;
   color: #1E3A5F !important; font-weight: 700;
   box-shadow: 0 2px 8px rgba(30,58,95,0.2) !important;
+}
+.s2-color-chip-oos {
+  opacity: 0.45; cursor: not-allowed; text-decoration: line-through;
 }
 .s2-color-dot {
   width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
