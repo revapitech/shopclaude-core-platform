@@ -1380,7 +1380,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [products, setProducts] = useState([]);
-  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '' };
+  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '' };
   const [form, setForm] = useState(EMPTY_FORM);
   const makeEmptyImageSlots = (n) => Array.from({length:n}, () => ({file:null,preview:null}));
   const [imageSlots, setImageSlots] = useState(makeEmptyImageSlots(2));
@@ -1828,8 +1828,9 @@ function App() {
       const on = prev.colours.includes(val);
       const colours = on ? prev.colours.filter(c => c !== val) : [...prev.colours, val];
       const colorPhotos = {...prev.colorPhotos};
-      if (on) delete colorPhotos[val];
-      return {...prev, colours, colorPhotos};
+      const colourStocks = {...prev.colourStocks};
+      if (on) { delete colorPhotos[val]; delete colourStocks[val]; }
+      return {...prev, colours, colorPhotos, colourStocks};
     });
   };
   const setColourPhoto = (colour, file) => setForm(f => ({...f, colorPhotos: {...f.colorPhotos, [colour]: {file, preview: URL.createObjectURL(file)}}}));
@@ -1932,8 +1933,12 @@ function App() {
         for (const colour of form.colours) {
           const colourPhotoUrl = await uploadColourPhoto(colour);
           const suffix = colour.replace(/\s+/g,'').substring(0,3).toUpperCase();
+          const perColourStock = form.colourStocks[colour] !== undefined && form.colourStocks[colour] !== ''
+            ? Number(form.colourStocks[colour])
+            : Number(form.stockQty) || 0;
           await axios.post(`${API}/products`, {
             ...base,
+            stockQty: perColourStock,
             imageUrl: combineImages(colourPhotoUrl, imageUrl),
             colorPhotoUrl: colourPhotoUrl || null,
             color: colour, size: sizeVal,
@@ -2050,6 +2055,7 @@ function App() {
 
     // Cap new upload slots to the plan's photo limit, but never drop existing photos (e.g. after a plan downgrade)
     const slotCount = Math.max(maxPhotosForPlan(tenantInfo?.plan), existingUrls.length);
+    const siblingStocks = Object.fromEntries(siblings.map(s => [s.color, s.stockQty ?? 0]));
     setEditModal({
       id: p.id,
       name: p.name,
@@ -2069,6 +2075,7 @@ function App() {
       colours,
       colorPhotos,
       siblingByColour,
+      siblingStocks,
       showColourPicker: !!colourEntry,
       featured: p.featured ?? false,
       festiveOffer: p.festiveOffer ?? false,
@@ -2186,11 +2193,14 @@ function App() {
             const colourPhotoUrl = await uploadEditColourPhoto(colour);
             const sibling = siblingByColour[colour];
             if (sibling) {
+              const updatedSiblingStock = editModal.siblingStocks?.[colour] !== undefined
+                ? Number(editModal.siblingStocks[colour])
+                : sibling.stockQty;
               await axios.put(`${API}/products/${sibling.id}`, {
                 name: sibling.name, category: sibling.category,
                 purchasePrice: sibling.purchasePrice, sellingPrice: sibling.sellingPrice, mrp: sibling.mrp,
                 productType: sibling.productType || 'OTHER', depositAmount: sibling.depositAmount, rentAmount: sibling.rentAmount,
-                stockQty: sibling.stockQty, lowStockAlertQty: null,
+                stockQty: updatedSiblingStock, lowStockAlertQty: null,
                 featured: sibling.featured, festiveOffer: sibling.festiveOffer ?? false,
                 rentalAvailable: sibling.rentalAvailable ?? false, active: sibling.active,
                 color: colour, size: sizeVal,
@@ -2650,6 +2660,19 @@ function App() {
                                 {c}
                               </span>
                             </label>
+                          ))}
+                        </div>
+                        <div className="modal-label" style={{marginTop:12}}>Stock per colour <span style={{fontWeight:400,color:'#9ca3af',textTransform:'none',letterSpacing:0}}>(leave blank to use the Stock Quantity field below for all)</span></div>
+                        <div className="colour-stock-list">
+                          {form.colours.map(c => (
+                            <div key={c} className="colour-stock-item">
+                              {COLOR_CSS[c] && <span className="csf-swatch" style={{background: COLOR_CSS[c], flexShrink:0}} />}
+                              <span className="colour-stock-name">{c}</span>
+                              <input type="number" min="0" className="colour-stock-input"
+                                placeholder="Qty"
+                                value={form.colourStocks[c] ?? ''}
+                                onChange={e => setForm(f => ({...f, colourStocks: {...f.colourStocks, [c]: e.target.value}}))} />
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -4001,6 +4024,28 @@ function App() {
                             </label>
                           ))}
                         </div>
+                        <div className="modal-label" style={{marginTop:12}}>Stock per colour</div>
+                        <div className="colour-stock-list">
+                          {editModal.colours.map(c => {
+                            const isPrimary = c === (editModal.colours.includes(editModal.color) ? editModal.color : editModal.colours[0]);
+                            const stockVal = isPrimary ? editModal.stockQty : (editModal.siblingStocks?.[c] ?? 0);
+                            return (
+                              <div key={c} className="colour-stock-item">
+                                {COLOR_CSS[c] && <span className="csf-swatch" style={{background: COLOR_CSS[c], flexShrink:0}} />}
+                                <span className="colour-stock-name">{c}</span>
+                                <input type="number" min="0" className="colour-stock-input"
+                                  value={stockVal}
+                                  onChange={e => {
+                                    if (isPrimary) {
+                                      setEditModal(m => ({...m, stockQty: e.target.value}));
+                                    } else {
+                                      setEditModal(m => ({...m, siblingStocks: {...(m.siblingStocks||{}), [c]: e.target.value}}));
+                                    }
+                                  }} />
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -4528,7 +4573,12 @@ function ShopApp() {
   if (detailProduct) {
     const dp = detailProduct;
     const dpUrls = imgUrls(dp);
-    const similar = products.filter(p => p.category === dp.category && p.id !== dp.id).slice(0, 8);
+    // Group all colour-variant siblings (same base SKU + category) so we can render them as a single product with a colour picker
+    const dpBaseSku = baseSkuOf(dp.sku);
+    const colorFamily = products.filter(p => p.category === dp.category && baseSkuOf(p.sku) === dpBaseSku && p.color);
+    const hasColorFamily = colorFamily.length > 1;
+    // Exclude colour siblings from "You May Also Like" since they're shown in the colour picker above
+    const similar = products.filter(p => p.category === dp.category && p.id !== dp.id && !(hasColorFamily && baseSkuOf(p.sku) === dpBaseSku)).slice(0, 8);
     return (
       <div className="s2-detail-page">
         {/* Header */}
@@ -4569,17 +4619,29 @@ function ShopApp() {
             <h1 className="s2-detail-name">{dp.name}</h1>
             <div className="s2-detail-price">₹{Number(dp.sellingPrice).toFixed(2)}</div>
 
-            {dp.color && (
+            {(hasColorFamily || dp.color) && (
               <div className="s2-detail-attr-block">
                 <div className="s2-attr-lbl">Colour</div>
                 <div className="s2-detail-color-chips">
-                  {dp.color.split(',').filter(Boolean).map(c => c.trim()).map(c => (
+                  {hasColorFamily ? colorFamily.map(variant => {
+                    const c = variant.color;
+                    const isOos = variant.stockQty === 0;
+                    return (
+                      <button key={variant.id}
+                        className={`s2-color-chip ${variant.id === dp.id ? 's2-color-chip-on' : ''} ${isOos ? 's2-color-chip-oos' : ''}`}
+                        onClick={() => { setDetailProduct(variant); setDetailQty(1); setDetailImgIdx(0); setDetailColor(c); }}>
+                        <span className="s2-color-dot"
+                          style={{background: COLOR_CSS[c] || '#ccc', border: c === 'White' ? '1px solid #ddd' : 'none'}} />
+                        {c}
+                        {isOos && <span style={{fontSize:'0.72em',marginLeft:3,opacity:0.65}}>(Out)</span>}
+                      </button>
+                    );
+                  }) : dp.color.split(',').filter(Boolean).map(c => c.trim()).map(c => (
                     <button key={c}
                       className={`s2-color-chip ${detailColor === c ? 's2-color-chip-on' : ''}`}
                       onClick={() => setDetailColor(detailColor === c ? '' : c)}>
                       <span className="s2-color-dot"
-                        style={{background: COLOR_CSS[c] || '#ccc',
-                          border: c === 'White' ? '1px solid #ddd' : 'none'}} />
+                        style={{background: COLOR_CSS[c] || '#ccc', border: c === 'White' ? '1px solid #ddd' : 'none'}} />
                       {c}
                     </button>
                   ))}
