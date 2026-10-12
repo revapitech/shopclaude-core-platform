@@ -54,6 +54,9 @@ public class ProductService {
         if (productRepository.findBySkuAndTenantId(request.sku(), tenantId).isPresent()) {
             throw new IllegalArgumentException("SKU '" + request.sku() + "' already exists");
         }
+        if (request.stockQty() != null && request.stockQty() < 0) {
+            throw new IllegalArgumentException("Stock quantity cannot be negative");
+        }
         String barcode = generateEan13();
         String productType = request.productType() != null ? request.productType() : "OTHER";
         boolean isRental = "RENTAL".equalsIgnoreCase(productType);
@@ -134,6 +137,9 @@ public class ProductService {
 
     public Product update(UUID productId, ProductRequest request) {
         UUID tenantId = TenantContext.getTenantId();
+        if (request.stockQty() != null && request.stockQty() < 0) {
+            throw new IllegalArgumentException("Stock quantity cannot be negative");
+        }
         Product product = productRepository.findById(productId)
                 .filter(p -> tenantId.equals(p.getTenantId()))
                 .orElseThrow(() -> new RuntimeException("Product not found"));

@@ -2213,6 +2213,7 @@ function App() {
               const suffix = colour.replace(/\s+/g,'').substring(0,3).toUpperCase();
               await axios.post(`${API}/products`, {
                 ...base,
+                stockQty: editModal.siblingStocks?.[colour] !== undefined ? Number(editModal.siblingStocks[colour]) : 0,
                 color: colour, size: sizeVal,
                 variantAttrs: JSON.stringify({...attrsBase, Colour: colour}),
                 sku: `${editModal.sku}-${suffix}`,

@@ -46,7 +46,8 @@ public class BillService {
             Product product = productRepository.findByBarcodeAndTenantId(itemRequest.barcode(), tenantId)
                     .orElseThrow(() -> new RuntimeException("Product not found: " + itemRequest.barcode()));
 
-            if (product.getStockQty() < itemRequest.quantity()) {
+            int updated = productRepository.decrementStock(product.getId(), tenantId, itemRequest.quantity());
+            if (updated == 0) {
                 throw new RuntimeException("Insufficient stock for: " + product.getName());
             }
 
@@ -62,8 +63,6 @@ public class BillService {
                     .build();
 
             bill.getItems().add(item);
-            product.setStockQty(product.getStockQty() - itemRequest.quantity());
-            productRepository.save(product);
             subTotal = subTotal.add(lineTotal);
         }
 
