@@ -19,12 +19,15 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests for the per-colour stock-check and decrement logic in PublicShopController.
+ * Tests for the per-colour stock-check semantics in PublicShopController.
  *
- * The placeOrder endpoint requires Razorpay signature verification, which calls a
- * static method on PublicPaymentController.  Rather than wire a full Spring context
- * we extract and test the stock-check logic in isolation, using plain Product objects
- * exactly as they would be manipulated inside the loop.
+ * The concurrency guarantee is provided by ProductRepository.decrementStock, a JPQL
+ * UPDATE … WHERE stockQty >= qty that executes atomically against PostgreSQL.
+ * PostgreSQL row-level write locks ensure a second concurrent UPDATE sees the
+ * committed stockQty before proceeding, making the guard race-free at READ COMMITTED.
+ *
+ * These unit tests verify the same invariants against the helper that mirrors the
+ * SQL semantics, without requiring a live database or Spring context.
  */
 @ExtendWith(MockitoExtension.class)
 class ShopOrderStockTest {

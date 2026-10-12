@@ -131,10 +131,7 @@ class ProductVariantStockTest {
         assertThat(result.getStockQty()).isEqualTo(7);
     }
 
-    // ── Test 4: negative stock in request is rejected by backend validation ──
-    // (The frontend restricts min=0 inputs, but the backend should be safe too.
-    //  Currently ProductService stores whatever it receives — a future validation
-    //  improvement. This test documents the current behaviour as a baseline.)
+    // ── Test 4: zero stock is valid and stored as-is ─────────────────────────
 
     @Test
     void create_withZeroStock_storesZero() {
@@ -145,5 +142,42 @@ class ProductVariantStockTest {
         Product p = productService.create(request("Black", 0));
 
         assertThat(p.getStockQty()).isEqualTo(0);
+    }
+
+    // ── Test 5: negative stock in create request is rejected ─────────────────
+
+    @Test
+    void create_withNegativeStock_throwsIllegalArgument() {
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(new Tenant()));
+        when(productRepository.findBySkuAndTenantId(anyString(), eq(tenantId))).thenReturn(Optional.empty());
+
+        ProductRequest bad = new ProductRequest(
+            "Test Shirt", "Apparel", "Red", null, "TS-NEG", null,
+            new BigDecimal("200"), new BigDecimal("499"), new BigDecimal("599"),
+            -1, 5, null, null, false, false, null, true,
+            "{\"Colour\":\"Red\"}", false, "OTHER", null, null, null
+        );
+
+        assertThatThrownBy(() -> productService.create(bad))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("negative");
+    }
+
+    // ── Test 6: negative stock in update request is rejected ─────────────────
+
+    @Test
+    void update_withNegativeStock_throwsIllegalArgument() {
+        UUID productId = UUID.randomUUID();
+
+        ProductRequest bad = new ProductRequest(
+            "Test Shirt", "Apparel", "Red", null, "TS-RED", null,
+            new BigDecimal("200"), new BigDecimal("499"), new BigDecimal("599"),
+            -5, 5, null, null, false, false, null, true,
+            "{\"Colour\":\"Red\"}", false, "OTHER", null, null, null
+        );
+
+        assertThatThrownBy(() -> productService.update(productId, bad))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("negative");
     }
 }

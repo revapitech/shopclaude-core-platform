@@ -144,16 +144,14 @@ public class PublicShopController {
                     .build());
 
             total = total.add(lineTotal);
-            if (product.getStockQty() < qty) {
+            int updated = productRepository.decrementStock(product.getId(), tenantId, qty);
+            if (updated == 0) {
                 String colorLabel = (product.getColor() != null && !product.getColor().isBlank())
                         ? " (" + product.getColor() + ")" : "";
                 throw new IllegalArgumentException(
                         "Not enough stock for " + product.getName() + colorLabel
                         + ". Only " + product.getStockQty() + " available.");
             }
-            product.setStockQty(product.getStockQty() - qty);
-            product.setSoldCount((product.getSoldCount() == null ? 0 : product.getSoldCount()) + qty);
-            productRepository.save(product);
         }
 
         order.setItems(items);
