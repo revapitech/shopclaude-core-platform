@@ -1,0 +1,23 @@
+# ── Secrets / local config ────────────────────────────────────────────────────
+backend/src/main/resources/application.yml
+backend/src/main/resources/application-*.yml
+!backend/src/main/resources/application.yml.example
+
+# ── Java build output ─────────────────────────────────────────────────────────
+backend/target/
+
+# ── Node / frontend ───────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Temp fix scripts ──────────────────────────────────────────────────────────
+fix_*.js

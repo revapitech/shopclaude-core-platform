@@ -27,13 +27,18 @@ axios.interceptors.request.use(config => {
   return config;
 });
 
-// On 401/403, clear token and reload to login screen
+// On 401/403, clear token and reload to login screen.
+// Skip auto-logout for file upload requests — those errors are handled by the
+// calling try/catch so the user sees a meaningful toast instead of a silent reload.
 axios.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401 || err.response?.status === 403) {
-      const token = localStorage.getItem('gosuas_token');
-      if (token) { localStorage.removeItem('gosuas_token'); window.location.reload(); }
+      const isFileUpload = err.config?.headers?.['Content-Type']?.includes('multipart/form-data');
+      if (!isFileUpload) {
+        const token = localStorage.getItem('gosuas_token');
+        if (token) { localStorage.removeItem('gosuas_token'); window.location.reload(); }
+      }
     }
     return Promise.reject(err);
   }
