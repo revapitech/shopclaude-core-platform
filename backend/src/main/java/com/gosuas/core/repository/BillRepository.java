@@ -12,4 +12,5 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
     List<Bill> findAllByTenantId(UUID tenantId);
     List<Bill> findAllByTenantIdAndBillNoStartingWith(UUID tenantId, String prefix);
     Optional<Bill> findFirstByTenantIdAndCustomerMobileOrderByBillDateDesc(UUID tenantId, String customerMobile);
+    Optional<Bill> findByBillNoAndTenantId(String billNo, UUID tenantId);
 }

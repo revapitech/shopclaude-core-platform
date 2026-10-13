@@ -31,6 +31,7 @@ public class Bill {
     private LocalDateTime billDate;
 
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
     private List<BillItem> items = new ArrayList<>();
 
     @PrePersist
