@@ -27,4 +27,13 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     @Modifying(clearAutomatically = true)
     @Query("UPDATE Product p SET p.stockQty = p.stockQty - :qty, p.soldCount = COALESCE(p.soldCount, 0) + :qty WHERE p.id = :id AND p.tenantId = :tenantId AND p.stockQty >= :qty")
     int decrementStock(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("qty") int qty);
+
+    /**
+     * Atomically restores stock when a sales return is approved and items are
+     * accepted back into sellable inventory. No lower-bound guard is needed here
+     * because the returned quantity was previously decremented from the same product.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Product p SET p.stockQty = p.stockQty + :qty WHERE p.id = :id AND p.tenantId = :tenantId")
+    int restoreStock(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("qty") int qty);
 }

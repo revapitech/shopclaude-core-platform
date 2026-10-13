@@ -1461,6 +1461,22 @@ function App() {
   const [returnModal, setReturnModal] = useState(null);
   const [rentalEditError, setRentalEditError] = useState('');
 
+  // ── Sales Returns ──────────────────────────────────────────────────────────
+  const [salesReturns, setSalesReturns] = useState([]);
+  const [returnSearch, setReturnSearch] = useState('');
+  const [returnStatusFilter, setReturnStatusFilter] = useState('ALL');
+  const [returnPage, setReturnPage] = useState(1);
+  const [expandedReturn, setExpandedReturn] = useState(null);
+  const [showCreateReturn, setShowCreateReturn] = useState(false);
+  const [returnPreviewRef, setReturnPreviewRef] = useState({ sourceType: 'POS', ref: '' });
+  const [returnPreview, setReturnPreview] = useState(null);
+  const [returnPreviewError, setReturnPreviewError] = useState('');
+  const [returnPreviewLoading, setReturnPreviewLoading] = useState(false);
+  const [returnFormItems, setReturnFormItems] = useState([]);
+  const [returnFormMeta, setReturnFormMeta] = useState({ returnReason: '', remarks: '', refundMode: 'CASH' });
+  const [returnSubmitError, setReturnSubmitError] = useState('');
+  const [returnSubmitLoading, setReturnSubmitLoading] = useState(false);
+
   const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const logoSrc = tenantInfo?.logoUrl ? `${BACKEND}${tenantInfo.logoUrl}` : '/logo.png';
 
@@ -1593,6 +1609,13 @@ function App() {
     } catch (e) {}
   };
 
+  const loadSalesReturns = async () => {
+    try {
+      const res = await axios.get(`${API}/returns`);
+      setSalesReturns(res.data);
+    } catch (e) {}
+  };
+
   useEffect(() => {
     if (isLoggedIn) { loadProducts(); loadTenantInfo(); loadTenantCategories(); loadDigitalProducts(); }
   }, [isLoggedIn]);
@@ -1609,6 +1632,7 @@ function App() {
       axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'rental')
       axios.get(`${API}/rentals`).then(r => setRentals(r.data)).catch(() => {});
+    if (isLoggedIn && activePage === 'returns') loadSalesReturns();
   }, [activePage, isLoggedIn]);
 
   useEffect(() => {
@@ -2415,6 +2439,9 @@ function App() {
           <button className={`nav-item ${activePage==='plan'?'nav-active':''}`} onClick={() => { setActivePage('plan'); setSidebarOpen(false); }}>
             💎 My Plan
           </button>
+          <button className={`nav-item ${activePage==='returns'?'nav-active':''}`} onClick={() => { setActivePage('returns'); setSidebarOpen(false); }}>
+            ↩ Sales Returns
+          </button>
           <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }}>
             🏷 Print Labels
           </button>
@@ -2450,7 +2477,7 @@ function App() {
           <button className="hamburger-btn" onClick={e => { e.stopPropagation(); setSidebarOpen(o => !o); }}>
             {sidebarOpen ? '✕' : '☰'}
           </button>
-          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing' }[activePage] || 'Home'}</h2>
+          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
             <a href={`https://${getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
               title="Visit your store"
@@ -3734,6 +3761,320 @@ function App() {
 
         {/* ── PDF Store page ── */}
         {activePage === 'pdf-store' && <PdfStorePage tenantInfo={tenantInfo} />}
+
+        {/* ── Sales Returns page ── */}
+        {activePage === 'returns' && (() => {
+          const STATUS_COLORS = { PENDING:'#b45309', APPROVED:'#1d4ed8', REJECTED:'#dc2626', COMPLETED:'#15803d', CANCELLED:'#6b7280' };
+          const q = returnSearch.toLowerCase();
+          const filtered = salesReturns.filter(r =>
+            (returnStatusFilter === 'ALL' || r.status === returnStatusFilter) &&
+            (!q || [r.returnNo, r.sourceBillNo, r.customerName, r.customerMobile].join(' ').toLowerCase().includes(q))
+          );
+          const totalRetPages = Math.max(1, Math.ceil(filtered.length / PAGE_ROWS));
+          const safeRetPage = Math.min(returnPage, totalRetPages);
+          const retSlice = filtered.slice((safeRetPage-1)*PAGE_ROWS, safeRetPage*PAGE_ROWS);
+
+          const lookupPreview = async () => {
+            if (!returnPreviewRef.ref.trim()) return;
+            setReturnPreviewLoading(true); setReturnPreviewError(''); setReturnPreview(null);
+            try {
+              const res = await axios.get(`${API}/returns/preview`, {
+                params: { sourceType: returnPreviewRef.sourceType, ref: returnPreviewRef.ref.trim() }
+              });
+              setReturnPreview(res.data);
+              setReturnFormItems(res.data.items.map(i => ({
+                barcode: i.barcode, productName: i.productName, unitPrice: i.unitPrice,
+                returnableQty: i.returnableQty, originalQty: i.originalQty,
+                returnedQty: 0, restockable: true,
+              })));
+              setReturnFormMeta({ returnReason: '', remarks: '', refundMode: 'CASH' });
+              setReturnSubmitError('');
+            } catch (err) {
+              setReturnPreviewError(err.response?.data?.error || 'Sale not found. Check the reference number.');
+            } finally { setReturnPreviewLoading(false); }
+          };
+
+          const submitReturn = async () => {
+            const itemsToReturn = returnFormItems.filter(i => i.returnedQty > 0);
+            if (!itemsToReturn.length) { setReturnSubmitError('Enter a return quantity for at least one item.'); return; }
+            setReturnSubmitLoading(true); setReturnSubmitError('');
+            try {
+              await axios.post(`${API}/returns`, {
+                sourceType: returnPreview.sourceType,
+                sourceBillId: returnPreview.sourceBillId,
+                returnReason: returnFormMeta.returnReason || null,
+                remarks: returnFormMeta.remarks || null,
+                refundMode: returnFormMeta.refundMode || null,
+                items: itemsToReturn.map(i => ({
+                  barcode: i.barcode, returnedQty: i.returnedQty, restockable: i.restockable
+                })),
+              });
+              setShowCreateReturn(false); setReturnPreview(null); setReturnPreviewRef({ sourceType:'POS', ref:'' });
+              loadSalesReturns(); showToast('Return created successfully');
+            } catch (err) {
+              setReturnSubmitError(err.response?.data?.error || 'Failed to create return.');
+            } finally { setReturnSubmitLoading(false); }
+          };
+
+          const changeStatus = async (retId, newStatus) => {
+            try {
+              await axios.put(`${API}/returns/${retId}/status`, { status: newStatus });
+              loadSalesReturns();
+              showToast(`Return ${newStatus.toLowerCase()}`);
+            } catch (err) {
+              showToast(err.response?.data?.error || 'Failed to update status', 'error');
+            }
+          };
+
+          return (
+            <div className="page-content">
+              {/* Toolbar */}
+              <div className="cust-toolbar" style={{marginBottom:12}}>
+                <input className="cust-search" placeholder="🔍 Search return #, bill #, customer…"
+                  value={returnSearch} onChange={e => { setReturnSearch(e.target.value); setReturnPage(1); }} />
+                <div className="order-src-filters">
+                  {['ALL','PENDING','APPROVED','REJECTED','COMPLETED','CANCELLED'].map(s => (
+                    <button key={s} className={`src-filter-btn ${returnStatusFilter===s?'src-active':''}`}
+                      onClick={() => { setReturnStatusFilter(s); setReturnPage(1); }}>
+                      {s === 'ALL' ? 'All' : s.charAt(0) + s.slice(1).toLowerCase()}
+                      <span className="src-count">{s==='ALL' ? salesReturns.length : salesReturns.filter(r=>r.status===s).length}</span>
+                    </button>
+                  ))}
+                </div>
+                <button className="btn-primary" style={{marginLeft:'auto'}} onClick={() => {
+                  setShowCreateReturn(true); setReturnPreview(null);
+                  setReturnPreviewRef({ sourceType:'POS', ref:'' }); setReturnPreviewError('');
+                }}>+ New Return</button>
+              </div>
+
+              {/* Returns table */}
+              <div className="data-table-wrap">
+                <table className="data-table">
+                  <thead><tr><th>Return #</th><th>Source</th><th>Bill / Order #</th><th>Customer</th><th>Date</th><th>Amount</th><th>Refund Mode</th><th>Refund</th><th>Status</th><th></th></tr></thead>
+                  <tbody>
+                    {retSlice.length === 0 && (
+                      <tr><td colSpan={10} style={{textAlign:'center',padding:'32px',color:'#9ca3af'}}>No returns found.</td></tr>
+                    )}
+                    {retSlice.map(r => (
+                      <React.Fragment key={r.id}>
+                        <tr className={`order-row ${expandedReturn===r.id?'order-row-open':''}`}
+                          onClick={() => setExpandedReturn(expandedReturn===r.id ? null : r.id)}
+                          style={{cursor:'pointer'}}>
+                          <td className="td-ordnum">{r.returnNo}</td>
+                          <td><span className={`src-badge src-${r.sourceType}`}>{r.sourceType}</span></td>
+                          <td>{r.sourceBillNo}</td>
+                          <td className="td-name">{r.customerName || '—'}</td>
+                          <td className="td-date">{r.returnDate || (r.createdAt?.slice(0,10) ?? '—')}</td>
+                          <td className="td-amt">₹{Number(r.totalReturnAmount||0).toFixed(2)}</td>
+                          <td>{r.refundMode || '—'}</td>
+                          <td><span style={{fontSize:12,fontWeight:600,color:r.refundStatus==='REFUNDED'?'#15803d':'#b45309'}}>{r.refundStatus}</span></td>
+                          <td><span style={{fontSize:12,fontWeight:700,color:STATUS_COLORS[r.status]||'#374151'}}>{r.status}</span></td>
+                          <td className="td-expand">{expandedReturn===r.id?'▲':'▼'}</td>
+                        </tr>
+                        {expandedReturn===r.id && (
+                          <tr className="order-items-row">
+                            <td colSpan={10}>
+                              <div className="order-items-wrap">
+                                {r.returnReason && <div style={{marginBottom:8,fontSize:13}}><strong>Reason:</strong> {r.returnReason}{r.remarks ? ` — ${r.remarks}` : ''}</div>}
+                                <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,marginBottom:12}}>
+                                  <thead><tr style={{background:'#f9fafb'}}>
+                                    <th style={{padding:'6px 8px',textAlign:'left'}}>Product</th>
+                                    <th style={{padding:'6px 8px',textAlign:'left'}}>Barcode</th>
+                                    <th style={{padding:'6px 8px',textAlign:'right'}}>Qty</th>
+                                    <th style={{padding:'6px 8px',textAlign:'right'}}>Unit Price</th>
+                                    <th style={{padding:'6px 8px',textAlign:'right'}}>Line Total</th>
+                                    <th style={{padding:'6px 8px',textAlign:'center'}}>Restockable</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {(r.items||[]).map((item,idx) => (
+                                      <tr key={idx} style={{borderTop:'1px solid #f3f4f6'}}>
+                                        <td style={{padding:'6px 8px'}}>{item.productName}</td>
+                                        <td style={{padding:'6px 8px',fontFamily:'monospace',fontSize:12}}>{item.barcode}</td>
+                                        <td style={{padding:'6px 8px',textAlign:'right'}}>{item.returnedQty}</td>
+                                        <td style={{padding:'6px 8px',textAlign:'right'}}>₹{Number(item.unitPrice||0).toFixed(2)}</td>
+                                        <td style={{padding:'6px 8px',textAlign:'right'}}>₹{Number(item.lineTotal||0).toFixed(2)}</td>
+                                        <td style={{padding:'6px 8px',textAlign:'center'}}>{item.restockable ? '✓' : '✗'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                {/* Status action buttons */}
+                                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                                  {r.status === 'PENDING' && <>
+                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'APPROVED'); }}>Approve</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px',color:'#dc2626',borderColor:'#fca5a5'}}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'REJECTED'); }}>Reject</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'CANCELLED'); }}>Cancel</button>
+                                  </>}
+                                  {r.status === 'APPROVED' && <>
+                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'COMPLETED'); }}>Mark Completed</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'CANCELLED'); }}>Cancel</button>
+                                  </>}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {totalRetPages > 1 && (
+                <div className="pagination">
+                  {Array.from({length:totalRetPages},(_,i)=>i+1).map(p => (
+                    <button key={p} className={`page-btn ${safeRetPage===p?'page-active':''}`}
+                      onClick={() => setReturnPage(p)}>{p}</button>
+                  ))}
+                </div>
+              )}
+
+              {/* Create Return Modal */}
+              {showCreateReturn && (
+                <div className="modal-overlay" onClick={() => setShowCreateReturn(false)}>
+                  <div className="modal-box" style={{width:660,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}}
+                    onClick={e => e.stopPropagation()}>
+                    <h3 style={{marginBottom:16}}>New Sales Return</h3>
+
+                    {/* Step 1: Look up the original sale */}
+                    {!returnPreview && (
+                      <div>
+                        <div style={{display:'flex',gap:10,marginBottom:8}}>
+                          <select value={returnPreviewRef.sourceType}
+                            onChange={e => setReturnPreviewRef(r => ({...r, sourceType: e.target.value}))}
+                            style={{padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff'}}>
+                            <option value="POS">POS / Offline Bill</option>
+                            <option value="ONLINE">Online Order</option>
+                          </select>
+                          <input style={{flex:1,padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14}}
+                            placeholder={returnPreviewRef.sourceType==='POS' ? 'Bill number, e.g. GOS-20241013-0001' : 'Order number, e.g. WEB-20241013-0001'}
+                            value={returnPreviewRef.ref}
+                            onChange={e => setReturnPreviewRef(r => ({...r, ref: e.target.value}))}
+                            onKeyDown={e => e.key==='Enter' && lookupPreview()} />
+                          <button className="btn-primary" onClick={lookupPreview} disabled={returnPreviewLoading}>
+                            {returnPreviewLoading ? '…' : 'Look Up'}
+                          </button>
+                        </div>
+                        {returnPreviewError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:8}}>{returnPreviewError}</div>}
+                        <div style={{fontSize:13,color:'#6b7280'}}>Enter the original bill or order number to load its items.</div>
+                      </div>
+                    )}
+
+                    {/* Step 2: Fill in return details */}
+                    {returnPreview && (
+                      <div>
+                        <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:13}}>
+                          <strong>{returnPreview.sourceBillNo}</strong> · {returnPreview.customerName || 'Walk-in'}
+                          {returnPreview.customerMobile ? ` · ${returnPreview.customerMobile}` : ''}
+                          <button style={{marginLeft:12,fontSize:12,color:'#6b7280',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}
+                            onClick={() => { setReturnPreview(null); setReturnPreviewRef(r => ({...r, ref:''})); }}>Change</button>
+                        </div>
+
+                        {/* Items table */}
+                        <div style={{overflowX:'auto',marginBottom:14}}>
+                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                            <thead><tr style={{background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
+                              <th style={{padding:'8px',textAlign:'left'}}>Product</th>
+                              <th style={{padding:'8px',textAlign:'right'}}>Returnable</th>
+                              <th style={{padding:'8px',textAlign:'right',width:90}}>Return Qty</th>
+                              <th style={{padding:'8px',textAlign:'center',width:80}}>Restock?</th>
+                              <th style={{padding:'8px',textAlign:'right'}}>Subtotal</th>
+                            </tr></thead>
+                            <tbody>
+                              {returnFormItems.map((item, idx) => (
+                                <tr key={idx} style={{borderBottom:'1px solid #f3f4f6'}}>
+                                  <td style={{padding:'8px'}}>
+                                    <div style={{fontWeight:600}}>{item.productName}</div>
+                                    <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{item.barcode}</div>
+                                  </td>
+                                  <td style={{padding:'8px',textAlign:'right',color:'#6b7280'}}>{item.returnableQty}</td>
+                                  <td style={{padding:'8px',textAlign:'right'}}>
+                                    <input type="number" min="0" max={item.returnableQty}
+                                      style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
+                                      value={item.returnedQty}
+                                      onChange={e => {
+                                        const v = Math.min(item.returnableQty, Math.max(0, Number(e.target.value)||0));
+                                        setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, returnedQty: v} : x));
+                                      }} />
+                                  </td>
+                                  <td style={{padding:'8px',textAlign:'center'}}>
+                                    <input type="checkbox" checked={item.restockable}
+                                      onChange={e => setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, restockable: e.target.checked} : x))} />
+                                  </td>
+                                  <td style={{padding:'8px',textAlign:'right'}}>
+                                    ₹{(Number(item.unitPrice||0) * item.returnedQty).toFixed(2)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr style={{borderTop:'2px solid #e5e7eb',fontWeight:700}}>
+                                <td colSpan={4} style={{padding:'8px',textAlign:'right'}}>Total Return Amount</td>
+                                <td style={{padding:'8px',textAlign:'right'}}>
+                                  ₹{returnFormItems.reduce((s,i) => s + Number(i.unitPrice||0)*i.returnedQty, 0).toFixed(2)}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+
+                        {/* Return meta */}
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+                          <div>
+                            <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Return Reason</label>
+                            <select value={returnFormMeta.returnReason}
+                              onChange={e => setReturnFormMeta(m => ({...m, returnReason: e.target.value}))}
+                              style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                              <option value="">— Select reason —</option>
+                              <option value="DEFECTIVE">Defective / Damaged</option>
+                              <option value="SIZE_ISSUE">Wrong Size</option>
+                              <option value="WRONG_ITEM">Wrong Item Delivered</option>
+                              <option value="CHANGE_OF_MIND">Change of Mind</option>
+                              <option value="OTHER">Other</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Refund Mode</label>
+                            <select value={returnFormMeta.refundMode}
+                              onChange={e => setReturnFormMeta(m => ({...m, refundMode: e.target.value}))}
+                              style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                              <option value="CASH">Cash</option>
+                              <option value="UPI">UPI</option>
+                              <option value="BANK_TRANSFER">Bank Transfer</option>
+                              <option value="STORE_CREDIT">Store Credit</option>
+                              <option value="ONLINE">Online (Razorpay)</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div style={{marginBottom:14}}>
+                          <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Remarks (optional)</label>
+                          <textarea rows={2} style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+                            placeholder="Additional notes about this return…"
+                            value={returnFormMeta.remarks}
+                            onChange={e => setReturnFormMeta(m => ({...m, remarks: e.target.value}))} />
+                        </div>
+
+                        {returnSubmitError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:10}}>{returnSubmitError}</div>}
+                        <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+                          <button className="btn-secondary" onClick={() => setShowCreateReturn(false)}>Cancel</button>
+                          <button className="btn-primary" onClick={submitReturn} disabled={returnSubmitLoading}>
+                            {returnSubmitLoading ? 'Saving…' : 'Create Return'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
       </div>{/* end main-area */}
 
