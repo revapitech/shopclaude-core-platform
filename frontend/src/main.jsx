@@ -1918,21 +1918,20 @@ function App() {
 
   const createProduct = async (e) => {
     e.preventDefault();
-
-    const imageUrl = await uploadImages();
-    const activeAttrs = catAttrs.filter(a => (form.selectedAttrs[a.name] || []).length > 0);
-    const isRental = form.productType === 'RENTAL';
-    const pricing = isRental
-      ? { sellingPrice: null, mrp: null, depositAmount: Number(form.depositAmount) || 0, rentAmount: Number(form.rentAmount) || 0 }
-      : { sellingPrice: Number(form.sellingPrice), mrp: Number(form.mrp), depositAmount: null, rentAmount: null };
-    const base = {
-      name: form.name, category: form.category, subcategory: null,
-      purchasePrice: Number(form.purchasePrice), ...pricing, stockQty: Number(form.stockQty),
-      lowStockAlertQty: null, imageUrl, active: form.showToWebsite, festiveOffer: form.festiveOffer,
-      rentalAvailable: form.rentalAvailable, productType: form.productType,
-      description: form.description || null,
-    };
     try {
+      const imageUrl = await uploadImages();
+      const activeAttrs = catAttrs.filter(a => (form.selectedAttrs[a.name] || []).length > 0);
+      const isRental = form.productType === 'RENTAL';
+      const pricing = isRental
+        ? { sellingPrice: null, mrp: null, depositAmount: Number(form.depositAmount) || 0, rentAmount: Number(form.rentAmount) || 0 }
+        : { sellingPrice: Number(form.sellingPrice), mrp: Number(form.mrp), depositAmount: null, rentAmount: null };
+      const base = {
+        name: form.name, category: form.category, subcategory: null,
+        purchasePrice: Number(form.purchasePrice), ...pricing, stockQty: Number(form.stockQty),
+        lowStockAlertQty: null, imageUrl, active: form.showToWebsite, festiveOffer: form.festiveOffer,
+        rentalAvailable: form.rentalAvailable, productType: form.productType,
+        description: form.description || null,
+      };
       if (activeAttrs.length > 0) {
         const combos = cartesian(activeAttrs.map(a => form.selectedAttrs[a.name]));
         for (const combo of combos) {
@@ -2139,6 +2138,7 @@ function App() {
   };
 
   const performEditSave = async () => {
+    try {
     const savedUrls = [];
     for (const slot of editModal.imageSlots) {
       if (slot.file) {
@@ -2172,8 +2172,6 @@ function App() {
       rentalAvailable: editModal.rentalAvailable ?? false,
       active: editModal.showToWebsite,
     };
-
-    try {
       if (editAttrs.length > 0) {
         const color = attrVals[editAttrs[0]?.name] || null;
         const size = attrVals[editAttrs[1]?.name] || null;
