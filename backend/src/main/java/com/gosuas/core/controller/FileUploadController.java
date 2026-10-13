@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.nio.file.*;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 
 @RestController
 @RequestMapping("/api/upload")
@@ -19,22 +20,27 @@ public class FileUploadController {
     private String uploadDir;
 
     @PostMapping
-    public ResponseEntity<Map<String, String>> upload(@RequestParam("file") MultipartFile file) throws IOException {
-        Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
-        Files.createDirectories(uploadPath);
+    public ResponseEntity<Map<String, String>> upload(@RequestParam("file") MultipartFile file) {
+        try {
+            Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
+            Files.createDirectories(uploadPath);
 
-        String ext = "";
-        String original = file.getOriginalFilename();
-        if (original != null && original.contains(".")) {
-            ext = original.substring(original.lastIndexOf('.'));
+            String ext = "";
+            String original = file.getOriginalFilename();
+            if (original != null && original.contains(".")) {
+                ext = original.substring(original.lastIndexOf('.'));
+            }
+            String filename = UUID.randomUUID() + ext;
+            Path dest = uploadPath.resolve(filename);
+
+            try (InputStream in = file.getInputStream()) {
+                Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            return ResponseEntity.ok(Map.of("url", "/uploads/" + filename));
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "File upload failed: " + e.getMessage()));
         }
-        String filename = UUID.randomUUID() + ext;
-        Path dest = uploadPath.resolve(filename);
-
-        try (InputStream in = file.getInputStream()) {
-            Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
-        }
-
-        return ResponseEntity.ok(Map.of("url", "/uploads/" + filename));
     }
 }
