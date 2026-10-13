@@ -2452,7 +2452,7 @@ function App() {
             💎 My Plan
           </button>
           <button className={`nav-item ${activePage==='returns'?'nav-active':''}`} onClick={() => { setActivePage('returns'); setSidebarOpen(false); }}>
-            ↩ Sales Returns
+            🔄 Sales Returns
           </button>
           <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }}>
             🏷 Print Labels
