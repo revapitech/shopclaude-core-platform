@@ -14,9 +14,9 @@ spring:
             enable: true
   datasource:
     driverClassName: org.postgresql.Driver
-    url: jdbc:postgresql://localhost:5432/gosuas_core_db
+    url: jdbc:postgresql://localhost:5434/gosuas_core_db
     username: postgres
-    password: postgres
+    password: postgres123
   jpa:
     hibernate:
       ddl-auto: update
@@ -35,7 +35,7 @@ server:
     context-path: /gosuas-core
 
 upload:
-  dir: /Users/unnimayakrishnan/Downloads/gosuas-core-platform/uploads
+  dir: ${UPLOAD_DIR:./uploads}
 
 razorpay:
   key:
