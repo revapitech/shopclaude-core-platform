@@ -1482,6 +1482,13 @@ function App() {
   const [returnFormMeta, setReturnFormMeta] = useState({ returnReason: '', remarks: '', refundMode: 'CASH' });
   const [returnSubmitError, setReturnSubmitError] = useState('');
   const [returnSubmitLoading, setReturnSubmitLoading] = useState(false);
+  const [returnMode, setReturnMode] = useState('bill'); // 'bill' | 'direct'
+  const [returnDirectSku, setReturnDirectSku] = useState('');
+  const [returnDirectProduct, setReturnDirectProduct] = useState(null);
+  const [returnDirectError, setReturnDirectError] = useState('');
+  const [returnDirectLoading, setReturnDirectLoading] = useState(false);
+  const [returnDirectItems, setReturnDirectItems] = useState([]);
+  const [returnDirectCustomer, setReturnDirectCustomer] = useState({ name: '', mobile: '' });
 
   const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const logoSrc = tenantInfo?.logoUrl ? `${BACKEND}${tenantInfo.logoUrl}` : '/logo.png';
@@ -3840,6 +3847,63 @@ function App() {
             }
           };
 
+          const lookupDirectProduct = async () => {
+            if (!returnDirectSku.trim()) return;
+            setReturnDirectLoading(true); setReturnDirectError(''); setReturnDirectProduct(null);
+            try {
+              const res = await axios.get(`${API}/returns/product-lookup`, { params: { sku: returnDirectSku.trim() } });
+              setReturnDirectProduct({ ...res.data, returnedQty: 1, restockable: true });
+            } catch (err) {
+              setReturnDirectError(err.response?.data?.error || 'Product not found. Check the SKU or barcode.');
+            } finally { setReturnDirectLoading(false); }
+          };
+
+          const addDirectItem = () => {
+            if (!returnDirectProduct) return;
+            if (returnDirectProduct.returnedQty < 1) { setReturnDirectError('Quantity must be at least 1.'); return; }
+            const barcode = returnDirectProduct.barcode;
+            const existing = returnDirectItems.find(i => i.barcode === barcode);
+            if (existing) {
+              setReturnDirectItems(prev => prev.map(i => i.barcode === barcode
+                ? { ...i, returnedQty: i.returnedQty + returnDirectProduct.returnedQty } : i));
+            } else {
+              setReturnDirectItems(prev => [...prev, {
+                productId: returnDirectProduct.productId,
+                productName: returnDirectProduct.productName,
+                barcode: returnDirectProduct.barcode,
+                unitPrice: returnDirectProduct.sellingPrice || 0,
+                returnedQty: returnDirectProduct.returnedQty,
+                restockable: returnDirectProduct.restockable,
+              }]);
+            }
+            setReturnDirectProduct(null); setReturnDirectSku(''); setReturnDirectError('');
+          };
+
+          const submitDirectReturn = async () => {
+            if (!returnDirectItems.length) { setReturnSubmitError('Add at least one item.'); return; }
+            setReturnSubmitLoading(true); setReturnSubmitError('');
+            try {
+              await axios.post(`${API}/returns`, {
+                sourceType: 'DIRECT',
+                sourceBillId: null,
+                customerName: returnDirectCustomer.name || null,
+                customerMobile: returnDirectCustomer.mobile || null,
+                returnReason: returnFormMeta.returnReason || null,
+                remarks: returnFormMeta.remarks || null,
+                refundMode: returnFormMeta.refundMode || null,
+                items: returnDirectItems.map(i => ({
+                  barcode: i.barcode, returnedQty: i.returnedQty, restockable: i.restockable
+                })),
+              });
+              setShowCreateReturn(false); setReturnPreview(null); setReturnPreviewRef({ sourceType:'POS', ref:'' });
+              setReturnDirectSku(''); setReturnDirectProduct(null); setReturnDirectItems([]);
+              setReturnDirectCustomer({ name: '', mobile: '' });
+              loadSalesReturns(); showToast('Return created successfully');
+            } catch (err) {
+              setReturnSubmitError(err.response?.data?.error || 'Failed to create return.');
+            } finally { setReturnSubmitLoading(false); }
+          };
+
           return (
             <div className="page-content">
               {/* Toolbar */}
@@ -3858,6 +3922,11 @@ function App() {
                 <button className="btn-primary" style={{marginLeft:'auto'}} onClick={() => {
                   setShowCreateReturn(true); setReturnPreview(null);
                   setReturnPreviewRef({ sourceType:'POS', ref:'' }); setReturnPreviewError('');
+                  setReturnMode('bill');
+                  setReturnDirectSku(''); setReturnDirectProduct(null); setReturnDirectError('');
+                  setReturnDirectItems([]); setReturnDirectCustomer({ name: '', mobile: '' });
+                  setReturnFormMeta({ returnReason: '', remarks: '', refundMode: 'CASH' });
+                  setReturnSubmitError('');
                 }}>+ New Return</button>
               </div>
 
@@ -3952,135 +4021,296 @@ function App() {
               {/* Create Return Modal */}
               {showCreateReturn && (
                 <div className="modal-overlay" onClick={() => setShowCreateReturn(false)}>
-                  <div className="modal-box" style={{width:660,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}}
+                  <div className="modal-box" style={{width:680,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}}
                     onClick={e => e.stopPropagation()}>
-                    <h3 style={{marginBottom:16}}>New Sales Return</h3>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+                      <h3 style={{margin:0}}>New Sales Return</h3>
+                      <button type="button" style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'#666',lineHeight:1}} onClick={() => setShowCreateReturn(false)}>×</button>
+                    </div>
 
-                    {/* Step 1: Look up the original sale */}
-                    {!returnPreview && (
-                      <div>
-                        <div style={{display:'flex',gap:10,marginBottom:8}}>
-                          <select value={returnPreviewRef.sourceType}
-                            onChange={e => setReturnPreviewRef(r => ({...r, sourceType: e.target.value}))}
-                            style={{padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff'}}>
-                            <option value="POS">POS / Offline Bill</option>
-                            <option value="ONLINE">Online Order</option>
-                          </select>
-                          <input style={{flex:1,padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14}}
-                            placeholder={returnPreviewRef.sourceType==='POS' ? 'Bill number, e.g. GOS-20241013-0001' : 'Order number, e.g. WEB-20241013-0001'}
-                            value={returnPreviewRef.ref}
-                            onChange={e => setReturnPreviewRef(r => ({...r, ref: e.target.value}))}
-                            onKeyDown={e => e.key==='Enter' && lookupPreview()} />
-                          <button className="btn-primary" onClick={lookupPreview} disabled={returnPreviewLoading}>
-                            {returnPreviewLoading ? '…' : 'Look Up'}
-                          </button>
-                        </div>
-                        {returnPreviewError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:8}}>{returnPreviewError}</div>}
-                        <div style={{fontSize:13,color:'#6b7280'}}>Enter the original bill or order number to load its items.</div>
-                      </div>
+                    {/* Mode tabs */}
+                    <div style={{display:'flex',borderRadius:8,overflow:'hidden',border:'1.5px solid #e5e7eb',marginBottom:18}}>
+                      <button type="button" style={{flex:1,padding:'9px',fontSize:13,fontWeight:600,background:returnMode==='bill'?'#1E3A5F':'#fff',color:returnMode==='bill'?'#fff':'#374151',border:'none',cursor:'pointer'}}
+                        onClick={() => { setReturnMode('bill'); setReturnPreview(null); setReturnPreviewRef({sourceType:'POS',ref:''}); setReturnPreviewError(''); setReturnSubmitError(''); }}>
+                        By Bill / Order #
+                      </button>
+                      <button type="button" style={{flex:1,padding:'9px',fontSize:13,fontWeight:600,background:returnMode==='direct'?'#1E3A5F':'#fff',color:returnMode==='direct'?'#fff':'#374151',border:'none',cursor:'pointer',borderLeft:'1px solid #e5e7eb'}}
+                        onClick={() => { setReturnMode('direct'); setReturnSubmitError(''); }}>
+                        By SKU / Direct
+                      </button>
+                    </div>
+
+                    {/* ── Bill / Order mode ── */}
+                    {returnMode === 'bill' && (
+                      <>
+                        {!returnPreview && (
+                          <div>
+                            <div style={{display:'flex',gap:10,marginBottom:8}}>
+                              <select value={returnPreviewRef.sourceType}
+                                onChange={e => setReturnPreviewRef(r => ({...r, sourceType: e.target.value}))}
+                                style={{padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff'}}>
+                                <option value="POS">POS / Offline Bill</option>
+                                <option value="ONLINE">Online Order</option>
+                              </select>
+                              <input style={{flex:1,padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14}}
+                                placeholder={returnPreviewRef.sourceType==='POS' ? 'Bill number, e.g. GOS-20241013-0001' : 'Order number, e.g. WEB-20241013-0001'}
+                                value={returnPreviewRef.ref}
+                                onChange={e => setReturnPreviewRef(r => ({...r, ref: e.target.value}))}
+                                onKeyDown={e => e.key==='Enter' && lookupPreview()} />
+                              <button className="btn-primary" onClick={lookupPreview} disabled={returnPreviewLoading}>
+                                {returnPreviewLoading ? '…' : 'Look Up'}
+                              </button>
+                            </div>
+                            {returnPreviewError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:8}}>{returnPreviewError}</div>}
+                            <div style={{fontSize:13,color:'#6b7280'}}>Enter the original bill or order number to load its items.</div>
+                          </div>
+                        )}
+
+                        {returnPreview && (
+                          <div>
+                            <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:13}}>
+                              <strong>{returnPreview.sourceBillNo}</strong> · {returnPreview.customerName || 'Walk-in'}
+                              {returnPreview.customerMobile ? ` · ${returnPreview.customerMobile}` : ''}
+                              <button style={{marginLeft:12,fontSize:12,color:'#6b7280',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}
+                                onClick={() => { setReturnPreview(null); setReturnPreviewRef(r => ({...r, ref:''})); }}>Change</button>
+                            </div>
+
+                            <div style={{overflowX:'auto',marginBottom:14}}>
+                              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                                <thead><tr style={{background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
+                                  <th style={{padding:'8px',textAlign:'left'}}>Product</th>
+                                  <th style={{padding:'8px',textAlign:'right'}}>Returnable</th>
+                                  <th style={{padding:'8px',textAlign:'right',width:90}}>Return Qty</th>
+                                  <th style={{padding:'8px',textAlign:'center',width:80}}>Restock?</th>
+                                  <th style={{padding:'8px',textAlign:'right'}}>Subtotal</th>
+                                </tr></thead>
+                                <tbody>
+                                  {returnFormItems.map((item, idx) => (
+                                    <tr key={idx} style={{borderBottom:'1px solid #f3f4f6'}}>
+                                      <td style={{padding:'8px'}}>
+                                        <div style={{fontWeight:600}}>{item.productName}</div>
+                                        <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{item.barcode}</div>
+                                      </td>
+                                      <td style={{padding:'8px',textAlign:'right',color:'#6b7280'}}>{item.returnableQty}</td>
+                                      <td style={{padding:'8px',textAlign:'right'}}>
+                                        <input type="number" min="0" max={item.returnableQty}
+                                          style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
+                                          value={item.returnedQty}
+                                          onChange={e => {
+                                            const v = Math.min(item.returnableQty, Math.max(0, Number(e.target.value)||0));
+                                            setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, returnedQty: v} : x));
+                                          }} />
+                                      </td>
+                                      <td style={{padding:'8px',textAlign:'center'}}>
+                                        <input type="checkbox" checked={item.restockable}
+                                          onChange={e => setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, restockable: e.target.checked} : x))} />
+                                      </td>
+                                      <td style={{padding:'8px',textAlign:'right'}}>
+                                        ₹{(Number(item.unitPrice||0) * item.returnedQty).toFixed(2)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr style={{borderTop:'2px solid #e5e7eb',fontWeight:700}}>
+                                    <td colSpan={4} style={{padding:'8px',textAlign:'right'}}>Total Return Amount</td>
+                                    <td style={{padding:'8px',textAlign:'right'}}>
+                                      ₹{returnFormItems.reduce((s,i) => s + Number(i.unitPrice||0)*i.returnedQty, 0).toFixed(2)}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Return Reason</label>
+                                <select value={returnFormMeta.returnReason}
+                                  onChange={e => setReturnFormMeta(m => ({...m, returnReason: e.target.value}))}
+                                  style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                                  <option value="">— Select reason —</option>
+                                  <option value="DEFECTIVE">Defective / Damaged</option>
+                                  <option value="SIZE_ISSUE">Wrong Size</option>
+                                  <option value="WRONG_ITEM">Wrong Item Delivered</option>
+                                  <option value="CHANGE_OF_MIND">Change of Mind</option>
+                                  <option value="OTHER">Other</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Refund Mode</label>
+                                <select value={returnFormMeta.refundMode}
+                                  onChange={e => setReturnFormMeta(m => ({...m, refundMode: e.target.value}))}
+                                  style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                                  <option value="CASH">Cash</option>
+                                  <option value="UPI">UPI</option>
+                                  <option value="BANK_TRANSFER">Bank Transfer</option>
+                                  <option value="STORE_CREDIT">Store Credit</option>
+                                  <option value="ONLINE">Online (Razorpay)</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div style={{marginBottom:14}}>
+                              <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Remarks (optional)</label>
+                              <textarea rows={2} style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+                                placeholder="Additional notes about this return…"
+                                value={returnFormMeta.remarks}
+                                onChange={e => setReturnFormMeta(m => ({...m, remarks: e.target.value}))} />
+                            </div>
+
+                            {returnSubmitError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:10}}>{returnSubmitError}</div>}
+                            <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+                              <button className="btn-secondary" onClick={() => setShowCreateReturn(false)}>Cancel</button>
+                              <button className="btn-primary" onClick={submitReturn} disabled={returnSubmitLoading}>
+                                {returnSubmitLoading ? 'Saving…' : 'Create Return'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
-                    {/* Step 2: Fill in return details */}
-                    {returnPreview && (
+                    {/* ── Direct / SKU mode ── */}
+                    {returnMode === 'direct' && (
                       <div>
-                        <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:13}}>
-                          <strong>{returnPreview.sourceBillNo}</strong> · {returnPreview.customerName || 'Walk-in'}
-                          {returnPreview.customerMobile ? ` · ${returnPreview.customerMobile}` : ''}
-                          <button style={{marginLeft:12,fontSize:12,color:'#6b7280',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}
-                            onClick={() => { setReturnPreview(null); setReturnPreviewRef(r => ({...r, ref:''})); }}>Change</button>
-                        </div>
-
-                        {/* Items table */}
-                        <div style={{overflowX:'auto',marginBottom:14}}>
-                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-                            <thead><tr style={{background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
-                              <th style={{padding:'8px',textAlign:'left'}}>Product</th>
-                              <th style={{padding:'8px',textAlign:'right'}}>Returnable</th>
-                              <th style={{padding:'8px',textAlign:'right',width:90}}>Return Qty</th>
-                              <th style={{padding:'8px',textAlign:'center',width:80}}>Restock?</th>
-                              <th style={{padding:'8px',textAlign:'right'}}>Subtotal</th>
-                            </tr></thead>
-                            <tbody>
-                              {returnFormItems.map((item, idx) => (
-                                <tr key={idx} style={{borderBottom:'1px solid #f3f4f6'}}>
-                                  <td style={{padding:'8px'}}>
-                                    <div style={{fontWeight:600}}>{item.productName}</div>
-                                    <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{item.barcode}</div>
-                                  </td>
-                                  <td style={{padding:'8px',textAlign:'right',color:'#6b7280'}}>{item.returnableQty}</td>
-                                  <td style={{padding:'8px',textAlign:'right'}}>
-                                    <input type="number" min="0" max={item.returnableQty}
-                                      style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
-                                      value={item.returnedQty}
-                                      onChange={e => {
-                                        const v = Math.min(item.returnableQty, Math.max(0, Number(e.target.value)||0));
-                                        setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, returnedQty: v} : x));
-                                      }} />
-                                  </td>
-                                  <td style={{padding:'8px',textAlign:'center'}}>
-                                    <input type="checkbox" checked={item.restockable}
-                                      onChange={e => setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, restockable: e.target.checked} : x))} />
-                                  </td>
-                                  <td style={{padding:'8px',textAlign:'right'}}>
-                                    ₹{(Number(item.unitPrice||0) * item.returnedQty).toFixed(2)}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot>
-                              <tr style={{borderTop:'2px solid #e5e7eb',fontWeight:700}}>
-                                <td colSpan={4} style={{padding:'8px',textAlign:'right'}}>Total Return Amount</td>
-                                <td style={{padding:'8px',textAlign:'right'}}>
-                                  ₹{returnFormItems.reduce((s,i) => s + Number(i.unitPrice||0)*i.returnedQty, 0).toFixed(2)}
-                                </td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-
-                        {/* Return meta */}
-                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-                          <div>
-                            <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Return Reason</label>
-                            <select value={returnFormMeta.returnReason}
-                              onChange={e => setReturnFormMeta(m => ({...m, returnReason: e.target.value}))}
-                              style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
-                              <option value="">— Select reason —</option>
-                              <option value="DEFECTIVE">Defective / Damaged</option>
-                              <option value="SIZE_ISSUE">Wrong Size</option>
-                              <option value="WRONG_ITEM">Wrong Item Delivered</option>
-                              <option value="CHANGE_OF_MIND">Change of Mind</option>
-                              <option value="OTHER">Other</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Refund Mode</label>
-                            <select value={returnFormMeta.refundMode}
-                              onChange={e => setReturnFormMeta(m => ({...m, refundMode: e.target.value}))}
-                              style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
-                              <option value="CASH">Cash</option>
-                              <option value="UPI">UPI</option>
-                              <option value="BANK_TRANSFER">Bank Transfer</option>
-                              <option value="STORE_CREDIT">Store Credit</option>
-                              <option value="ONLINE">Online (Razorpay)</option>
-                            </select>
-                          </div>
-                        </div>
-                        <div style={{marginBottom:14}}>
-                          <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Remarks (optional)</label>
-                          <textarea rows={2} style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
-                            placeholder="Additional notes about this return…"
-                            value={returnFormMeta.remarks}
-                            onChange={e => setReturnFormMeta(m => ({...m, remarks: e.target.value}))} />
-                        </div>
-
-                        {returnSubmitError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:10}}>{returnSubmitError}</div>}
-                        <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
-                          <button className="btn-secondary" onClick={() => setShowCreateReturn(false)}>Cancel</button>
-                          <button className="btn-primary" onClick={submitReturn} disabled={returnSubmitLoading}>
-                            {returnSubmitLoading ? 'Saving…' : 'Create Return'}
+                        {/* SKU / barcode lookup */}
+                        <div style={{display:'flex',gap:8,marginBottom:8}}>
+                          <input style={{flex:1,padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14}}
+                            placeholder="Enter product SKU or scan barcode…"
+                            value={returnDirectSku}
+                            onChange={e => { setReturnDirectSku(e.target.value); setReturnDirectError(''); setReturnDirectProduct(null); }}
+                            onKeyDown={e => e.key==='Enter' && lookupDirectProduct()} />
+                          <button className="btn-primary" onClick={lookupDirectProduct} disabled={returnDirectLoading}>
+                            {returnDirectLoading ? '…' : 'Look Up'}
                           </button>
                         </div>
+                        {returnDirectError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:8}}>{returnDirectError}</div>}
+
+                        {/* Product card */}
+                        {returnDirectProduct && (
+                          <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'12px 14px',marginBottom:14}}>
+                            <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>{returnDirectProduct.productName}</div>
+                            <div style={{fontSize:12,color:'#6b7280',marginBottom:10}}>
+                              SKU: {returnDirectProduct.sku} · Barcode: {returnDirectProduct.barcode} · Stock: {returnDirectProduct.stockQty} · ₹{Number(returnDirectProduct.sellingPrice||0).toFixed(2)}
+                            </div>
+                            <div style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+                              <label style={{fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:6}}>
+                                Qty to Return:
+                                <input type="number" min="1"
+                                  style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
+                                  value={returnDirectProduct.returnedQty}
+                                  onChange={e => setReturnDirectProduct(p => ({...p, returnedQty: Math.max(1, Number(e.target.value)||1)}))} />
+                              </label>
+                              <label style={{fontSize:13,display:'flex',alignItems:'center',gap:5,cursor:'pointer'}}>
+                                <input type="checkbox" checked={returnDirectProduct.restockable}
+                                  onChange={e => setReturnDirectProduct(p => ({...p, restockable: e.target.checked}))} />
+                                Restock to inventory
+                              </label>
+                              <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}} onClick={addDirectItem}>+ Add to Return</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Items added so far */}
+                        {returnDirectItems.length > 0 && (
+                          <div style={{marginBottom:14}}>
+                            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                              <thead><tr style={{background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
+                                <th style={{padding:'8px',textAlign:'left'}}>Product</th>
+                                <th style={{padding:'8px',textAlign:'right'}}>Qty</th>
+                                <th style={{padding:'8px',textAlign:'right'}}>Unit Price</th>
+                                <th style={{padding:'8px',textAlign:'right'}}>Subtotal</th>
+                                <th style={{padding:'8px',textAlign:'center'}}>Restock?</th>
+                                <th style={{padding:'8px'}}></th>
+                              </tr></thead>
+                              <tbody>
+                                {returnDirectItems.map((item, idx) => (
+                                  <tr key={idx} style={{borderBottom:'1px solid #f3f4f6'}}>
+                                    <td style={{padding:'8px'}}>
+                                      <div style={{fontWeight:600}}>{item.productName}</div>
+                                      <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{item.barcode}</div>
+                                    </td>
+                                    <td style={{padding:'8px',textAlign:'right'}}>{item.returnedQty}</td>
+                                    <td style={{padding:'8px',textAlign:'right'}}>₹{Number(item.unitPrice||0).toFixed(2)}</td>
+                                    <td style={{padding:'8px',textAlign:'right'}}>₹{(Number(item.unitPrice||0)*item.returnedQty).toFixed(2)}</td>
+                                    <td style={{padding:'8px',textAlign:'center'}}>{item.restockable ? '✓' : '✗'}</td>
+                                    <td style={{padding:'8px',textAlign:'center'}}>
+                                      <button type="button" style={{background:'none',border:'none',color:'#dc2626',cursor:'pointer',fontSize:18,lineHeight:1}} onClick={() => setReturnDirectItems(prev => prev.filter((_,i) => i!==idx))}>×</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr style={{borderTop:'2px solid #e5e7eb',fontWeight:700}}>
+                                  <td colSpan={3} style={{padding:'8px',textAlign:'right'}}>Total</td>
+                                  <td style={{padding:'8px',textAlign:'right'}}>₹{returnDirectItems.reduce((s,i) => s + Number(i.unitPrice||0)*i.returnedQty, 0).toFixed(2)}</td>
+                                  <td colSpan={2}></td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
+
+                        {returnDirectItems.length > 0 && (
+                          <div>
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Customer Name (optional)</label>
+                                <input style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}
+                                  placeholder="Walk-in customer"
+                                  value={returnDirectCustomer.name}
+                                  onChange={e => setReturnDirectCustomer(c => ({...c, name: e.target.value}))} />
+                              </div>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Mobile (optional)</label>
+                                <input style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}
+                                  placeholder="e.g. 9876543210"
+                                  value={returnDirectCustomer.mobile}
+                                  onChange={e => setReturnDirectCustomer(c => ({...c, mobile: e.target.value}))} />
+                              </div>
+                            </div>
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Return Reason</label>
+                                <select value={returnFormMeta.returnReason}
+                                  onChange={e => setReturnFormMeta(m => ({...m, returnReason: e.target.value}))}
+                                  style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                                  <option value="">— Select reason —</option>
+                                  <option value="DEFECTIVE">Defective / Damaged</option>
+                                  <option value="SIZE_ISSUE">Wrong Size</option>
+                                  <option value="WRONG_ITEM">Wrong Item Delivered</option>
+                                  <option value="CHANGE_OF_MIND">Change of Mind</option>
+                                  <option value="OTHER">Other</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Refund Mode</label>
+                                <select value={returnFormMeta.refundMode}
+                                  onChange={e => setReturnFormMeta(m => ({...m, refundMode: e.target.value}))}
+                                  style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                                  <option value="CASH">Cash</option>
+                                  <option value="UPI">UPI</option>
+                                  <option value="BANK_TRANSFER">Bank Transfer</option>
+                                  <option value="STORE_CREDIT">Store Credit</option>
+                                  <option value="ONLINE">Online (Razorpay)</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div style={{marginBottom:14}}>
+                              <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Remarks (optional)</label>
+                              <textarea rows={2} style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+                                placeholder="Additional notes about this return…"
+                                value={returnFormMeta.remarks}
+                                onChange={e => setReturnFormMeta(m => ({...m, remarks: e.target.value}))} />
+                            </div>
+                            {returnSubmitError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:10}}>{returnSubmitError}</div>}
+                            <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+                              <button className="btn-secondary" onClick={() => setShowCreateReturn(false)}>Cancel</button>
+                              <button className="btn-primary" onClick={submitDirectReturn} disabled={returnSubmitLoading}>
+                                {returnSubmitLoading ? 'Saving…' : 'Create Return'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

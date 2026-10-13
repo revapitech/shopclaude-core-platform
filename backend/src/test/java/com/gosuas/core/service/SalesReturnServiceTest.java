@@ -87,7 +87,7 @@ class SalesReturnServiceTest {
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         SalesReturnRequest req = new SalesReturnRequest(
-                "POS", billId, null, "DEFECTIVE", null, "CASH",
+                "POS", billId, null, null, null, "DEFECTIVE", null, "CASH",
                 List.of(new SalesReturnItemRequest("BAR001", 2, true)));
 
         SalesReturnResponse res = service.createReturn(req);
@@ -107,7 +107,7 @@ class SalesReturnServiceTest {
         when(returnRepository.sumReturnedQtyByBillAndBarcode(tenantId, billId, "BAR001")).thenReturn(0);
 
         SalesReturnRequest req = new SalesReturnRequest(
-                "POS", billId, null, null, null, null,
+                "POS", billId, null, null, null, null, null, null,
                 List.of(new SalesReturnItemRequest("BAR001", 5, true)));
 
         assertThatThrownBy(() -> service.createReturn(req))
@@ -124,7 +124,7 @@ class SalesReturnServiceTest {
         when(returnRepository.sumReturnedQtyByBillAndBarcode(tenantId, billId, "BAR001")).thenReturn(3);
 
         SalesReturnRequest req = new SalesReturnRequest(
-                "POS", billId, null, null, null, null,
+                "POS", billId, null, null, null, null, null, null,
                 List.of(new SalesReturnItemRequest("BAR001", 3, true)));
 
         assertThatThrownBy(() -> service.createReturn(req))
@@ -137,7 +137,7 @@ class SalesReturnServiceTest {
     @Test
     void createReturn_zeroQty_throws() {
         SalesReturnRequest req = new SalesReturnRequest(
-                "POS", billId, null, null, null, null,
+                "POS", billId, null, null, null, null, null, null,
                 List.of(new SalesReturnItemRequest("BAR001", 0, true)));
 
         assertThatThrownBy(() -> service.createReturn(req))
@@ -243,11 +243,51 @@ class SalesReturnServiceTest {
         when(billRepository.findById(billId)).thenReturn(Optional.of(makeBill("BAR001", 5)));
 
         SalesReturnRequest req = new SalesReturnRequest(
-                "POS", billId, null, null, null, null,
+                "POS", billId, null, null, null, null, null, null,
                 List.of(new SalesReturnItemRequest("UNKNOWN", 1, true)));
 
         assertThatThrownBy(() -> service.createReturn(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not found in the original sale");
+    }
+
+    // ── Test 12: DIRECT return creates return and restores stock on approval ──
+
+    @Test
+    void createReturn_directSource_savesReturn() {
+        Product p = makeProduct(10);
+        p.setName("Shirt");
+        p.setBarcode("BAR001");
+
+        when(productRepository.findByBarcodeAndTenantId("BAR001", tenantId)).thenReturn(Optional.of(p));
+        when(returnRepository.findAllByTenantIdAndReturnNoStartingWith(eq(tenantId), anyString())).thenReturn(List.of());
+        when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        SalesReturnRequest req = new SalesReturnRequest(
+                "DIRECT", null, "Bob", "9876543210", null, "DEFECTIVE", null, "CASH",
+                List.of(new SalesReturnItemRequest("BAR001", 1, true)));
+
+        SalesReturnResponse res = service.createReturn(req);
+
+        assertThat(res.status()).isEqualTo("PENDING");
+        assertThat(res.sourceBillNo()).isEqualTo("DIRECT");
+        assertThat(res.customerName()).isEqualTo("Bob");
+        assertThat(res.items()).hasSize(1);
+        assertThat(res.items().get(0).returnedQty()).isEqualTo(1);
+    }
+
+    // ── Test 13: DIRECT return with unknown barcode is rejected ───────────────
+
+    @Test
+    void createReturn_directSource_unknownBarcode_throws() {
+        when(productRepository.findByBarcodeAndTenantId("UNKNOWN", tenantId)).thenReturn(Optional.empty());
+
+        SalesReturnRequest req = new SalesReturnRequest(
+                "DIRECT", null, null, null, null, null, null, null,
+                List.of(new SalesReturnItemRequest("UNKNOWN", 1, true)));
+
+        assertThatThrownBy(() -> service.createReturn(req))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Product not found for barcode");
     }
 }

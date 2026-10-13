@@ -58,4 +58,14 @@ public class SalesReturnController {
             @RequestParam String ref) {
         return ResponseEntity.ok(returnService.getPreview(sourceType, ref));
     }
+
+    /**
+     * Look up a product by SKU or barcode for direct (walk-in) returns.
+     *
+     * GET /api/returns/product-lookup?sku=SKU-001  or  ?sku=BARCODE
+     */
+    @GetMapping("/product-lookup")
+    public ResponseEntity<Map<String, Object>> productLookup(@RequestParam String sku) {
+        return ResponseEntity.ok(returnService.lookupProductForReturn(sku));
+    }
 }
