@@ -1409,6 +1409,7 @@ function App() {
   const [custMobileInput, setCustMobileInput] = useState('');
   const [custLookupFound, setCustLookupFound] = useState(false);
   const [editModal, setEditModal] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [activePage, setActivePage] = useState('home');
   const [tenantCategories, setTenantCategories] = useState([]);
   const [newCatDraft, setNewCatDraft] = useState({ name: '', attributes: [] });
@@ -1975,6 +1976,7 @@ function App() {
       setForm(EMPTY_FORM);
       setImageSlots(makeEmptyImageSlots(maxPhotosForPlan(tenantInfo?.plan)));
       loadProducts();
+      setShowAddForm(false);
       showToast('Product Successfully added');
     } catch (err) {
       const msg = err.response?.data?.error || '';
@@ -2521,10 +2523,104 @@ function App() {
 
         {/* ── HOME PAGE ── */}
         {activePage === 'home' && <div className="page-content">
-          <div className="grid">
         <section>
-          <h2>Add Product</h2>
-          <form onSubmit={createProduct}>
+          <h2>Offline Billing</h2>
+          <div className="barcode-row">
+            <input
+              ref={barcodeInputRef}
+              placeholder="Scan barcode or enter SKU"
+              autoFocus
+              value={barcode}
+              onChange={e => setBarcode(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && scanBarcode()}
+            />
+            <button onClick={scanBarcode}>Add to Cart</button>
+          </div>
+          {scanError && <p className="error-msg">{scanError}</p>}
+
+          <ul className="cart-list">
+            {cart.length === 0 && <li className="cart-empty">No items in cart</li>}
+            {cart.map((i, idx) => (
+              <li key={idx}>
+                <span className="cart-name">{i.name}</span>
+                <div className="cart-controls">
+                  <button className="qty-btn" onClick={() => updateQty(i.barcode, -1)}>−</button>
+                  <span className="qty-num">{i.quantity}</span>
+                  <button className="qty-btn" onClick={() => updateQty(i.barcode, 1)}>+</button>
+                  <span className="cart-price">₹{(Number(i.price) * i.quantity).toFixed(2)}</span>
+                  <button className="remove-btn" onClick={() => removeFromCart(i.barcode)}>✕</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {cart.length > 0 && (() => {
+            const subtotal = cart.reduce((s, i) => s + Number(i.price) * i.quantity, 0);
+            const discount = calcDiscount(subtotal);
+            return (
+              <>
+                <div className="discount-row">
+                  <span>Discount <em>optional</em></span>
+                  <div className="discount-input-group">
+                    <select value={discountType} onChange={e => setDiscountType(e.target.value)}>
+                      <option value="AMOUNT">₹</option>
+                      <option value="PERCENT">%</option>
+                    </select>
+                    <input type="number" min="0" max={discountType === 'PERCENT' ? 100 : subtotal} placeholder="0"
+                      value={discountInput} onChange={e => setDiscountInput(e.target.value)} />
+                  </div>
+                </div>
+                {discount > 0 && (
+                  <div className="cart-total-row cart-subtotal-row">
+                    <span>Subtotal</span>
+                    <span>₹{subtotal.toFixed(2)}</span>
+                  </div>
+                )}
+                {discount > 0 && (
+                  <div className="cart-total-row cart-subtotal-row">
+                    <span>Discount{discountType === 'PERCENT' ? ` (${Number(discountInput)||0}%)` : ''}</span>
+                    <span>− ₹{discount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="cart-total-row">
+                  <span>Total</span>
+                  <strong>₹{(subtotal - discount).toFixed(2)}</strong>
+                </div>
+              </>
+            );
+          })()}
+
+          <button disabled={!cart.length} onClick={() => { setCustNameInput(''); setCustMobileInput(''); setCustLookupFound(false); setCustModal(true); }}>Generate Bill</button>
+          {billError && <p className="error-msg">{billError}</p>}
+
+          {lastBill && (
+            <div className="bill-result">
+              <div className="bill-result-row">
+                <span>Bill No:</span><strong>{lastBill.billNo || '—'}</strong>
+              </div>
+              <div className="bill-result-row">
+                <span>Total:</span><strong>₹{fmt(lastBill.grandTotal)}</strong>
+              </div>
+              <div className="bill-result-row">
+                <span>Status:</span><span className="paid-badge">{lastBill.paymentStatus || 'PAID'}</span>
+              </div>
+              <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
+                🖨 Reprint Receipt
+              </button>
+            </div>
+          )}
+        </section>
+
+        {/* ── Add Product modal ── */}
+        {showAddForm && (
+          <div className="modal-overlay" onClick={() => setShowAddForm(false)}>
+            <div className="modal-box" style={{width:600,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}} onClick={e => e.stopPropagation()}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                <h2 style={{margin:0}}>Add Product</h2>
+                <button type="button" style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'#666',lineHeight:1,padding:'0 4px'}} onClick={() => setShowAddForm(false)}>×</button>
+              </div>
+              <form onSubmit={createProduct}>
+
             {tenantInfo?.subdomain === 'gosuas' && (
               <>
                 <label className="modal-label">Product Type</label>
@@ -2797,101 +2893,16 @@ function App() {
                 return total > 1 ? `Add ${total} Products` : 'Add Product';
               })()}
             </button>
-          </form>
-        </section>
 
-        <section>
-          <h2>Offline Billing</h2>
-          <div className="barcode-row">
-            <input
-              ref={barcodeInputRef}
-              placeholder="Scan barcode or enter SKU"
-              autoFocus
-              value={barcode}
-              onChange={e => setBarcode(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && scanBarcode()}
-            />
-            <button onClick={scanBarcode}>Add to Cart</button>
-          </div>
-          {scanError && <p className="error-msg">{scanError}</p>}
-
-          <ul className="cart-list">
-            {cart.length === 0 && <li className="cart-empty">No items in cart</li>}
-            {cart.map((i, idx) => (
-              <li key={idx}>
-                <span className="cart-name">{i.name}</span>
-                <div className="cart-controls">
-                  <button className="qty-btn" onClick={() => updateQty(i.barcode, -1)}>−</button>
-                  <span className="qty-num">{i.quantity}</span>
-                  <button className="qty-btn" onClick={() => updateQty(i.barcode, 1)}>+</button>
-                  <span className="cart-price">₹{(Number(i.price) * i.quantity).toFixed(2)}</span>
-                  <button className="remove-btn" onClick={() => removeFromCart(i.barcode)}>✕</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-
-          {cart.length > 0 && (() => {
-            const subtotal = cart.reduce((s, i) => s + Number(i.price) * i.quantity, 0);
-            const discount = calcDiscount(subtotal);
-            return (
-              <>
-                <div className="discount-row">
-                  <span>Discount <em>optional</em></span>
-                  <div className="discount-input-group">
-                    <select value={discountType} onChange={e => setDiscountType(e.target.value)}>
-                      <option value="AMOUNT">₹</option>
-                      <option value="PERCENT">%</option>
-                    </select>
-                    <input type="number" min="0" max={discountType === 'PERCENT' ? 100 : subtotal} placeholder="0"
-                      value={discountInput} onChange={e => setDiscountInput(e.target.value)} />
-                  </div>
-                </div>
-                {discount > 0 && (
-                  <div className="cart-total-row cart-subtotal-row">
-                    <span>Subtotal</span>
-                    <span>₹{subtotal.toFixed(2)}</span>
-                  </div>
-                )}
-                {discount > 0 && (
-                  <div className="cart-total-row cart-subtotal-row">
-                    <span>Discount{discountType === 'PERCENT' ? ` (${Number(discountInput)||0}%)` : ''}</span>
-                    <span>− ₹{discount.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="cart-total-row">
-                  <span>Total</span>
-                  <strong>₹{(subtotal - discount).toFixed(2)}</strong>
-                </div>
-              </>
-            );
-          })()}
-
-          <button disabled={!cart.length} onClick={() => { setCustNameInput(''); setCustMobileInput(''); setCustLookupFound(false); setCustModal(true); }}>Generate Bill</button>
-          {billError && <p className="error-msg">{billError}</p>}
-
-          {lastBill && (
-            <div className="bill-result">
-              <div className="bill-result-row">
-                <span>Bill No:</span><strong>{lastBill.billNo || '—'}</strong>
-              </div>
-              <div className="bill-result-row">
-                <span>Total:</span><strong>₹{fmt(lastBill.grandTotal)}</strong>
-              </div>
-              <div className="bill-result-row">
-                <span>Status:</span><span className="paid-badge">{lastBill.paymentStatus || 'PAID'}</span>
-              </div>
-              <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
-                🖨 Reprint Receipt
-              </button>
+              </form>
             </div>
-          )}
-        </section>
-        </div>{/* end grid */}
+          </div>
+        )}
 
           <section className="inventory-section">
             <div className="inventory-header">
               <h2>Inventory</h2>
+              <button style={{background:'#1E3A5F',color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontSize:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}} onClick={() => setShowAddForm(true)}>+ Add Product</button>
               <input className="search-input" placeholder="Search by name, SKU, colour or barcode..."
                 value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} />
               <button className="export-csv-btn" onClick={() => exportToCsv('inventory.csv', filteredProducts, [
