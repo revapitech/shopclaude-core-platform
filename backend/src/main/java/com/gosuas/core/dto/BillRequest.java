@@ -8,5 +8,6 @@ public record BillRequest(
         String customerMobile,
         BigDecimal discountAmount,
         String paymentMode,
+        List<PaymentEntryRequest> splitPayments,
         List<BillItemRequest> items
 ) {}

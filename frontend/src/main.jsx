@@ -44,6 +44,9 @@ axios.interceptors.response.use(
   }
 );
 
+// Shop admin pages that can be opened directly via the URL hash (/#returns etc.)
+const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'print-labels', 'pdf-store'];
+
 const FIELD_LABELS = {
   name: 'Product Name',
   sku: 'SKU Code',
@@ -606,7 +609,10 @@ function printBillReceipt(bill, shopName = 'GOSUAS') {
   <div class="info-row"><span>Bill No:</span><span>${bill.billNo || 'N/A'}</span></div>
   <div class="info-row"><span>Date:</span><span>${date}</span></div>
   <div class="info-row"><span>Customer:</span><span>${bill.customerName || 'Walk-in'}</span></div>
-  <div class="info-row"><span>Payment:</span><span>${bill.paymentMode || 'UPI'}</span></div>
+  ${bill.paymentMode === 'SPLIT' && bill.payments && bill.payments.length > 0
+    ? `<div class="info-row"><span>Payment:</span><span>Split</span></div>` +
+      bill.payments.map(p => `<div class="info-row" style="font-size:11px;padding-left:10px"><span>${p.method}</span><span>₹${fmt(p.amount)}</span></div>`).join('')
+    : `<div class="info-row"><span>Payment:</span><span>${bill.paymentMode || 'CASH'}</span></div>`}
   <div class="dash"></div>
   <table>
     <thead>
@@ -1413,9 +1419,17 @@ function App() {
   const [custNameInput, setCustNameInput] = useState('');
   const [custMobileInput, setCustMobileInput] = useState('');
   const [custLookupFound, setCustLookupFound] = useState(false);
+  const [paymentType, setPaymentType] = useState('CASH');
+  const [splitEntries, setSplitEntries] = useState([{ method: 'CASH', amount: '' }]);
+  const [splitError, setSplitError] = useState('');
   const [editModal, setEditModal] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [activePage, setActivePage] = useState('home');
+  // The current page lives in the URL hash (e.g. /#returns) so a page can be opened
+  // directly or bookmarked, and survives a browser refresh instead of falling back to Home.
+  const [activePage, setActivePage] = useState(() => {
+    const h = window.location.hash.replace(/^#\/?/, '');
+    return ADMIN_PAGES.includes(h) ? h : 'home';
+  });
   const [tenantCategories, setTenantCategories] = useState([]);
   const [newCatDraft, setNewCatDraft] = useState({ name: '', attributes: [] });
   const [newAttrDraft, setNewAttrDraft] = useState({ name: '', options: '' });
@@ -1489,6 +1503,8 @@ function App() {
   const [returnDirectLoading, setReturnDirectLoading] = useState(false);
   const [returnDirectItems, setReturnDirectItems] = useState([]);
   const [returnDirectCustomer, setReturnDirectCustomer] = useState({ name: '', mobile: '' });
+  const [salesReturnsError, setSalesReturnsError] = useState('');
+  const [returnStatusBusy, setReturnStatusBusy] = useState(null); // id of the return whose status is being changed
 
   const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const logoSrc = tenantInfo?.logoUrl ? `${BACKEND}${tenantInfo.logoUrl}` : '/logo.png';
@@ -1626,8 +1642,26 @@ function App() {
     try {
       const res = await axios.get(`${API}/returns`);
       setSalesReturns(res.data);
-    } catch (e) {}
+      setSalesReturnsError('');
+    } catch (e) {
+      setSalesReturnsError(e.response?.data?.error || 'Could not load returns. Check your connection and try again.');
+    }
   };
+
+  useEffect(() => {
+    const current = window.location.hash.replace(/^#\/?/, '');
+    if (current === activePage || (!current && activePage === 'home')) return;
+    window.location.hash = activePage;
+  }, [activePage]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const h = window.location.hash.replace(/^#\/?/, '');
+      setActivePage(ADMIN_PAGES.includes(h) ? h : 'home');
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   useEffect(() => {
     if (isLoggedIn) { loadProducts(); loadTenantInfo(); loadTenantCategories(); loadDigitalProducts(); }
@@ -2292,15 +2326,19 @@ function App() {
     }
   };
 
-  const generateBill = async (customerName, customerMobile) => {
+  const generateBill = async (customerName, customerMobile, pmtType, pmtSplitEntries) => {
     try {
       const subtotal = cart.reduce((s, i) => s + Number(i.price) * i.quantity, 0);
       const discountAmount = calcDiscount(subtotal);
+      const isSplit = pmtType === 'SPLIT' && pmtSplitEntries && pmtSplitEntries.length > 0;
       const payload = {
         customerName: (customerName || '').trim() || 'Walk-in Customer',
         customerMobile: (customerMobile || '').trim(),
         discountAmount,
-        paymentMode: 'UPI',
+        paymentMode: isSplit ? null : pmtType,
+        splitPayments: isSplit
+          ? pmtSplitEntries.map(e => ({ method: e.method, amount: parseFloat(e.amount) }))
+          : null,
         items: cart.map(i => ({ barcode: i.barcode, quantity: i.quantity }))
       };
       const res = await axios.post(`${API}/bills`, payload);
@@ -2602,7 +2640,7 @@ function App() {
             );
           })()}
 
-          <button disabled={!cart.length} onClick={() => { setCustNameInput(''); setCustMobileInput(''); setCustLookupFound(false); setCustModal(true); }}>Generate Bill</button>
+          <button disabled={!cart.length} onClick={() => { setCustNameInput(''); setCustMobileInput(''); setCustLookupFound(false); setPaymentType('CASH'); setSplitEntries([{ method: 'CASH', amount: '' }]); setSplitError(''); setCustModal(true); }}>Generate Bill</button>
           {billError && <p className="error-msg">{billError}</p>}
 
           {lastBill && (
@@ -3837,13 +3875,42 @@ function App() {
             } finally { setReturnSubmitLoading(false); }
           };
 
-          const changeStatus = async (retId, newStatus) => {
+          const applyStatus = async (retId, newStatus) => {
+            if (returnStatusBusy) return;
+            setReturnStatusBusy(retId);
             try {
               await axios.put(`${API}/returns/${retId}/status`, { status: newStatus });
-              loadSalesReturns();
+              await loadSalesReturns();
+              // Approve / cancel move stock — refresh inventory so Home and Stock Alerts match the DB
+              if (newStatus === 'APPROVED' || newStatus === 'CANCELLED') await loadProducts();
               showToast(`Return ${newStatus.toLowerCase()}`);
             } catch (err) {
-              showToast(err.response?.data?.error || 'Failed to update status', 'error');
+              showToast(err.response?.data?.error || 'Failed to update status. Check your connection and try again.', 'error');
+              loadSalesReturns();
+            } finally { setReturnStatusBusy(null); }
+          };
+
+          // Status changes that move stock need an explicit confirmation first.
+          const changeStatus = (ret, newStatus) => {
+            const restockQty = (ret.items || []).filter(i => i.restockable).reduce((s, i) => s + (i.returnedQty || 0), 0);
+            if (newStatus === 'APPROVED') {
+              setConfirmDialog({
+                title: `Approve ${ret.returnNo}?`,
+                message: restockQty > 0
+                  ? `${restockQty} unit(s) marked Restock will be added back to inventory.`
+                  : 'No items are marked Restock, so inventory will not change.',
+                confirmLabel: 'Approve',
+                onConfirm: () => { setConfirmDialog(null); applyStatus(ret.id, newStatus); },
+              });
+            } else if (newStatus === 'CANCELLED' && ret.stockRestored) {
+              setConfirmDialog({
+                title: `Cancel ${ret.returnNo}?`,
+                message: `${restockQty} unit(s) already restocked by this return will be removed from inventory again.`,
+                confirmLabel: 'Cancel Return',
+                onConfirm: () => { setConfirmDialog(null); applyStatus(ret.id, newStatus); },
+              });
+            } else {
+              applyStatus(ret.id, newStatus);
             }
           };
 
@@ -3930,6 +3997,13 @@ function App() {
                 }}>+ New Return</button>
               </div>
 
+              {salesReturnsError && (
+                <div style={{padding:'10px 14px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:12,display:'flex',alignItems:'center',gap:12}}>
+                  {salesReturnsError}
+                  <button className="btn-secondary" style={{fontSize:12,padding:'4px 12px'}} onClick={loadSalesReturns}>Retry</button>
+                </div>
+              )}
+
               {/* Returns table */}
               <div className="data-table-wrap">
                 <table className="data-table">
@@ -3984,19 +4058,20 @@ function App() {
                                 {/* Status action buttons */}
                                 <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                                   {r.status === 'PENDING' && <>
-                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'APPROVED'); }}>Approve</button>
-                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px',color:'#dc2626',borderColor:'#fca5a5'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'REJECTED'); }}>Reject</button>
-                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'CANCELLED'); }}>Cancel</button>
+                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'APPROVED'); }}>Approve</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px',color:'#dc2626',borderColor:'#fca5a5'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'REJECTED'); }}>Reject</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'CANCELLED'); }}>Cancel</button>
                                   </>}
                                   {r.status === 'APPROVED' && <>
-                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'COMPLETED'); }}>Mark Completed</button>
-                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'CANCELLED'); }}>Cancel</button>
+                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'COMPLETED'); }}>Mark Completed</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'CANCELLED'); }}>Cancel</button>
                                   </>}
+                                  {returnStatusBusy === r.id && <span style={{fontSize:13,color:'#6b7280',alignSelf:'center'}}>Updating…</span>}
                                 </div>
                               </div>
                             </td>
@@ -4093,11 +4168,12 @@ function App() {
                                       </td>
                                       <td style={{padding:'8px',textAlign:'right',color:'#6b7280'}}>{item.returnableQty}</td>
                                       <td style={{padding:'8px',textAlign:'right'}}>
-                                        <input type="number" min="0" max={item.returnableQty}
+                                        <input type="number" min="0" step="1" max={item.returnableQty}
                                           style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
                                           value={item.returnedQty}
                                           onChange={e => {
-                                            const v = Math.min(item.returnableQty, Math.max(0, Number(e.target.value)||0));
+                                            // Whole units only — the backend field is an integer and would silently truncate 2.5
+                                            const v = Math.min(item.returnableQty, Math.max(0, Math.floor(Number(e.target.value)||0)));
                                             setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, returnedQty: v} : x));
                                           }} />
                                       </td>
@@ -4190,15 +4266,18 @@ function App() {
                           <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'12px 14px',marginBottom:14}}>
                             <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>{returnDirectProduct.productName}</div>
                             <div style={{fontSize:12,color:'#6b7280',marginBottom:10}}>
-                              SKU: {returnDirectProduct.sku} · Barcode: {returnDirectProduct.barcode} · Stock: {returnDirectProduct.stockQty} · ₹{Number(returnDirectProduct.sellingPrice||0).toFixed(2)}
+                              SKU: {returnDirectProduct.sku} · Barcode: {returnDirectProduct.barcode}
+                              {returnDirectProduct.color ? ` · Colour: ${returnDirectProduct.color}` : ''}
+                              {returnDirectProduct.size ? ` · Size: ${returnDirectProduct.size}` : ''}
+                              {' '}· Current stock: <strong>{returnDirectProduct.stockQty}</strong> · ₹{Number(returnDirectProduct.sellingPrice||0).toFixed(2)}
                             </div>
                             <div style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
                               <label style={{fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:6}}>
                                 Qty to Return:
-                                <input type="number" min="1"
+                                <input type="number" min="1" step="1"
                                   style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
                                   value={returnDirectProduct.returnedQty}
-                                  onChange={e => setReturnDirectProduct(p => ({...p, returnedQty: Math.max(1, Number(e.target.value)||1)}))} />
+                                  onChange={e => setReturnDirectProduct(p => ({...p, returnedQty: Math.max(1, Math.floor(Number(e.target.value)||1))}))} />
                               </label>
                               <label style={{fontSize:13,display:'flex',alignItems:'center',gap:5,cursor:'pointer'}}>
                                 <input type="checkbox" checked={returnDirectProduct.restockable}
@@ -4787,7 +4866,7 @@ function App() {
             <p style={{color:'#555',fontSize:14,margin:'10px 0 0'}}>{confirmDialog.message}</p>
             <div className="modal-actions">
               <button className="modal-cancel" onClick={() => setConfirmDialog(null)}>Cancel</button>
-              <button className="modal-danger" onClick={confirmDialog.onConfirm}>Delete</button>
+              <button className="modal-danger" onClick={confirmDialog.onConfirm}>{confirmDialog.confirmLabel || 'Delete'}</button>
             </div>
           </div>
         </div>
@@ -4809,10 +4888,82 @@ function App() {
             <label className="modal-label" style={{marginTop:'10px'}}>Name</label>
             <input placeholder="Walk-in Customer" value={custNameInput}
               onChange={e => setCustNameInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { setCustModal(false); generateBill(custNameInput, custMobileInput); } }} />
+              onKeyDown={e => { if (e.key === 'Enter' && paymentType !== 'SPLIT') { setCustModal(false); generateBill(custNameInput, custMobileInput, paymentType, splitEntries); } }} />
+
+            {/* ── Payment type selector ── */}
+            <label className="modal-label" style={{marginTop:'14px'}}>Payment Method</label>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
+              {['CASH','CARD','QR','SPLIT'].map(m => (
+                <button key={m} type="button"
+                  onClick={() => { setPaymentType(m); setSplitError(''); if (m !== 'SPLIT') setSplitEntries([{ method: m, amount: '' }]); }}
+                  style={{padding:'6px 14px',borderRadius:6,border:'2px solid',cursor:'pointer',fontWeight:600,fontSize:13,
+                    borderColor: paymentType===m ? '#4f46e5':'#d1d5db',
+                    background: paymentType===m ? '#ede9fe':'#f9fafb',
+                    color: paymentType===m ? '#4f46e5':'#374151'}}>
+                  {m==='CASH'?'💵 Cash':m==='CARD'?'💳 Card':m==='QR'?'📱 QR':'✂️ Split'}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Split payment breakdown ── */}
+            {paymentType === 'SPLIT' && (() => {
+              const subtotal = cart.reduce((s, i) => s + Number(i.price) * i.quantity, 0);
+              const discount = calcDiscount(subtotal);
+              const grandTotal = subtotal - discount;
+              const splitSum = splitEntries.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+              const remaining = Math.round((grandTotal - splitSum) * 100) / 100;
+              return (
+                <div style={{background:'#f8f7ff',border:'1px solid #e0dcff',borderRadius:8,padding:'12px 14px',marginBottom:8}}>
+                  {splitEntries.map((entry, idx) => (
+                    <div key={idx} style={{display:'flex',gap:8,alignItems:'center',marginBottom:8}}>
+                      <select value={entry.method}
+                        onChange={e => setSplitEntries(prev => prev.map((x, i) => i===idx ? {...x, method:e.target.value} : x))}
+                        style={{flex:'0 0 100px',padding:'5px 8px',borderRadius:6,border:'1px solid #d1d5db',fontSize:13}}>
+                        <option value="CASH">Cash</option>
+                        <option value="CARD">Card</option>
+                        <option value="QR">QR</option>
+                        <option value="UPI">UPI</option>
+                      </select>
+                      <input type="number" min="0.01" step="0.01" placeholder="Amount"
+                        value={entry.amount}
+                        onChange={e => setSplitEntries(prev => prev.map((x, i) => i===idx ? {...x, amount:e.target.value} : x))}
+                        style={{flex:1,padding:'5px 8px',borderRadius:6,border:'1px solid #d1d5db',fontSize:13}} />
+                      {splitEntries.length > 1 && (
+                        <button type="button" onClick={() => setSplitEntries(prev => prev.filter((_, i) => i!==idx))}
+                          style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:18,lineHeight:1,padding:'0 4px'}}>✕</button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button"
+                    onClick={() => setSplitEntries(prev => [...prev, { method: 'CASH', amount: '' }])}
+                    style={{fontSize:13,color:'#4f46e5',background:'none',border:'none',cursor:'pointer',padding:'2px 0',fontWeight:600}}>
+                    + Add payment row
+                  </button>
+                  <div style={{display:'flex',justifyContent:'space-between',marginTop:10,paddingTop:8,borderTop:'1px solid #e0dcff',fontSize:13,fontWeight:600}}>
+                    <span>Bill total: ₹{grandTotal.toFixed(2)}</span>
+                    <span style={{color: remaining===0 ? '#16a34a' : '#dc2626'}}>
+                      {remaining===0 ? '✓ Balanced' : remaining > 0 ? `₹${remaining.toFixed(2)} remaining` : `Over by ₹${Math.abs(remaining).toFixed(2)}`}
+                    </span>
+                  </div>
+                  {splitError && <p style={{color:'#dc2626',fontSize:12,margin:'6px 0 0'}}>{splitError}</p>}
+                </div>
+              );
+            })()}
+
             <div className="modal-actions">
               <button className="modal-cancel" onClick={() => setCustModal(false)}>Back</button>
-              <button className="modal-print" onClick={() => { setCustModal(false); generateBill(custNameInput, custMobileInput); }}>
+              <button className="modal-print" onClick={() => {
+                if (paymentType === 'SPLIT') {
+                  const subtotal = cart.reduce((s, i) => s + Number(i.price) * i.quantity, 0);
+                  const grandTotal = subtotal - calcDiscount(subtotal);
+                  const splitSum = splitEntries.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+                  if (Math.abs(splitSum - grandTotal) > 0.001) { setSplitError(`Split total ₹${splitSum.toFixed(2)} must equal bill total ₹${grandTotal.toFixed(2)}`); return; }
+                  if (splitEntries.some(e => !e.method || !(parseFloat(e.amount) > 0))) { setSplitError('Each payment row needs a method and a positive amount.'); return; }
+                  setSplitError('');
+                }
+                setCustModal(false);
+                generateBill(custNameInput, custMobileInput, paymentType, splitEntries);
+              }}>
                 Generate Bill
               </button>
             </div>

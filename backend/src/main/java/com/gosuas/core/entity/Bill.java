@@ -34,6 +34,10 @@ public class Bill {
     @Builder.Default
     private List<BillItem> items = new ArrayList<>();
 
+    @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<BillPayment> payments = new ArrayList<>();
+
     @PrePersist
     public void prePersist() {
         this.billDate = LocalDateTime.now();
