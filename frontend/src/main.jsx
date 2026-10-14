@@ -3558,6 +3558,29 @@ function App() {
                                   ))}
                                 </tbody>
                               </table>
+                              {/* Order-level discount totals — POS bills only */}
+                              {o.source === 'POS' && (
+                                <div style={{display:'flex',justifyContent:'flex-end',marginTop:10}}>
+                                  <div style={{minWidth:260,fontSize:13}}>
+                                    {Number(o.discountAmount||0) > 0 && (
+                                      <>
+                                        <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',color:'#374151'}}>
+                                          <span>Subtotal</span>
+                                          <span>₹{Number(o.subTotal||0).toFixed(2)}</span>
+                                        </div>
+                                        <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',color:'#dc2626',fontWeight:600}}>
+                                          <span>Discount</span>
+                                          <span>− ₹{Number(o.discountAmount||0).toFixed(2)}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    <div style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderTop:'2px solid #1E3A5F',marginTop:2,fontWeight:700,fontSize:14,color:'#1E3A5F'}}>
+                                      <span>Total</span>
+                                      <span>₹{Number(o.total||0).toFixed(2)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
