@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -289,5 +290,125 @@ class SalesReturnServiceTest {
         assertThatThrownBy(() -> service.createReturn(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Product not found for barcode");
+    }
+
+    // ── Test 14: product lookup finds product by SKU ──────────────────────────
+
+    @Test
+    void lookupProductForReturn_foundBySku() {
+        Product p = Product.builder()
+                .id(productId).tenantId(tenantId)
+                .name("Shirt").sku("SKU-001").barcode("BAR001")
+                .sellingPrice(new BigDecimal("299")).stockQty(8).build();
+        when(productRepository.findBySkuAndTenantId("SKU-001", tenantId)).thenReturn(Optional.of(p));
+
+        Map<String, Object> result = service.lookupProductForReturn("SKU-001");
+
+        assertThat(result.get("sku")).isEqualTo("SKU-001");
+        assertThat(result.get("barcode")).isEqualTo("BAR001");
+        assertThat(result.get("stockQty")).isEqualTo(8);
+        assertThat(result.get("sellingPrice")).isEqualTo(new BigDecimal("299"));
+        // barcode lookup should not be invoked when SKU matches
+        verify(productRepository, never()).findByBarcodeAndTenantId(any(), any());
+    }
+
+    // ── Test 15: product lookup falls back to barcode when SKU misses ─────────
+
+    @Test
+    void lookupProductForReturn_fallsBackToBarcode() {
+        Product p = Product.builder()
+                .id(productId).tenantId(tenantId)
+                .name("Cap").sku("CAP-001").barcode("BAR999")
+                .sellingPrice(new BigDecimal("149")).stockQty(5).build();
+        when(productRepository.findBySkuAndTenantId("BAR999", tenantId)).thenReturn(Optional.empty());
+        when(productRepository.findByBarcodeAndTenantId("BAR999", tenantId)).thenReturn(Optional.of(p));
+
+        Map<String, Object> result = service.lookupProductForReturn("BAR999");
+
+        assertThat(result.get("barcode")).isEqualTo("BAR999");
+        assertThat(result.get("stockQty")).isEqualTo(5);
+    }
+
+    // ── Test 16: product lookup throws when neither SKU nor barcode matches ───
+
+    @Test
+    void lookupProductForReturn_notFound_throws() {
+        when(productRepository.findBySkuAndTenantId("UNKNOWN", tenantId)).thenReturn(Optional.empty());
+        when(productRepository.findByBarcodeAndTenantId("UNKNOWN", tenantId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.lookupProductForReturn("UNKNOWN"))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("not found");
+    }
+
+    // ── Test 17: PENDING → REJECTED does not touch stock ─────────────────────
+
+    @Test
+    void updateStatus_pendingToRejected_doesNotTouchStock() {
+        SalesReturn ret = makePendingReturn("BAR001", 2);
+        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.updateStatus(ret.getId(), "REJECTED");
+
+        verify(productRepository, never()).restoreStock(any(), any(), anyInt());
+        verify(productRepository, never()).decrementStock(any(), any(), anyInt());
+        assertThat(ret.getStatus()).isEqualTo("REJECTED");
+    }
+
+    // ── Test 18: PENDING → CANCELLED (never approved) does not touch stock ───
+
+    @Test
+    void updateStatus_pendingToCancelledBeforeApproval_doesNotTouchStock() {
+        SalesReturn ret = makePendingReturn("BAR001", 2);
+        // stockRestored is false — return was never approved
+        assertThat(ret.isStockRestored()).isFalse();
+        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.updateStatus(ret.getId(), "CANCELLED");
+
+        verify(productRepository, never()).restoreStock(any(), any(), anyInt());
+        verify(productRepository, never()).decrementStock(any(), any(), anyInt());
+        assertThat(ret.getStatus()).isEqualTo("CANCELLED");
+    }
+
+    // ── Test 19: approving a DIRECT return restores stock via product ID ──────
+
+    @Test
+    void updateStatus_directReturnApproved_restoresStock() {
+        SalesReturn ret = makePendingReturn("BAR001", 3);
+        ret.setSourceType("DIRECT");
+        ret.setSourceBillId(null);
+        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.updateStatus(ret.getId(), "APPROVED");
+
+        verify(productRepository).restoreStock(productId, tenantId, 3);
+        assertThat(ret.isStockRestored()).isTrue();
+        assertThat(ret.getStatus()).isEqualTo("APPROVED");
+    }
+
+    // ── Test 20: getPreview for POS bill returns only still-returnable items ──
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void getPreview_posSource_returnsReturnableItems() {
+        Bill bill = makeBill("BAR001", 5);
+        when(billRepository.findByBillNoAndTenantId("GOS-20241013-0001", tenantId))
+                .thenReturn(Optional.of(bill));
+        when(returnRepository.sumReturnedQtyByBillAndBarcode(tenantId, billId, "BAR001"))
+                .thenReturn(2); // 2 already returned → only 3 left
+
+        Map<String, Object> result = service.getPreview("POS", "GOS-20241013-0001");
+
+        assertThat(result.get("sourceType")).isEqualTo("POS");
+        assertThat(result.get("customerName")).isEqualTo("Alice");
+        List<Map<String, Object>> items = (List<Map<String, Object>>) result.get("items");
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).get("returnableQty")).isEqualTo(3);
+        assertThat(items.get(0).get("barcode")).isEqualTo("BAR001");
+        assertThat(items.get(0).get("originalQty")).isEqualTo(5);
     }
 }
