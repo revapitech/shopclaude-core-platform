@@ -13,6 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -82,7 +84,7 @@ class SalesReturnServiceTest {
 
     @Test
     void createReturn_posSource_savesReturn() {
-        when(billRepository.findById(billId)).thenReturn(Optional.of(makeBill("BAR001", 5)));
+        when(billRepository.findByIdForUpdate(billId)).thenReturn(Optional.of(makeBill("BAR001", 5)));
         when(returnRepository.sumReturnedQtyByBillAndBarcode(tenantId, billId, "BAR001")).thenReturn(0);
         when(returnRepository.findAllByTenantIdAndReturnNoStartingWith(eq(tenantId), anyString())).thenReturn(List.of());
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -104,7 +106,7 @@ class SalesReturnServiceTest {
 
     @Test
     void createReturn_exceedsOriginalQty_throws() {
-        when(billRepository.findById(billId)).thenReturn(Optional.of(makeBill("BAR001", 3)));
+        when(billRepository.findByIdForUpdate(billId)).thenReturn(Optional.of(makeBill("BAR001", 3)));
         when(returnRepository.sumReturnedQtyByBillAndBarcode(tenantId, billId, "BAR001")).thenReturn(0);
 
         SalesReturnRequest req = new SalesReturnRequest(
@@ -120,7 +122,7 @@ class SalesReturnServiceTest {
 
     @Test
     void createReturn_partialPriorReturn_reducesReturnableQty() {
-        when(billRepository.findById(billId)).thenReturn(Optional.of(makeBill("BAR001", 5)));
+        when(billRepository.findByIdForUpdate(billId)).thenReturn(Optional.of(makeBill("BAR001", 5)));
         // 3 already returned → only 2 left
         when(returnRepository.sumReturnedQtyByBillAndBarcode(tenantId, billId, "BAR001")).thenReturn(3);
 
@@ -151,8 +153,9 @@ class SalesReturnServiceTest {
     @Test
     void updateStatus_approved_restoresStock() {
         SalesReturn ret = makePendingReturn("BAR001", 2);
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(productRepository.restoreStock(productId, tenantId, 2)).thenReturn(1);
 
         service.updateStatus(ret.getId(), "APPROVED");
 
@@ -168,7 +171,7 @@ class SalesReturnServiceTest {
         SalesReturn ret = makePendingReturn("BAR001", 2);
         ret.setStockRestored(true); // simulate already restored
         ret.setStatus("APPROVED");
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
 
         // APPROVED → COMPLETED (second call; stockRestored already true)
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -184,7 +187,7 @@ class SalesReturnServiceTest {
         SalesReturn ret = makePendingReturn("BAR001", 2);
         ret.setStatus("APPROVED");
         ret.setStockRestored(true);
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(productRepository.decrementStock(productId, tenantId, 2)).thenReturn(1);
 
@@ -201,7 +204,7 @@ class SalesReturnServiceTest {
     void updateStatus_approved_nonRestockableItemsSkipped() {
         SalesReturn ret = makePendingReturn("BAR001", 2);
         ret.getItems().get(0).setRestockable(false);
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.updateStatus(ret.getId(), "APPROVED");
@@ -216,7 +219,7 @@ class SalesReturnServiceTest {
     void updateStatus_shopifyReturn_doesNotRestoreStock() {
         SalesReturn ret = makePendingReturn("BAR001", 2);
         ret.setSourceType("SHOPIFY");
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.updateStatus(ret.getId(), "APPROVED");
@@ -230,7 +233,7 @@ class SalesReturnServiceTest {
     void updateStatus_completedToApproved_throws() {
         SalesReturn ret = makePendingReturn("BAR001", 2);
         ret.setStatus("COMPLETED");
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
 
         assertThatThrownBy(() -> service.updateStatus(ret.getId(), "APPROVED"))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -241,7 +244,7 @@ class SalesReturnServiceTest {
 
     @Test
     void createReturn_unknownBarcode_throws() {
-        when(billRepository.findById(billId)).thenReturn(Optional.of(makeBill("BAR001", 5)));
+        when(billRepository.findByIdForUpdate(billId)).thenReturn(Optional.of(makeBill("BAR001", 5)));
 
         SalesReturnRequest req = new SalesReturnRequest(
                 "POS", billId, null, null, null, null, null, null,
@@ -346,7 +349,7 @@ class SalesReturnServiceTest {
     @Test
     void updateStatus_pendingToRejected_doesNotTouchStock() {
         SalesReturn ret = makePendingReturn("BAR001", 2);
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.updateStatus(ret.getId(), "REJECTED");
@@ -363,7 +366,7 @@ class SalesReturnServiceTest {
         SalesReturn ret = makePendingReturn("BAR001", 2);
         // stockRestored is false — return was never approved
         assertThat(ret.isStockRestored()).isFalse();
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.updateStatus(ret.getId(), "CANCELLED");
@@ -380,8 +383,9 @@ class SalesReturnServiceTest {
         SalesReturn ret = makePendingReturn("BAR001", 3);
         ret.setSourceType("DIRECT");
         ret.setSourceBillId(null);
-        when(returnRepository.findById(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
         when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(productRepository.restoreStock(productId, tenantId, 3)).thenReturn(1);
 
         service.updateStatus(ret.getId(), "APPROVED");
 
@@ -410,5 +414,131 @@ class SalesReturnServiceTest {
         assertThat(items.get(0).get("returnableQty")).isEqualTo(3);
         assertThat(items.get(0).get("barcode")).isEqualTo("BAR001");
         assertThat(items.get(0).get("originalQty")).isEqualTo(5);
+    }
+
+    // ── Test 21: approval fails atomically when a product can't be restocked ──
+
+    @Test
+    void updateStatus_approved_productDeleted_throwsAndLeavesReturnPending() {
+        SalesReturn ret = makePendingReturn("BAR001", 2);
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
+        when(productRepository.restoreStock(productId, tenantId, 2)).thenReturn(0); // row gone
+
+        assertThatThrownBy(() -> service.updateStatus(ret.getId(), "APPROVED"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("no longer exists");
+
+        // Exception propagates out of the @Transactional method → rollback; nothing saved
+        assertThat(ret.isStockRestored()).isFalse();
+        assertThat(ret.getStatus()).isEqualTo("PENDING");
+        verify(returnRepository, never()).save(any());
+    }
+
+    // ── Test 22: returning one colour variant restocks only that variant ─────
+
+    @Test
+    void updateStatus_approved_multiVariant_onlyReturnedVariantRestocked() {
+        UUID redId  = UUID.randomUUID();
+        UUID blueId = UUID.randomUUID();
+        SalesReturn ret = makePendingReturn("RED001", 3);
+        ret.getItems().get(0).setProductId(redId);
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(productRepository.restoreStock(redId, tenantId, 3)).thenReturn(1);
+
+        service.updateStatus(ret.getId(), "APPROVED");
+
+        verify(productRepository).restoreStock(redId, tenantId, 3);
+        verify(productRepository, never()).restoreStock(eq(blueId), any(), anyInt());
+        verify(productRepository, times(1)).restoreStock(any(), any(), anyInt());
+    }
+
+    // ── Test 23: status changes read the return with a row lock ──────────────
+
+    @Test
+    void updateStatus_usesLockingRead() {
+        SalesReturn ret = makePendingReturn("BAR001", 1);
+        when(returnRepository.findByIdForUpdate(ret.getId())).thenReturn(Optional.of(ret));
+        when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(productRepository.restoreStock(productId, tenantId, 1)).thenReturn(1);
+
+        service.updateStatus(ret.getId(), "APPROVED");
+
+        verify(returnRepository).findByIdForUpdate(ret.getId());
+        verify(returnRepository, never()).findById(any());
+    }
+
+    // ── Test 24: creating a bill-based return locks the source bill ──────────
+
+    @Test
+    void createReturn_posSource_locksSourceBill() {
+        when(billRepository.findByIdForUpdate(billId)).thenReturn(Optional.of(makeBill("BAR001", 5)));
+        when(returnRepository.sumReturnedQtyByBillAndBarcode(tenantId, billId, "BAR001")).thenReturn(0);
+        when(returnRepository.findAllByTenantIdAndReturnNoStartingWith(eq(tenantId), anyString())).thenReturn(List.of());
+        when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.createReturn(new SalesReturnRequest(
+                "POS", billId, null, null, null, null, null, null,
+                List.of(new SalesReturnItemRequest("BAR001", 1, true))));
+
+        verify(billRepository).findByIdForUpdate(billId);
+        verify(billRepository, never()).findById(any());
+    }
+
+    // ── Test 25: negative return qty is rejected before any lookup ───────────
+
+    @Test
+    void createReturn_negativeQty_throws() {
+        SalesReturnRequest req = new SalesReturnRequest(
+                "DIRECT", null, null, null, null, null, null, null,
+                List.of(new SalesReturnItemRequest("BAR001", -2, true)));
+
+        assertThatThrownBy(() -> service.createReturn(req))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("greater than zero");
+        verifyNoInteractions(productRepository);
+    }
+
+    // ── Test 26: the logged-in user is recorded on the return ────────────────
+
+    @Test
+    void createReturn_recordsCreatingUser() {
+        UUID userId = UUID.randomUUID();
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(userId.toString(), null, List.of()));
+        try {
+            Product p = makeProduct(10);
+            p.setName("Shirt");
+            p.setBarcode("BAR001");
+            when(productRepository.findByBarcodeAndTenantId("BAR001", tenantId)).thenReturn(Optional.of(p));
+            when(returnRepository.findAllByTenantIdAndReturnNoStartingWith(eq(tenantId), anyString())).thenReturn(List.of());
+            when(returnRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            SalesReturnResponse res = service.createReturn(new SalesReturnRequest(
+                    "DIRECT", null, null, null, null, null, null, null,
+                    List.of(new SalesReturnItemRequest("BAR001", 1, true))));
+
+            assertThat(res.createdBy()).isEqualTo(userId);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    // ── Test 27: lookup exposes the variant's colour and size ────────────────
+
+    @Test
+    void lookupProductForReturn_includesVariantAttributes() {
+        Product p = Product.builder()
+                .id(productId).tenantId(tenantId)
+                .name("Kurti").color("Red").size("M").sku("KUR-RED-M").barcode("BAR777")
+                .sellingPrice(new BigDecimal("899")).stockQty(10).build();
+        when(productRepository.findBySkuAndTenantId("KUR-RED-M", tenantId)).thenReturn(Optional.of(p));
+
+        Map<String, Object> result = service.lookupProductForReturn("KUR-RED-M");
+
+        assertThat(result.get("productName")).isEqualTo("Kurti (Red)");
+        assertThat(result.get("color")).isEqualTo("Red");
+        assertThat(result.get("size")).isEqualTo("M");
+        assertThat(result.get("stockQty")).isEqualTo(10);
     }
 }
