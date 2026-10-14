@@ -55,6 +55,9 @@ public class SalesReturn {
     @Column(name = "stock_restored")
     private boolean stockRestored;
 
+    @Column(name = "created_by")
+    private UUID createdBy;       // platform_user.id of the staff member who recorded the return
+
     private LocalDateTime createdAt;
 
     @OneToMany(mappedBy = "salesReturn", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)

@@ -22,6 +22,7 @@ public record SalesReturnResponse(
         String refundStatus,
         String status,
         boolean stockRestored,
+        UUID createdBy,
         LocalDateTime createdAt,
         List<SalesReturnItemResponse> items
 ) {}
