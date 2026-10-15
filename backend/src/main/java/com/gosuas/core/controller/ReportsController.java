@@ -34,7 +34,7 @@ public class ReportsController {
         LocalDateTime toDt   = to   != null ? to.plusDays(1).atStartOfDay() : LocalDateTime.now().plusDays(1);
 
         // ── POS bills (offline) ──────────────────────────────────────────────
-        List<Bill> bills = billRepo.findAllByTenantId(tenantId).stream()
+        List<Bill> bills = billRepo.findAllByTenantIdWithPayments(tenantId).stream()
             .filter(b -> b.getBillDate() != null && !b.getBillDate().isBefore(fromDt) && b.getBillDate().isBefore(toDt))
             .collect(Collectors.toList());
 
@@ -44,8 +44,14 @@ public class ReportsController {
 
         Map<String, Double> paymentMethods = new LinkedHashMap<>();
         bills.forEach(b -> {
-            String pm = b.getPaymentMode() != null ? b.getPaymentMode() : "Other";
-            paymentMethods.merge(pm, safeNum(b.getGrandTotal()), Double::sum);
+            if ("SPLIT".equals(b.getPaymentMode()) && b.getPayments() != null && !b.getPayments().isEmpty()) {
+                b.getPayments().forEach(p ->
+                    paymentMethods.merge(p.getMethod(), p.getAmount().doubleValue(), Double::sum)
+                );
+            } else {
+                String pm = b.getPaymentMode() != null ? b.getPaymentMode() : "Other";
+                paymentMethods.merge(pm, safeNum(b.getGrandTotal()), Double::sum);
+            }
         });
 
         // ── Online shop orders ───────────────────────────────────────────────
