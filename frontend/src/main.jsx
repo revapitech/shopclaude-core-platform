@@ -1399,6 +1399,8 @@ function App() {
   const [barcode, setBarcode] = useState('');
   const [cart, setCart] = useState([]);
   const [lastBill, setLastBill] = useState(null);
+  const [lastBillId, setLastBillId] = useState(null);
+  const [regeneratingBill, setRegeneratingBill] = useState(false);
   const [scanError, setScanError] = useState('');
   const [billError, setBillError] = useState('');
   const [inventorySearch, setInventorySearch] = useState('');
@@ -2343,16 +2345,16 @@ function App() {
       };
       const res = await axios.post(`${API}/bills`, payload);
       setLastBill(res.data);
+      setLastBillId(res.data.id);
       setCart([]);
       setDiscountInput('');
       setDiscountType('AMOUNT');
       setBillError('');
       loadProducts();
       printBillReceipt(res.data, tenantInfo?.name);
-      // Give the print job a few seconds to go out, then reset the session so the
-      // screen is clean and the barcode field is refocused for the next customer.
+      // Refocus the barcode field for the next customer. lastBill stays visible so
+      // the cashier can still regenerate the receipt; they dismiss it with the × button.
       setTimeout(() => {
-        setLastBill(null);
         barcodeInputRef.current?.focus();
       }, 3000);
       showToast('Bill Successfully generated');
@@ -2645,6 +2647,10 @@ function App() {
 
           {lastBill && (
             <div className="bill-result">
+              <div className="bill-result-header">
+                <span className="bill-result-title">Bill Generated</span>
+                <button className="bill-result-dismiss" title="Dismiss" onClick={() => { setLastBill(null); setLastBillId(null); barcodeInputRef.current?.focus(); }}>×</button>
+              </div>
               <div className="bill-result-row">
                 <span>Bill No:</span><strong>{lastBill.billNo || '—'}</strong>
               </div>
@@ -2656,6 +2662,36 @@ function App() {
               </div>
               <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
                 🖨 Reprint Receipt
+              </button>
+              <button className="regenerate-bill-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
+                ↺ Regenerate Bill
+              </button>
+            </div>
+          )}
+          {!lastBill && lastBillId && (
+            <div className="bill-result bill-result-compact">
+              <div className="bill-result-header">
+                <span className="bill-result-title">Last bill saved</span>
+                <button className="bill-result-dismiss" title="Clear" onClick={() => { setLastBillId(null); }}>×</button>
+              </div>
+              <button
+                className="regenerate-bill-btn"
+                disabled={regeneratingBill}
+                onClick={async () => {
+                  setRegeneratingBill(true);
+                  setBillError('');
+                  try {
+                    const res = await axios.get(`${API}/bills/${lastBillId}`);
+                    setLastBill(res.data);
+                    printBillReceipt(res.data, tenantInfo?.name);
+                  } catch {
+                    setBillError('Could not retrieve the bill. Please check your connection.');
+                  } finally {
+                    setRegeneratingBill(false);
+                  }
+                }}
+              >
+                {regeneratingBill ? 'Retrieving…' : '↺ Regenerate Bill'}
               </button>
             </div>
           )}

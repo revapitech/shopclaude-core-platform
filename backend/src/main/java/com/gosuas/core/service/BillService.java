@@ -111,6 +111,16 @@ public class BillService {
                 .toList();
     }
 
+    public BillResponse getBillById(UUID id) {
+        UUID tenantId = TenantContext.getTenantId();
+        Bill bill = billRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Bill not found: " + id));
+        if (!bill.getTenantId().equals(tenantId)) {
+            throw new RuntimeException("Bill not found: " + id);
+        }
+        return mapToResponse(bill);
+    }
+
     // Lets the billing screen auto-fill a returning walk-in customer's name once their mobile
     // number matches a previous bill, instead of asking for it again.
     public String findCustomerNameByMobile(String mobile) {

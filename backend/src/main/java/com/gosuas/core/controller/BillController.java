@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/bills")
@@ -36,6 +37,15 @@ public class BillController {
     @GetMapping
     public List<BillResponse> listBills() {
         return billService.listBills();
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<BillResponse> getBillById(@PathVariable UUID id) {
+        try {
+            return ResponseEntity.ok(billService.getBillById(id));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @GetMapping("/customer-by-mobile/{mobile}")

@@ -172,10 +172,18 @@ button:disabled { background: #aaa; cursor: default; }
 .discount-input-group select { margin: 0; padding: 6px 6px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; background: #fff; }
 .discount-input-group input { width: 80px; margin: 0; padding: 6px 10px; text-align: right; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
 .bill-result { background: #f0f8e8; border: 1px solid #c5e1a5; border-radius: 8px; padding: 14px 16px; margin-top: 12px; }
+.bill-result-compact { padding: 10px 14px; }
+.bill-result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.bill-result-title { font-weight: 700; font-size: 14px; color: #2e7d32; }
+.bill-result-dismiss { background: none; border: none; font-size: 18px; line-height: 1; padding: 0 2px; cursor: pointer; color: #666; margin: 0; width: auto; }
+.bill-result-dismiss:hover { color: #c62828; background: none; }
 .bill-result-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 15px; }
 .paid-badge { background: #2e7d32; color: white; font-size: 12px; padding: 2px 10px; border-radius: 12px; font-weight: 600; }
 .print-again-btn { background: #2e7d32; margin-top: 10px; width: 100%; }
 .print-again-btn:hover { background: #1b5e20; }
+.regenerate-bill-btn { background: #1565c0; margin-top: 8px; width: 100%; }
+.regenerate-bill-btn:hover { background: #0d47a1; }
+.regenerate-bill-btn:disabled { background: #90a4ae; cursor: not-allowed; }
 
 /* ── Inventory ── */
 .inventory-section { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); margin-top: 0; }
