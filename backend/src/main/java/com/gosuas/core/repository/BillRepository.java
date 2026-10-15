@@ -18,6 +18,10 @@ public interface BillRepository extends JpaRepository<Bill, UUID> {
     Optional<Bill> findFirstByTenantIdAndCustomerMobileOrderByBillDateDesc(UUID tenantId, String customerMobile);
     Optional<Bill> findByBillNoAndTenantId(String billNo, UUID tenantId);
 
+    // Eagerly fetch payments to avoid LazyInitializationException in reports
+    @Query("SELECT DISTINCT b FROM Bill b LEFT JOIN FETCH b.payments WHERE b.tenantId = :tenantId")
+    List<Bill> findAllByTenantIdWithPayments(@Param("tenantId") UUID tenantId);
+
     // Row lock on the bill so two concurrent returns against it can't both pass the
     // "returned qty <= sold qty" check before either one commits.
     @Lock(LockModeType.PESSIMISTIC_WRITE)
