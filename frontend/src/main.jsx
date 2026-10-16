@@ -5216,7 +5216,7 @@ function ShopApp() {
   };
 
   const cartTotal = cart.reduce((s, i) => s + Number(i.price) * i.qty, 0);
-  const cartCount = cart.reduce((s, i) => s + i.qty, 0);
+  const cartCount = cart.length;
 
   const placeOrder = async (e) => {
     e.preventDefault();
