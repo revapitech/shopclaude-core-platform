@@ -5376,7 +5376,8 @@ function ShopApp() {
     // Exclude colour siblings from "You May Also Like" since they're shown in the colour picker above
     const similar = products.filter(p => p.category === dp.category && p.id !== dp.id && !(hasColorFamily && baseSkuOf(p.sku) === dpBaseSku)).slice(0, 8);
     return (
-      <div className="s2-detail-page">
+      <>
+        <div className="s2-detail-page">
         {/* Header */}
         <header className="s2-header" style={{position:'sticky',top:0,zIndex:100}}>
           <div className="s2-header-inner">
@@ -5520,71 +5521,109 @@ function ShopApp() {
           </div>
         )}
 
-        {/* Cart drawer (shared) */}
-        {showCart && (
-          <div className="s2-cart-overlay" onClick={() => setShowCart(false)}>
-            <div className="s2-cart-drawer" onClick={e => e.stopPropagation()}>
-              <div className="s2-cart-hdr"><span>Your Cart ({cartCount})</span><button onClick={() => setShowCart(false)}>✕</button></div>
-              {cart.length === 0 ? <p className="s2-cart-empty">Your cart is empty.</p> : <>
-                <div className="s2-cart-items">
-                  {cart.map(i => (
-                    <div key={i.barcode} className="s2-cart-item">
-                      {i.imageUrl && <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-item-img" />}
-                      <div className="s2-cart-item-info">
-                        <div className="s2-cart-item-name">{i.name}</div>
-                        <div className="s2-cart-item-price">₹{Number(i.price).toFixed(2)}</div>
-                      </div>
-                      <div className="s2-cart-qty">
-                        <button onClick={() => updateCartQty(i.key, -1)}>−</button>
-                        <span>{i.qty}</span>
-                        <button onClick={() => updateCartQty(i.key, 1)}>+</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="s2-cart-footer">
-                  <div className="s2-cart-total">Total: ₹{cartTotal.toFixed(2)}</div>
-                  <button className="s2-checkout-btn" onClick={() => { setShowCart(false); setCheckout(true); }}>Checkout →</button>
-                </div>
-              </>}
-            </div>
-          </div>
-        )}
-
-        {/* Checkout modal (shared) */}
-        {checkout && (
-          <div className="s2-modal-overlay" onClick={() => setCheckout(false)}>
-            <div className="s2-modal" onClick={e => e.stopPropagation()}>
-              <button className="s2-modal-close" onClick={() => setCheckout(false)}>✕</button>
-              <h2 className="s2-modal-title">Checkout</h2>
-              <form onSubmit={placeOrder}>
-                <label className="s2-lbl">Full Name *</label>
-                <input className="s2-inp" value={orderForm.name} onChange={e=>setOrderForm(f=>({...f,name:e.target.value}))} required />
-                <label className="s2-lbl">Mobile Number *</label>
-                <input className="s2-inp" type="tel" inputMode="numeric" maxLength={10} value={orderForm.phone}
-                  onChange={e=>setOrderForm(f=>({...f,phone:e.target.value.replace(/\D/g,'').slice(0,10)}))} required />
-                <label className="s2-lbl">Delivery Address *</label>
-                <label className="s2-lbl">House / Flat No. *</label>
-                <input className="s2-inp" value={orderForm.houseNo} onChange={e=>setOrderForm(f=>({...f,houseNo:e.target.value}))} required />
-                <label className="s2-lbl">Street / Area *</label>
-                <input className="s2-inp" value={orderForm.street} onChange={e=>setOrderForm(f=>({...f,street:e.target.value}))} required />
-                <div className="s2-addr-row">
-                  <div><label className="s2-lbl">City *</label><input className="s2-inp" value={orderForm.city} onChange={e=>setOrderForm(f=>({...f,city:e.target.value}))} required /></div>
-                  <div><label className="s2-lbl">Pincode *</label><input className="s2-inp" value={orderForm.pincode} onChange={e=>setOrderForm(f=>({...f,pincode:e.target.value}))} required /></div>
-                </div>
-                <label className="s2-lbl">State *</label>
-                <select className="s2-inp" value={orderForm.state} onChange={e=>setOrderForm(f=>({...f,state:e.target.value}))} required>
-                  <option value="">Select state</option>
-                  {INDIA_STATES.map(s=><option key={s}>{s}</option>)}
-                </select>
-                {orderError && <p className="error-msg">{orderError}</p>}
-                <button type="submit" className="s2-place-btn">Place Order</button>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
-    );
+
+      {/* Cart Drawer */}
+      {showCart && (
+        <div className="s2-overlay" onClick={() => setShowCart(false)}>
+          <div className="s2-drawer" onClick={e => e.stopPropagation()}>
+            <div className="s2-drawer-hdr">
+              <h3>Your Cart ({cartCount})</h3>
+              <button className="s2-drawer-close" onClick={() => setShowCart(false)}>✕</button>
+            </div>
+            {cart.length === 0
+              ? <div className="s2-cart-empty">Your cart is empty<br/><small>Add some items to get started!</small></div>
+              : <>
+                  <div className="s2-cart-items">
+                    {cart.map(i => (
+                      <div key={i.key} className="s2-cart-row">
+                        {i.imageUrl
+                          ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
+                          : <div className="s2-cart-thumb-ph">💎</div>}
+                        <div className="s2-cart-info">
+                          <div className="s2-cart-name">{i.name}</div>
+                          {(i.selectedColor || i.selectedSize) && (
+                            <div className="s2-cart-variant">
+                              {i.selectedColor && (
+                                <span className="s2-cart-color-dot"
+                                  style={{background: COLOR_CSS[i.selectedColor] || '#ccc',
+                                    border: i.selectedColor==='White'?'1px solid #ddd':'none'}} />
+                              )}
+                              {[i.selectedColor, i.selectedSize].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                          <div className="s2-cart-price-each">₹{Number(i.price).toFixed(2)}</div>
+                        </div>
+                        <div className="s2-qty-wrap">
+                          <button className="s2-qty-btn" onClick={() => updateCartQty(i.key, -1)}>−</button>
+                          <span className="s2-qty-num">{i.qty}</span>
+                          <button className="s2-qty-btn" onClick={() => updateCartQty(i.key, 1)}>+</button>
+                        </div>
+                        <div className="s2-cart-line">₹{(Number(i.price) * i.qty).toFixed(2)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="s2-cart-footer">
+                    <div className="s2-cart-subtotal"><span>Subtotal</span><strong>₹{cartTotal.toFixed(2)}</strong></div>
+                    <button className="s2-checkout-btn" onClick={() => { setShowCart(false); setCheckout(true); }}>
+                      Proceed to Checkout →
+                    </button>
+                  </div>
+                </>
+            }
+          </div>
+        </div>
+      )}
+
+      {/* Checkout Modal */}
+      {checkout && (
+        <div className="s2-overlay s2-center-overlay" onClick={() => setCheckout(false)}>
+          <div className="s2-checkout-modal" onClick={e => e.stopPropagation()}>
+            <div className="s2-drawer-hdr">
+              <h3>Checkout</h3>
+              <button className="s2-drawer-close" onClick={() => setCheckout(false)}>✕</button>
+            </div>
+            <form onSubmit={placeOrder} className="s2-checkout-form">
+              <div className="s2-form-group">
+                <label>Full Name *</label>
+                <input placeholder="Your full name" value={orderForm.name} onChange={e => setOrderForm({...orderForm, name: e.target.value})} />
+              </div>
+              <div className="s2-form-group">
+                <label>Phone Number *</label>
+                <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile number"
+                  value={orderForm.phone}
+                  onChange={e => setOrderForm({...orderForm, phone: e.target.value.replace(/\D/g, '').slice(0, 10)})} />
+              </div>
+              <div className="s2-addr-section">
+                <div className="s2-addr-title">Delivery Address *</div>
+                <input placeholder="House / Flat / Building No. *" value={orderForm.houseNo} onChange={e => setOrderForm({...orderForm, houseNo: e.target.value})} required />
+                <input placeholder="Street / Area / Locality *" value={orderForm.street} onChange={e => setOrderForm({...orderForm, street: e.target.value})} required />
+                <div className="s2-form-row">
+                  <input placeholder="City *" value={orderForm.city} onChange={e => setOrderForm({...orderForm, city: e.target.value})} required />
+                  <input placeholder="PIN Code *" value={orderForm.pincode} onChange={e => setOrderForm({...orderForm, pincode: e.target.value})} required />
+                </div>
+                <select value={orderForm.state} onChange={e => setOrderForm({...orderForm, state: e.target.value})} required>
+                  <option value="">Select State *</option>
+                  {INDIA_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="s2-order-summary">
+                <div className="s2-summary-title">Order Summary</div>
+                {cart.map(i => (
+                  <div key={i.barcode} className="s2-summary-row">
+                    <span>{i.name} × {i.qty}</span><span>₹{(Number(i.price)*i.qty).toFixed(2)}</span>
+                  </div>
+                ))}
+                <div className="s2-summary-total"><span>Total</span><strong>₹{cartTotal.toFixed(2)}</strong></div>
+              </div>
+              {orderError && <p className="s2-form-error">{orderError}</p>}
+              <button type="submit" className="s2-place-btn">Place Order</button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
   }
 
   /* ── Order success screen ── */
