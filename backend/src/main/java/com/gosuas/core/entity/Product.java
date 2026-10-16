@@ -62,6 +62,14 @@ public class Product {
     @Column(name = "variant_attrs", columnDefinition = "TEXT")
     private String variantAttrs;
 
+    @Column(name = "hsn_code")
+    private String hsnCode;
+
+    // GST rate applicable to this product (0, 5, 12, 18, 28 or null for exempt/unregistered).
+    // Null means no GST is charged. Stored so historical invoices stay reproducible.
+    @Column(name = "gst_rate", precision = 5, scale = 2)
+    private java.math.BigDecimal gstRate;
+
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();

@@ -26,4 +26,24 @@ public class BillItem {
     private Integer quantity;
     private BigDecimal unitPrice;
     private BigDecimal lineTotal;
+
+    // Snapshot of product tax config at time of billing (so the invoice stays correct even if
+    // the product's GST rate or HSN code changes later).
+    @Column(name = "hsn_code")
+    private String hsnCode;
+
+    @Column(name = "gst_rate", precision = 5, scale = 2)
+    private BigDecimal gstRate;
+
+    @Column(name = "taxable_amount", precision = 12, scale = 2)
+    private BigDecimal taxableAmount;
+
+    @Column(name = "cgst", precision = 12, scale = 2)
+    private BigDecimal cgst;
+
+    @Column(name = "sgst", precision = 12, scale = 2)
+    private BigDecimal sgst;
+
+    @Column(name = "igst", precision = 12, scale = 2)
+    private BigDecimal igst;
 }

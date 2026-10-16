@@ -5,8 +5,10 @@ import com.gosuas.core.dto.*;
 import com.gosuas.core.entity.Bill;
 import com.gosuas.core.entity.BillPayment;
 import com.gosuas.core.entity.Product;
+import com.gosuas.core.entity.Tenant;
 import com.gosuas.core.repository.BillRepository;
 import com.gosuas.core.repository.ProductRepository;
+import com.gosuas.core.repository.TenantRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +33,7 @@ class BillServiceTest {
 
     @Mock BillRepository billRepository;
     @Mock ProductRepository productRepository;
+    @Mock TenantRepository tenantRepository;
     @InjectMocks BillService billService;
 
     private UUID tenantId;
@@ -53,6 +56,17 @@ class BillServiceTest {
         when(billRepository.findAllByTenantIdAndBillNoStartingWith(any(), any()))
                 .thenReturn(List.of());
         when(billRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // Default: tenant not GST-registered — GST computation is skipped
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
+    }
+
+    /** Helper: creates a GST-registered intra-state tenant for GST tests. */
+    private Tenant gstTenant(String supplyType) {
+        Tenant t = new Tenant();
+        t.setGstRegistered(true);
+        t.setGstin("29ABCDE1234F1Z5");
+        t.setSupplyType(supplyType);
+        return t;
     }
 
     // ── Test 1: Single CASH payment ─────────────────────────────────────────────
@@ -326,5 +340,173 @@ class BillServiceTest {
 
         // bill must not have been saved
         verify(billRepository, never()).save(any());
+    }
+
+    // ── Test 17: GST-unregistered tenant → no GST fields computed ───────────────
+    @Test
+    void t17_gstUnregisteredTenant_noGstComputed() {
+        product.setGstRate(new BigDecimal("18"));
+        BillRequest req = new BillRequest("Alice", null,
+                BigDecimal.ZERO, "CASH", null,
+                List.of(new BillItemRequest("BAR001", 1)));
+
+        BillResponse res = billService.createBill(req);
+
+        // GST fields should be zero (not null) since we always initialise the bill fields
+        assertThat(res.totalGst()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(res.cgst()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(res.sgst()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    // ── Test 18: GST-registered intra-state, 18% inclusive — CGST+SGST correct ──
+    @Test
+    void t18_gstIntraState18Percent() {
+        product.setGstRate(new BigDecimal("18"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(gstTenant("INTRA")));
+
+        // 1 × ₹500 (tax-inclusive at 18%)
+        // taxable = 500 / 1.18 = 423.73; GST = 76.27; CGST = SGST = 38.14
+        BillRequest req = new BillRequest("Bob", null,
+                BigDecimal.ZERO, "CASH", null,
+                List.of(new BillItemRequest("BAR001", 1)));
+
+        BillResponse res = billService.createBill(req);
+
+        assertThat(res.totalGst()).isGreaterThan(BigDecimal.ZERO);
+        assertThat(res.cgst()).isEqualByComparingTo(res.sgst()); // CGST == SGST for intra-state
+        assertThat(res.igst()).isEqualByComparingTo(BigDecimal.ZERO);
+        // taxable + cgst + sgst should approximately equal grand total
+        BigDecimal reconstituted = res.taxableAmount().add(res.cgst()).add(res.sgst());
+        assertThat(reconstituted.doubleValue()).isCloseTo(res.grandTotal().doubleValue(), within(1.0));
+    }
+
+    // ── Test 19: GST-registered inter-state, 12% inclusive — IGST correct ────────
+    @Test
+    void t19_gstInterState12Percent() {
+        product.setGstRate(new BigDecimal("12"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(gstTenant("INTER")));
+
+        BillRequest req = new BillRequest("Carol", null,
+                BigDecimal.ZERO, "CASH", null,
+                List.of(new BillItemRequest("BAR001", 1)));
+
+        BillResponse res = billService.createBill(req);
+
+        assertThat(res.igst()).isGreaterThan(BigDecimal.ZERO);
+        assertThat(res.cgst()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(res.sgst()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(res.totalGst()).isEqualByComparingTo(res.igst());
+    }
+
+    // ── Test 20: GST 0% product — zero tax, full amount taxable ─────────────────
+    @Test
+    void t20_gstZeroPercent_noTax() {
+        product.setGstRate(BigDecimal.ZERO);
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(gstTenant("INTRA")));
+
+        BillRequest req = new BillRequest("Dave", null,
+                BigDecimal.ZERO, "CASH", null,
+                List.of(new BillItemRequest("BAR001", 2)));
+
+        BillResponse res = billService.createBill(req);
+
+        assertThat(res.totalGst()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(res.taxableAmount()).isEqualByComparingTo(res.grandTotal());
+    }
+
+    // ── Test 21: GST null product (no GST configured) — treated as 0% ───────────
+    @Test
+    void t21_gstNullRate_treatedAsExempt() {
+        product.setGstRate(null); // no GST configured
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(gstTenant("INTRA")));
+
+        BillRequest req = new BillRequest("Eve", null,
+                BigDecimal.ZERO, "CASH", null,
+                List.of(new BillItemRequest("BAR001", 1)));
+
+        BillResponse res = billService.createBill(req);
+
+        assertThat(res.totalGst()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(res.taxableAmount()).isEqualByComparingTo(res.grandTotal());
+    }
+
+    // ── Test 22: Discount + GST — tax computed on post-discount value ────────────
+    @Test
+    void t22_discountBeforeGst() {
+        product.setGstRate(new BigDecimal("18"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(gstTenant("INTRA")));
+
+        // 1 × ₹500, ₹50 discount → grand total ₹450
+        BillRequest req = new BillRequest("Frank", null,
+                new BigDecimal("50.00"), "CASH", null,
+                List.of(new BillItemRequest("BAR001", 1)));
+
+        BillResponse res = billService.createBill(req);
+
+        assertThat(res.grandTotal()).isEqualByComparingTo("450.00");
+        // taxable + cgst + sgst should approximately equal ₹450
+        BigDecimal reconstituted = res.taxableAmount().add(res.cgst()).add(res.sgst());
+        assertThat(reconstituted.doubleValue()).isCloseTo(450.0, within(1.0));
+        // GST on discounted amount should be less than on full ₹500
+        assertThat(res.totalGst().doubleValue()).isLessThan(500.0 - 500.0 / 1.18);
+    }
+
+    // ── Test 23: Split payment + GST — no duplication of tax totals ─────────────
+    @Test
+    void t23_splitPaymentDoesNotDuplicateGst() {
+        product.setGstRate(new BigDecimal("18"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(gstTenant("INTRA")));
+
+        List<PaymentEntryRequest> split = List.of(
+                new PaymentEntryRequest("CASH", new BigDecimal("250.00")),
+                new PaymentEntryRequest("QR",   new BigDecimal("250.00"))
+        );
+        BillRequest req = new BillRequest("Grace", null,
+                BigDecimal.ZERO, null, split,
+                List.of(new BillItemRequest("BAR001", 1)));
+
+        BillResponse res = billService.createBill(req);
+
+        assertThat(res.paymentMode()).isEqualTo("SPLIT");
+        // GST must still be computed once — not once per payment leg
+        BigDecimal reconstituted = res.taxableAmount().add(res.cgst()).add(res.sgst());
+        assertThat(reconstituted.doubleValue()).isCloseTo(500.0, within(1.0));
+    }
+
+    // ── Test 24: 5% GST — verify CGST and SGST each equal 2.5% of taxable ───────
+    @Test
+    void t24_gst5Percent_correctSplit() {
+        product.setSellingPrice(new BigDecimal("1050.00")); // ₹1050 tax-inclusive at 5%
+        product.setGstRate(new BigDecimal("5"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(gstTenant("INTRA")));
+
+        BillRequest req = new BillRequest("Heidi", null,
+                BigDecimal.ZERO, "CASH", null,
+                List.of(new BillItemRequest("BAR001", 1)));
+
+        BillResponse res = billService.createBill(req);
+
+        // taxable = 1050 / 1.05 = 1000; GST = 50; CGST = SGST = 25
+        assertThat(res.taxableAmount().doubleValue()).isCloseTo(1000.0, within(1.0));
+        assertThat(res.cgst().doubleValue()).isCloseTo(25.0, within(1.0));
+        assertThat(res.sgst().doubleValue()).isCloseTo(25.0, within(1.0));
+    }
+
+    // ── Test 25: 28% GST — highest rate, verify arithmetic ───────────────────────
+    @Test
+    void t25_gst28Percent() {
+        product.setGstRate(new BigDecimal("28"));
+        when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(gstTenant("INTRA")));
+
+        BillRequest req = new BillRequest("Ivan", null,
+                BigDecimal.ZERO, "CASH", null,
+                List.of(new BillItemRequest("BAR001", 1)));
+
+        BillResponse res = billService.createBill(req);
+
+        // taxable = 500 / 1.28 ≈ 390.63; GST ≈ 109.37; CGST = SGST ≈ 54.69
+        assertThat(res.taxableAmount().doubleValue()).isCloseTo(390.0, within(2.0));
+        assertThat(res.totalGst().doubleValue()).isCloseTo(109.0, within(2.0));
+        assertThat(res.cgst()).isEqualByComparingTo(res.sgst());
     }
 }

@@ -132,6 +132,12 @@ public class TenantController {
             if (body.containsKey("razorpayMerchantKeySecret") && body.get("razorpayMerchantKeySecret") != null
                     && !body.get("razorpayMerchantKeySecret").isBlank())
                 tenant.setRazorpayMerchantKeySecret(body.get("razorpayMerchantKeySecret"));
+            if (body.containsKey("gstin"))
+                tenant.setGstin(body.get("gstin"));
+            if (body.containsKey("gstRegistered"))
+                tenant.setGstRegistered("true".equalsIgnoreCase(body.get("gstRegistered")));
+            if (body.containsKey("supplyType") && ("INTRA".equalsIgnoreCase(body.get("supplyType")) || "INTER".equalsIgnoreCase(body.get("supplyType"))))
+                tenant.setSupplyType(body.get("supplyType").toUpperCase());
             return ResponseEntity.ok(tenantRepository.save(tenant));
         }).orElse(ResponseEntity.notFound().build());
     }
