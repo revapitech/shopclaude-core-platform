@@ -625,6 +625,12 @@ function printBillReceipt(bill, shopName = 'GOSUAS') {
   <div class="dash"></div>
   <div class="total-row"><span>Sub Total</span><span>₹${fmt(bill.subTotal)}</span></div>
   ${Number(bill.discountAmount) > 0 ? `<div class="total-row"><span>Discount</span><span>- ₹${fmt(bill.discountAmount)}</span></div>` : ''}
+  ${Number(bill.totalGst) > 0 ? `
+  <div class="total-row" style="font-size:11px;color:#555"><span>Taxable Value</span><span>₹${fmt(bill.taxableAmount)}</span></div>
+  ${Number(bill.cgst) > 0 ? `<div class="total-row" style="font-size:11px;color:#555"><span>CGST</span><span>₹${fmt(bill.cgst)}</span></div>` : ''}
+  ${Number(bill.sgst) > 0 ? `<div class="total-row" style="font-size:11px;color:#555"><span>SGST</span><span>₹${fmt(bill.sgst)}</span></div>` : ''}
+  ${Number(bill.igst) > 0 ? `<div class="total-row" style="font-size:11px;color:#555"><span>IGST</span><span>₹${fmt(bill.igst)}</span></div>` : ''}
+  <div class="total-row" style="font-size:11px;color:#555"><span>Total GST</span><span>₹${fmt(bill.totalGst)}</span></div>` : ''}
   <div class="grand"><span>TOTAL</span><span>₹${fmt(bill.grandTotal)}</span></div>
   <div class="dash"></div>
   <p class="status">★ ${bill.paymentStatus || 'PAID'} ★</p>
@@ -1391,7 +1397,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [products, setProducts] = useState([]);
-  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '' };
+  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '', hsnCode: '', gstRate: '' };
   const [form, setForm] = useState(EMPTY_FORM);
   const makeEmptyImageSlots = (n) => Array.from({length:n}, () => ({file:null,preview:null}));
   const [imageSlots, setImageSlots] = useState(makeEmptyImageSlots(2));
@@ -1592,6 +1598,9 @@ function App() {
       if (shopEditModal?.bankBranchName !== undefined) infoUpdate.bankBranchName = shopEditModal.bankBranchName;
       if (shopEditModal?.razorpayMerchantKeyId !== undefined) infoUpdate.razorpayMerchantKeyId = shopEditModal.razorpayMerchantKeyId;
       if (shopEditModal?.razorpayMerchantKeySecret) infoUpdate.razorpayMerchantKeySecret = shopEditModal.razorpayMerchantKeySecret;
+      if (shopEditModal?.gstin !== undefined) infoUpdate.gstin = shopEditModal.gstin;
+      infoUpdate.gstRegistered = String(shopEditModal?.gstRegistered || false);
+      if (shopEditModal?.supplyType) infoUpdate.supplyType = shopEditModal.supplyType;
       if (Object.keys(infoUpdate).length > 0) {
         const res = await axios.put(`${API}/tenant/info`, infoUpdate);
         setTenantInfo(res.data);
@@ -1978,6 +1987,7 @@ function App() {
         name: form.name, category: form.category, subcategory: null,
         purchasePrice: Number(form.purchasePrice), ...pricing, stockQty: Number(form.stockQty),
         lowStockAlertQty: null, imageUrl, active: form.showToWebsite, festiveOffer: form.festiveOffer,
+        hsnCode: form.hsnCode || null, gstRate: form.gstRate !== '' ? Number(form.gstRate) : null,
         rentalAvailable: form.rentalAvailable, productType: form.productType,
         description: form.description || null,
       };
@@ -2045,7 +2055,7 @@ function App() {
     setCart(prev => {
       const existing = prev.find(i => i.barcode === found.barcode);
       if (existing) return prev.map(i => i.barcode === found.barcode ? { ...i, quantity: i.quantity + 1 } : i);
-      return [...prev, { barcode: found.barcode, name: found.name, quantity: 1, price: found.sellingPrice }];
+      return [...prev, { barcode: found.barcode, name: found.name, quantity: 1, price: found.sellingPrice, gstRate: found.gstRate ?? null, hsnCode: found.hsnCode ?? null }];
     });
     setBarcode('');
     setScanError('');
@@ -2155,6 +2165,8 @@ function App() {
       rentalAvailable: p.rentalAvailable ?? false,
       showToWebsite: p.active ?? false,
       imageSlots: Array.from({length: slotCount}, (_, i) => makeSlot(existingUrls[i])),
+      hsnCode: p.hsnCode || '',
+      gstRate: p.gstRate != null ? String(p.gstRate) : '',
     });
   };
 
@@ -2221,6 +2233,8 @@ function App() {
       festiveOffer: editModal.festiveOffer ?? false,
       rentalAvailable: editModal.rentalAvailable ?? false,
       active: editModal.showToWebsite,
+      hsnCode: editModal.hsnCode || null,
+      gstRate: editModal.gstRate !== '' && editModal.gstRate != null ? Number(editModal.gstRate) : null,
     };
       if (editAttrs.length > 0) {
         const color = attrVals[editAttrs[0]?.name] || null;
@@ -2455,7 +2469,7 @@ function App() {
                   onError={e => { e.currentTarget.onerror = null; e.currentTarget.style.display = 'none'; }} />
               : <div className="sidebar-logo-img" style={{display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,background:'rgba(255,255,255,0.15)'}}>🏪</div>
             }
-            <button title="Edit shop name & logo" onClick={() => { setShopEditModal({name: tenantInfo?.name || '', address: tenantInfo?.shopAddress || '', phoneNumber: tenantInfo?.phoneNumber || '', bankAccountNumber: tenantInfo?.bankAccountNumber || '', confirmBankAccountNumber: tenantInfo?.bankAccountNumber || '', bankAccountHolderName: tenantInfo?.bankAccountHolderName || '', bankIfscCode: tenantInfo?.bankIfscCode || '', bankBranchName: tenantInfo?.bankBranchName || '', razorpayMerchantKeyId: tenantInfo?.razorpayMerchantKeyId || '', razorpayMerchantKeySecret: ''}); setRzpHelpOpen(false); setShopLogoFile(null); setShopLogoPreview(null); }}
+            <button title="Edit shop name & logo" onClick={() => { setShopEditModal({name: tenantInfo?.name || '', address: tenantInfo?.shopAddress || '', phoneNumber: tenantInfo?.phoneNumber || '', bankAccountNumber: tenantInfo?.bankAccountNumber || '', confirmBankAccountNumber: tenantInfo?.bankAccountNumber || '', bankAccountHolderName: tenantInfo?.bankAccountHolderName || '', bankIfscCode: tenantInfo?.bankIfscCode || '', bankBranchName: tenantInfo?.bankBranchName || '', razorpayMerchantKeyId: tenantInfo?.razorpayMerchantKeyId || '', razorpayMerchantKeySecret: '', gstin: tenantInfo?.gstin || '', gstRegistered: tenantInfo?.gstRegistered || false, supplyType: tenantInfo?.supplyType || 'INTRA'}); setRzpHelpOpen(false); setShopLogoFile(null); setShopLogoPreview(null); }}
               style={{position:'absolute',bottom:-4,right:-4,width:20,height:20,background:'#fff',border:'1.5px solid #d1d5db',borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,padding:0,lineHeight:1}}>
               ✏️
             </button>
@@ -2638,6 +2652,37 @@ function App() {
                   <span>Total</span>
                   <strong>₹{(subtotal - discount).toFixed(2)}</strong>
                 </div>
+                {tenantInfo?.gstRegistered && (() => {
+                  const grandTotal = subtotal - discount;
+                  const isInter = tenantInfo?.supplyType === 'INTER';
+                  let totalTaxable = 0, totalCgst = 0, totalSgst = 0, totalIgst = 0;
+                  cart.forEach(i => {
+                    const rate = i.gstRate ? Number(i.gstRate) : 0;
+                    const effectiveLine = (Number(i.price) * i.quantity) * (subtotal > 0 ? grandTotal / subtotal : 1);
+                    if (rate > 0) {
+                      const taxable = effectiveLine / (1 + rate / 100);
+                      const gst = effectiveLine - taxable;
+                      totalTaxable += taxable;
+                      if (isInter) totalIgst += gst;
+                      else { totalCgst += gst / 2; totalSgst += gst / 2; }
+                    } else {
+                      totalTaxable += effectiveLine;
+                    }
+                  });
+                  const totalGst = totalCgst + totalSgst + totalIgst;
+                  if (totalGst === 0) return null;
+                  return (
+                    <div className="gst-breakdown">
+                      <div className="cart-total-row gst-row"><span>Taxable Value</span><span>₹{totalTaxable.toFixed(2)}</span></div>
+                      {isInter
+                        ? <div className="cart-total-row gst-row"><span>IGST</span><span>₹{totalIgst.toFixed(2)}</span></div>
+                        : <><div className="cart-total-row gst-row"><span>CGST</span><span>₹{totalCgst.toFixed(2)}</span></div>
+                           <div className="cart-total-row gst-row"><span>SGST</span><span>₹{totalSgst.toFixed(2)}</span></div></>
+                      }
+                      <div className="cart-total-row gst-row gst-total-row"><span>Total GST</span><span>₹{totalGst.toFixed(2)}</span></div>
+                    </div>
+                  );
+                })()}
               </>
             );
           })()}
@@ -2932,6 +2977,24 @@ function App() {
                 min="0"
               />
             ))}
+            {tenantInfo?.gstRegistered && (
+              <div style={{display:'flex',gap:8,marginTop:4}}>
+                <input
+                  placeholder="HSN / SAC Code (optional)"
+                  value={form.hsnCode}
+                  onChange={e => setForm({...form, hsnCode: e.target.value})}
+                  style={{flex:2}}
+                />
+                <select value={form.gstRate} onChange={e => setForm({...form, gstRate: e.target.value})} style={{flex:1,padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff',outline:'none'}}>
+                  <option value="">GST Rate</option>
+                  <option value="0">0% (Exempt)</option>
+                  <option value="5">5%</option>
+                  <option value="12">12%</option>
+                  <option value="18">18%</option>
+                  <option value="28">28%</option>
+                </select>
+              </div>
+            )}
             <label className="modal-label">Product Images (up to {maxPhotosForPlan(tenantInfo?.plan)}) <span style={{fontWeight:400,color:'#9ca3af'}}>— {tenantInfo?.plan === 'PRO' ? 'PRO plan' : 'upgrade to PRO for up to 6 photos'}</span></label>
             <div className="edit-img-slots">
               {imageSlots.map((slot, idx) => (
@@ -3173,6 +3236,23 @@ function App() {
                   </div>
                 )}
               </div>
+
+              {/* GST Summary */}
+              {s.gstTotal > 0 && (
+                <div className="rpt-chart-card" style={{marginTop:20}}>
+                  <div className="rpt-chart-title">GST Summary (POS Bills)</div>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,marginTop:8}}>
+                    <tbody>
+                      <tr style={{borderBottom:'1px solid #e5e7eb'}}><td style={{padding:'6px 0',color:'#374151'}}>Taxable Value</td><td style={{textAlign:'right',fontWeight:600}}>₹{fmt(s.gstTaxableValue)}</td></tr>
+                      {s.gstCgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>CGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstCgst)}</td></tr>}
+                      {s.gstSgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>SGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstSgst)}</td></tr>}
+                      {s.gstIgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>IGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstIgst)}</td></tr>}
+                      <tr><td style={{padding:'6px 0',fontWeight:700,color:'#1E3A5F',borderTop:'2px solid #1E3A5F'}}>Total GST</td><td style={{textAlign:'right',fontWeight:700,color:'#1E3A5F',borderTop:'2px solid #1E3A5F'}}>₹{fmt(s.gstTotal)}</td></tr>
+                    </tbody>
+                  </table>
+                  <p style={{fontSize:11.5,color:'#9ca3af',margin:'8px 0 0',lineHeight:1.5}}>GST shown is the tax component embedded in POS bills. This is not a substitute for a formal GST return — consult your accountant for ITC claims, reversals, and final tax liability.</p>
+                </div>
+              )}
 
               {/* Top products */}
               {s.topProducts && s.topProducts.length > 0 && (
@@ -3607,6 +3687,20 @@ function App() {
                                         <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',color:'#dc2626',fontWeight:600}}>
                                           <span>Discount</span>
                                           <span>− ₹{Number(o.discountAmount||0).toFixed(2)}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    {Number(o.totalGst||0) > 0 && (
+                                      <>
+                                        <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12}}>
+                                          <span>Taxable Value</span>
+                                          <span>₹{Number(o.taxableAmount||0).toFixed(2)}</span>
+                                        </div>
+                                        {Number(o.cgst||0) > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12}}><span>CGST</span><span>₹{Number(o.cgst||0).toFixed(2)}</span></div>}
+                                        {Number(o.sgst||0) > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12}}><span>SGST</span><span>₹{Number(o.sgst||0).toFixed(2)}</span></div>}
+                                        {Number(o.igst||0) > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12}}><span>IGST</span><span>₹{Number(o.igst||0).toFixed(2)}</span></div>}
+                                        <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12,fontWeight:600}}>
+                                          <span>Total GST</span><span>₹{Number(o.totalGst||0).toFixed(2)}</span>
                                         </div>
                                       </>
                                     )}
@@ -4593,6 +4687,36 @@ function App() {
               Get these from your own Razorpay Dashboard → Settings → API Keys. We never see or store your sales money — it goes straight to your Razorpay account.
             </p>
 
+            {/* GST Settings */}
+            <label className="modal-label" style={{marginTop:16}}>GST Settings</label>
+            <div style={{background:'#f8faff',border:'1.5px solid #dbeafe',borderRadius:8,padding:'12px 14px',marginTop:4,display:'flex',flexDirection:'column',gap:10}}>
+              <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,fontWeight:600,color:'#1E3A5F'}}>
+                <input type="checkbox" checked={shopEditModal.gstRegistered || false}
+                  onChange={e => setShopEditModal(m => ({...m, gstRegistered: e.target.checked}))} />
+                GST Registered Business
+              </label>
+              {shopEditModal.gstRegistered && (
+                <>
+                  <div>
+                    <label className="modal-label">GSTIN</label>
+                    <input value={shopEditModal.gstin || ''} onChange={e => setShopEditModal(m => ({...m, gstin: e.target.value.toUpperCase()}))}
+                      placeholder="e.g. 29ABCDE1234F1Z5" maxLength={15} style={{marginTop:4,fontFamily:'monospace',letterSpacing:1}} />
+                  </div>
+                  <div>
+                    <label className="modal-label">Supply Type</label>
+                    <select value={shopEditModal.supplyType || 'INTRA'} onChange={e => setShopEditModal(m => ({...m, supplyType: e.target.value}))}
+                      style={{marginTop:4,padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none',width:'100%'}}>
+                      <option value="INTRA">Intra-State (CGST + SGST)</option>
+                      <option value="INTER">Inter-State (IGST)</option>
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+            <p style={{fontSize:11.5,color:'#9ca3af',margin:'4px 0 0'}}>
+              When enabled, GST will be computed on every POS bill and shown on receipts. Set the applicable rate per product in the Products page.
+            </p>
+
             <div style={{display:'flex',gap:10,marginTop:18}}>
               <button className="btn-primary" onClick={saveShopSettings} disabled={shopEditSaving} style={{flex:1}}>
                 {shopEditSaving ? 'Saving…' : 'Save'}
@@ -4670,6 +4794,26 @@ function App() {
                 </>
               )}
             </div>
+
+            {tenantInfo?.gstRegistered && (
+              <div style={{display:'flex',gap:8,marginTop:10}}>
+                <div style={{flex:2}}>
+                  <label className="modal-label">HSN / SAC Code</label>
+                  <input value={editModal.hsnCode || ''} onChange={e => setEditModal(m => ({...m, hsnCode: e.target.value}))} placeholder="HSN / SAC Code (optional)" />
+                </div>
+                <div style={{flex:1}}>
+                  <label className="modal-label">GST Rate</label>
+                  <select value={editModal.gstRate ?? ''} onChange={e => setEditModal(m => ({...m, gstRate: e.target.value}))} style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff',outline:'none',width:'100%'}}>
+                    <option value="">None</option>
+                    <option value="0">0% (Exempt)</option>
+                    <option value="5">5%</option>
+                    <option value="12">12%</option>
+                    <option value="18">18%</option>
+                    <option value="28">28%</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             <div className="edit-restock-banner" style={{marginTop:'10px'}}>
               <span className="edit-restock-label">Stock Quantity</span>

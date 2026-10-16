@@ -25,5 +25,7 @@ public record ProductRequest(
         String productType,
         BigDecimal depositAmount,
         BigDecimal rentAmount,
-        String colorPhotoUrl
+        String colorPhotoUrl,
+        String hsnCode,
+        BigDecimal gstRate
 ) {}

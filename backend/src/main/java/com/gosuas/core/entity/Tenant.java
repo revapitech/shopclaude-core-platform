@@ -71,6 +71,17 @@ public class Tenant {
                 && razorpayMerchantKeySecret != null && !razorpayMerchantKeySecret.isBlank();
     }
 
+    // GST registration details
+    @Column(name = "gstin")
+    private String gstin;
+
+    @Column(name = "gst_registered")
+    private Boolean gstRegistered;
+
+    // INTRA (same state — CGST+SGST) or INTER (different state — IGST). Defaults to INTRA.
+    @Column(name = "supply_type")
+    private String supplyType;
+
     @Column(name = "shop_address", columnDefinition = "TEXT")
     private String shopAddress;
 

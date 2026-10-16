@@ -42,6 +42,13 @@ public class ReportsController {
         double offlineDiscount = bills.stream().mapToDouble(b -> safeNum(b.getDiscountAmount())).sum();
         int    offlineOrders  = bills.size();
 
+        // ── GST totals (POS bills only) ───────────────────────────────────────
+        double totalTaxableValue = bills.stream().mapToDouble(b -> safeNum(b.getTaxableAmount())).sum();
+        double totalCgst  = bills.stream().mapToDouble(b -> safeNum(b.getCgst())).sum();
+        double totalSgst  = bills.stream().mapToDouble(b -> safeNum(b.getSgst())).sum();
+        double totalIgst  = bills.stream().mapToDouble(b -> safeNum(b.getIgst())).sum();
+        double totalGst   = bills.stream().mapToDouble(b -> safeNum(b.getTotalGst())).sum();
+
         Map<String, Double> paymentMethods = new LinkedHashMap<>();
         bills.forEach(b -> {
             if ("SPLIT".equals(b.getPaymentMode()) && b.getPayments() != null && !b.getPayments().isEmpty()) {
@@ -170,6 +177,11 @@ public class ReportsController {
         res.put("paymentMethods", paymentMethods);
         res.put("daily",          daily);
         res.put("topProducts",    topProducts);
+        res.put("gstTaxableValue", Math.round(totalTaxableValue * 100.0) / 100.0);
+        res.put("gstCgst",         Math.round(totalCgst  * 100.0) / 100.0);
+        res.put("gstSgst",         Math.round(totalSgst  * 100.0) / 100.0);
+        res.put("gstIgst",         Math.round(totalIgst  * 100.0) / 100.0);
+        res.put("gstTotal",        Math.round(totalGst   * 100.0) / 100.0);
         return res;
     }
 

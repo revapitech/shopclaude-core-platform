@@ -56,7 +56,7 @@ class ProductVariantStockTest {
             new BigDecimal("200"), new BigDecimal("499"), new BigDecimal("599"),
             stock, 5, null, null, false, false, null, true,
             "{\"Colour\":\"" + color + "\"}", false, "OTHER",
-            null, null, null
+            null, null, null, null, null
         );
     }
 
@@ -155,7 +155,7 @@ class ProductVariantStockTest {
             "Test Shirt", "Apparel", "Red", null, "TS-NEG", null,
             new BigDecimal("200"), new BigDecimal("499"), new BigDecimal("599"),
             -1, 5, null, null, false, false, null, true,
-            "{\"Colour\":\"Red\"}", false, "OTHER", null, null, null
+            "{\"Colour\":\"Red\"}", false, "OTHER", null, null, null, null, null
         );
 
         assertThatThrownBy(() -> productService.create(bad))
@@ -173,7 +173,7 @@ class ProductVariantStockTest {
             "Test Shirt", "Apparel", "Red", null, "TS-RED", null,
             new BigDecimal("200"), new BigDecimal("499"), new BigDecimal("599"),
             -5, 5, null, null, false, false, null, true,
-            "{\"Colour\":\"Red\"}", false, "OTHER", null, null, null
+            "{\"Colour\":\"Red\"}", false, "OTHER", null, null, null, null, null
         );
 
         assertThatThrownBy(() -> productService.update(productId, bad))

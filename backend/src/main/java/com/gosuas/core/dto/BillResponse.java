@@ -17,5 +17,10 @@ public record BillResponse(
         String paymentStatus,
         LocalDateTime billDate,
         List<BillItemResponse> items,
-        List<PaymentEntryResponse> payments
+        List<PaymentEntryResponse> payments,
+        BigDecimal taxableAmount,
+        BigDecimal cgst,
+        BigDecimal sgst,
+        BigDecimal igst,
+        BigDecimal totalGst
 ) {}
