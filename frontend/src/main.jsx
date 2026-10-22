@@ -45,7 +45,7 @@ axios.interceptors.response.use(
 );
 
 // Shop admin pages that can be opened directly via the URL hash (/#returns etc.)
-const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'print-labels', 'pdf-store'];
+const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'print-labels', 'pdf-store'];
 
 const FIELD_LABELS = {
   name: 'Product Name',
@@ -1489,6 +1489,20 @@ function App() {
   const [returnModal, setReturnModal] = useState(null);
   const [rentalEditError, setRentalEditError] = useState('');
 
+  // ── Damage Stock ───────────────────────────────────────────────────────────
+  const [damages, setDamages] = useState([]);
+  const [damageSearch, setDamageSearch] = useState('');
+  const [damagePage, setDamagePage] = useState(1);
+  const [damageError, setDamageError] = useState('');
+  const [showDamageForm, setShowDamageForm] = useState(false);
+  const [damageSku, setDamageSku] = useState('');
+  const [damageProduct, setDamageProduct] = useState(null);
+  const [damageSkuError, setDamageSkuError] = useState('');
+  const [damageSkuLoading, setDamageSkuLoading] = useState(false);
+  const [damageForm, setDamageForm] = useState({ qty: '', reason: 'OTHER', notes: '' });
+  const [damageSubmitError, setDamageSubmitError] = useState('');
+  const [damageSubmitLoading, setDamageSubmitLoading] = useState(false);
+
   // ── Sales Returns ──────────────────────────────────────────────────────────
   const [salesReturns, setSalesReturns] = useState([]);
   const [returnSearch, setReturnSearch] = useState('');
@@ -1659,6 +1673,16 @@ function App() {
     }
   };
 
+  const loadDamages = async () => {
+    try {
+      const res = await axios.get(`${API}/damage`);
+      setDamages(res.data);
+      setDamageError('');
+    } catch (e) {
+      setDamageError(e.response?.data?.error || 'Could not load damage entries.');
+    }
+  };
+
   useEffect(() => {
     const current = window.location.hash.replace(/^#\/?/, '');
     if (current === activePage || (!current && activePage === 'home')) return;
@@ -1691,6 +1715,7 @@ function App() {
     if (isLoggedIn && activePage === 'rental')
       axios.get(`${API}/rentals`).then(r => setRentals(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'returns') loadSalesReturns();
+    if (isLoggedIn && activePage === 'damage') loadDamages();
   }, [activePage, isLoggedIn]);
 
   useEffect(() => {
@@ -2508,6 +2533,9 @@ function App() {
           <button className={`nav-item ${activePage==='returns'?'nav-active':''}`} onClick={() => { setActivePage('returns'); setSidebarOpen(false); }}>
             🔄 Sales Returns
           </button>
+          <button className={`nav-item ${activePage==='damage'?'nav-active':''}`} onClick={() => { setActivePage('damage'); setSidebarOpen(false); }}>
+            🗑 Damage Stock
+          </button>
           <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }}>
             🏷 Print Labels
           </button>
@@ -2543,7 +2571,7 @@ function App() {
           <button className="hamburger-btn" onClick={e => { e.stopPropagation(); setSidebarOpen(o => !o); }}>
             {sidebarOpen ? '✕' : '☰'}
           </button>
-          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns' }[activePage] || 'Home'}</h2>
+          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
             <a href={`https://${getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
               title="Visit your store"
@@ -4546,6 +4574,229 @@ function App() {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Damage Stock page ── */}
+        {activePage === 'damage' && (() => {
+          const DAMAGE_REASONS = [
+            { value:'DAMAGED_IN_TRANSIT', label:'Damaged in Transit' },
+            { value:'EXPIRED',            label:'Expired' },
+            { value:'MANUFACTURING_DEFECT', label:'Manufacturing Defect' },
+            { value:'WATER_DAMAGE',       label:'Water Damage' },
+            { value:'BREAKAGE',           label:'Breakage' },
+            { value:'OTHER',              label:'Other' },
+          ];
+          const ITEMS_PER_PAGE = 15;
+          const dq = damageSearch.toLowerCase();
+          const filtered = damages.filter(d =>
+            !dq ||
+            (d.damageNo || '').toLowerCase().includes(dq) ||
+            (d.productName || '').toLowerCase().includes(dq) ||
+            (d.sku || '').toLowerCase().includes(dq) ||
+            (d.reason || '').toLowerCase().includes(dq)
+          );
+          const totalDamagePages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+          const pageDamages = filtered.slice((damagePage - 1) * ITEMS_PER_PAGE, damagePage * ITEMS_PER_PAGE);
+
+          const lookupDamageProduct = async () => {
+            if (!damageSku.trim()) return;
+            setDamageSkuError(''); setDamageSkuLoading(true); setDamageProduct(null);
+            try {
+              const res = await axios.get(`${API}/damage/product-lookup?sku=${encodeURIComponent(damageSku.trim())}`);
+              setDamageProduct(res.data);
+            } catch (e) {
+              setDamageSkuError(e.response?.data?.error || e.response?.data || 'Product not found');
+            } finally { setDamageSkuLoading(false); }
+          };
+
+          const submitDamage = async () => {
+            if (!damageProduct) { setDamageSubmitError('Look up a product first'); return; }
+            const qty = parseInt(damageForm.qty, 10);
+            if (!qty || qty <= 0) { setDamageSubmitError('Enter a valid damage quantity'); return; }
+            if (qty > damageProduct.stockQty) { setDamageSubmitError(`Quantity ${qty} exceeds current stock of ${damageProduct.stockQty}`); return; }
+            setDamageSubmitError(''); setDamageSubmitLoading(true);
+            try {
+              await axios.post(`${API}/damage`, {
+                sku: damageProduct.sku || damageSku.trim(),
+                damageQty: qty,
+                reason: damageForm.reason,
+                notes: damageForm.notes || null,
+              });
+              await loadDamages();
+              setShowDamageForm(false);
+              setDamageSku(''); setDamageProduct(null);
+              setDamageForm({ qty: '', reason: 'OTHER', notes: '' });
+              showToast('Damage entry recorded');
+            } catch (e) {
+              setDamageSubmitError(e.response?.data?.error || e.response?.data || 'Failed to record damage');
+            } finally { setDamageSubmitLoading(false); }
+          };
+
+          return (
+            <div className="page-content">
+              {/* Header row */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:12}}>
+                <div>
+                  <div style={{fontSize:13,color:'#6b7280'}}>Record products removed from sellable inventory due to damage, expiry, or defects.</div>
+                </div>
+                <button className="btn-primary" onClick={() => { setShowDamageForm(v=>!v); setDamageSkuError(''); setDamageSubmitError(''); }}>
+                  {showDamageForm ? '✕ Cancel' : '+ Record Damage'}
+                </button>
+              </div>
+
+              {/* Entry form */}
+              {showDamageForm && (
+                <div style={{background:'#f9fafb',border:'1.5px solid #e5e7eb',borderRadius:12,padding:'20px 24px',marginBottom:24}}>
+                  <h3 style={{margin:'0 0 16px',fontSize:16,color:'#1f2937'}}>New Damage Entry</h3>
+
+                  {/* SKU lookup */}
+                  <div style={{display:'flex',gap:10,alignItems:'flex-end',marginBottom:16}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">SKU or Barcode</label>
+                      <input placeholder="Enter SKU or scan barcode"
+                        value={damageSku}
+                        onChange={e => { setDamageSku(e.target.value); setDamageProduct(null); setDamageSkuError(''); }}
+                        onKeyDown={e => e.key === 'Enter' && lookupDamageProduct()}
+                        style={{marginTop:4}} />
+                    </div>
+                    <button className="btn-secondary" onClick={lookupDamageProduct} disabled={damageSkuLoading || !damageSku.trim()}
+                      style={{whiteSpace:'nowrap'}}>
+                      {damageSkuLoading ? 'Looking up…' : 'Look Up'}
+                    </button>
+                  </div>
+                  {damageSkuError && <div style={{fontSize:13,color:'#dc2626',marginBottom:12}}>{damageSkuError}</div>}
+
+                  {/* Product card */}
+                  {damageProduct && (
+                    <div style={{display:'flex',alignItems:'center',gap:14,background:'#fff',border:'1.5px solid #d1fae5',borderRadius:10,padding:'12px 16px',marginBottom:16}}>
+                      {damageProduct.imageUrl && (
+                        <img src={`${BACKEND}${damageProduct.imageUrl}`} alt=""
+                          style={{width:56,height:56,objectFit:'cover',borderRadius:8,flexShrink:0,background:'#f3f4f6'}} />
+                      )}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:700,fontSize:15,color:'#111827',marginBottom:2}}>{damageProduct.productName}</div>
+                        <div style={{fontSize:12,color:'#6b7280',fontFamily:'monospace'}}>SKU: {damageProduct.sku} &nbsp;|&nbsp; Barcode: {damageProduct.barcode}</div>
+                        {damageProduct.color && <div style={{fontSize:12,color:'#6b7280'}}>Colour: {damageProduct.color}</div>}
+                        <div style={{fontSize:13,fontWeight:600,color:'#1d4ed8',marginTop:4}}>Stock: {damageProduct.stockQty}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Form fields */}
+                  {damageProduct && (
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+                      <div>
+                        <label className="modal-label">Damage Quantity <span style={{color:'#dc2626'}}>*</span></label>
+                        <input type="number" min="1" max={damageProduct.stockQty} placeholder="e.g. 2"
+                          value={damageForm.qty}
+                          onChange={e => setDamageForm(f => ({...f, qty: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                      <div>
+                        <label className="modal-label">Reason</label>
+                        <select value={damageForm.reason}
+                          onChange={e => setDamageForm(f => ({...f, reason: e.target.value}))}
+                          style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                          {DAMAGE_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                        </select>
+                      </div>
+                      <div style={{gridColumn:'1 / -1'}}>
+                        <label className="modal-label">Notes <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+                        <input placeholder="e.g. Fell off shelf during restocking"
+                          value={damageForm.notes}
+                          onChange={e => setDamageForm(f => ({...f, notes: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                    </div>
+                  )}
+
+                  {damageSubmitError && <div style={{fontSize:13,color:'#dc2626',marginTop:12}}>{damageSubmitError}</div>}
+
+                  {damageProduct && (
+                    <div style={{marginTop:16,display:'flex',gap:10,justifyContent:'flex-end'}}>
+                      <button className="btn-secondary" onClick={() => { setShowDamageForm(false); setDamageSku(''); setDamageProduct(null); setDamageForm({ qty:'', reason:'OTHER', notes:'' }); }}>
+                        Cancel
+                      </button>
+                      <button className="btn-primary" onClick={submitDamage} disabled={damageSubmitLoading}>
+                        {damageSubmitLoading ? 'Recording…' : '✓ Confirm Damage'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Search */}
+              <div style={{marginBottom:16}}>
+                <input placeholder="Search by damage no, product, SKU or reason…"
+                  value={damageSearch}
+                  onChange={e => { setDamageSearch(e.target.value); setDamagePage(1); }}
+                  style={{width:'100%',padding:'9px 14px',border:'1.5px solid #e5e7eb',borderRadius:9,fontSize:13,outline:'none',boxSizing:'border-box'}} />
+              </div>
+
+              {/* Error */}
+              {damageError && (
+                <div style={{padding:'12px 16px',background:'#fef2f2',borderRadius:8,color:'#dc2626',fontSize:13,marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  {damageError}
+                  <button className="btn-secondary" style={{fontSize:12,padding:'4px 12px'}} onClick={loadDamages}>Retry</button>
+                </div>
+              )}
+
+              {/* History table */}
+              <div className="table-scroll-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Damage No</th>
+                      <th>Product</th>
+                      <th>SKU</th>
+                      <th style={{textAlign:'right'}}>Qty</th>
+                      <th style={{textAlign:'right'}}>Before</th>
+                      <th style={{textAlign:'right'}}>After</th>
+                      <th>Reason</th>
+                      <th>Notes</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageDamages.length === 0 ? (
+                      <tr><td colSpan={9} style={{textAlign:'center',padding:'32px',color:'#9ca3af'}}>
+                        {damages.length === 0 ? 'No damage entries yet. Use "Record Damage" to log damaged stock.' : 'No entries match your search.'}
+                      </td></tr>
+                    ) : pageDamages.map(d => (
+                      <tr key={d.id}>
+                        <td style={{fontFamily:'monospace',fontWeight:600,color:'#1d4ed8'}}>{d.damageNo}</td>
+                        <td style={{fontWeight:600}}>{d.productName}</td>
+                        <td style={{fontFamily:'monospace',fontSize:12,color:'#6b7280'}}>{d.sku}</td>
+                        <td style={{textAlign:'right',fontWeight:700,color:'#dc2626'}}>{d.damageQty}</td>
+                        <td style={{textAlign:'right',color:'#6b7280'}}>{d.stockBefore ?? '—'}</td>
+                        <td style={{textAlign:'right',color:'#374151'}}>{d.stockAfter ?? '—'}</td>
+                        <td>
+                          <span style={{display:'inline-block',padding:'2px 8px',borderRadius:12,fontSize:11,fontWeight:600,
+                            background: d.reason === 'EXPIRED' ? '#fef9c3' : d.reason === 'BREAKAGE' ? '#fee2e2' : '#f3f4f6',
+                            color: d.reason === 'EXPIRED' ? '#92400e' : d.reason === 'BREAKAGE' ? '#991b1b' : '#374151'}}>
+                            {(DAMAGE_REASONS.find(r => r.value === d.reason)?.label) || d.reason || '—'}
+                          </span>
+                        </td>
+                        <td style={{color:'#6b7280',fontSize:12,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.notes || '—'}</td>
+                        <td style={{fontSize:12,color:'#9ca3af',whiteSpace:'nowrap'}}>
+                          {d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {totalDamagePages > 1 && (
+                <div style={{display:'flex',justifyContent:'center',gap:6,marginTop:16}}>
+                  <button className="btn-secondary" disabled={damagePage === 1} onClick={() => setDamagePage(p => p - 1)}>‹ Prev</button>
+                  <span style={{padding:'6px 12px',fontSize:13,color:'#374151'}}>Page {damagePage} of {totalDamagePages}</span>
+                  <button className="btn-secondary" disabled={damagePage === totalDamagePages} onClick={() => setDamagePage(p => p + 1)}>Next ›</button>
                 </div>
               )}
             </div>
