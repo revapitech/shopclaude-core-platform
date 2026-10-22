@@ -1907,7 +1907,9 @@ function App() {
 
   const handleLogin = (token) => {
     localStorage.setItem('gosuas_token', token);
-    window.location.reload();
+    // Navigate to home (strip hash) so the app starts fresh instead of
+    // reloading at whatever protected page triggered the session-expiry redirect.
+    window.location.replace(window.location.pathname);
   };
 
   const handleLogout = () => {
