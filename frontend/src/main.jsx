@@ -3193,16 +3193,16 @@ function App() {
           {rptStats && (() => {
             const s = rptStats;
             const statCards = [
-              { label:'Total Orders',       value: s.totalOrders,                        color:'#1565c0', sub: `${s.offlineOrders} POS · ${s.onlineOrders} Online · ${s.shopifyOrders} Shopify` },
-              { label:'Total Revenue',      value: `₹${fmt(s.totalRevenue)}`,            color:'#2e7d32', sub: 'All channels combined' },
-              { label:'Offline (POS)',       value: `₹${fmt(s.offlineRevenue)}`,          color:'#1E3A5F', sub: `${s.offlineOrders} bills` },
-              { label:'Online Shop',        value: `₹${fmt(s.onlineRevenue)}`,           color:'#c2185b', sub: `${s.onlineOrders} orders` },
-              { label:'Shopify Imported',   value: `₹${fmt(s.shopifyRevenue)}`,          color:'#00695c', sub: `${s.shopifyOrders} orders` },
-              { label:'Avg Order Value',    value: `₹${fmt(s.avgOrderValue)}`,           color:'#6a1b9a', sub: 'Across all channels' },
-              { label:'POS Discount Given', value: `₹${fmt(s.offlineDiscount)}`,         color:'#e65100', sub: 'Total discounts offline' },
-              { label:'Refunds',            value: `₹${fmt(s.refundAmount)}`,            color:'#c62828', sub: `${s.refundCount} orders refunded` },
+              { label:'Total Orders',       value: s.totalOrders,                        color:'#2563EB', sub: `${s.offlineOrders} POS · ${s.onlineOrders} Online · ${s.shopifyOrders} Shopify` },
+              { label:'Total Revenue',      value: `₹${fmt(s.totalRevenue)}`,            color:'#059669', sub: 'All channels combined' },
+              { label:'Offline (POS)',       value: `₹${fmt(s.offlineRevenue)}`,          color:'#7C3AED', sub: `${s.offlineOrders} bills` },
+              { label:'Online Shop',        value: `₹${fmt(s.onlineRevenue)}`,           color:'#DB2777', sub: `${s.onlineOrders} orders` },
+              { label:'Shopify Imported',   value: `₹${fmt(s.shopifyRevenue)}`,          color:'#0D9488', sub: `${s.shopifyOrders} orders` },
+              { label:'Avg Order Value',    value: `₹${fmt(s.avgOrderValue)}`,           color:'#4F46E5', sub: 'Across all channels' },
+              { label:'POS Discount Given', value: `₹${fmt(s.offlineDiscount)}`,         color:'#F97316', sub: 'Total discounts offline' },
+              { label:'Refunds',            value: `₹${fmt(s.refundAmount)}`,            color:'#DC2626', sub: `${s.refundCount} orders refunded` },
               ...(tenantInfo?.subdomain === 'gosuas' ? [
-                { label:'Rental Deposits Returned', value: `₹${fmt(s.rentalReturnAmount)}`, color:'#8d6e63',
+                { label:'Rental Deposits Returned', value: `₹${fmt(s.rentalReturnAmount)}`, color:'#D97706',
                   sub: `${s.rentalReturnCount} returned · not counted in revenue${s.rentalDeductionAmount > 0 ? ` · ₹${fmt(s.rentalDeductionAmount)} deducted for damage` : ''}` },
               ] : []),
             ];
@@ -3241,9 +3241,9 @@ function App() {
                     ))}
                   </div>
                   <div className="rpt-bar-legend">
-                    <span><span className="rpt-leg-dot" style={{background:'#1565c0'}}/>POS</span>
-                    <span><span className="rpt-leg-dot" style={{background:'#c2185b'}}/>Online</span>
-                    <span><span className="rpt-leg-dot" style={{background:'#2e7d32'}}/>Shopify</span>
+                    <span><span className="rpt-leg-dot" style={{background:'#2563EB'}}/>POS</span>
+                    <span><span className="rpt-leg-dot" style={{background:'#DB2777'}}/>Online</span>
+                    <span><span className="rpt-leg-dot" style={{background:'#059669'}}/>Shopify</span>
                   </div>
                 </div>
 
@@ -3277,7 +3277,7 @@ function App() {
                       {s.gstCgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>CGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstCgst)}</td></tr>}
                       {s.gstSgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>SGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstSgst)}</td></tr>}
                       {s.gstIgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>IGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstIgst)}</td></tr>}
-                      <tr><td style={{padding:'6px 0',fontWeight:700,color:'#1E3A5F',borderTop:'2px solid #1E3A5F'}}>Total GST</td><td style={{textAlign:'right',fontWeight:700,color:'#1E3A5F',borderTop:'2px solid #1E3A5F'}}>₹{fmt(s.gstTotal)}</td></tr>
+                      <tr><td style={{padding:'6px 0',fontWeight:700,color:'#0D9488',borderTop:'2px solid #0D9488'}}>Total GST</td><td style={{textAlign:'right',fontWeight:700,color:'#0D9488',borderTop:'2px solid #0D9488'}}>₹{fmt(s.gstTotal)}</td></tr>
                     </tbody>
                   </table>
                   <p style={{fontSize:11.5,color:'#9ca3af',margin:'8px 0 0',lineHeight:1.5}}>GST shown is the tax component embedded in POS bills. This is not a substitute for a formal GST return — consult your accountant for ITC claims, reversals, and final tax liability.</p>
