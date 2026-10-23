@@ -33,7 +33,7 @@ axios.interceptors.request.use(config => {
 axios.interceptors.response.use(
   res => res,
   err => {
-    if (err.response?.status === 401 || err.response?.status === 403) {
+    if (err.response?.status === 401) {
       const isFileUpload = err.config?.headers?.['Content-Type']?.includes('multipart/form-data');
       if (!isFileUpload) {
         const token = localStorage.getItem('gosuas_token');
