@@ -3309,6 +3309,169 @@ function App() {
                   </table>
                 </div>
               )}
+
+            {/* ── Damage Stock Summary ── */}
+            {(() => {
+              const totalDamageQty = rptStats.totalDamageQty ?? 0;
+              const totalDamageEntries = rptStats.totalDamageEntries ?? 0;
+              const affectedSkuCount = rptStats.affectedSkuCount ?? 0;
+              const damageValue = rptStats.damageValue ?? null;
+              const damageByReason = rptStats.damageByReason ?? {};
+              const damageByProduct = rptStats.damageByProduct ?? [];
+              const damageEntries = rptStats.damageEntries ?? [];
+
+              const maxReasonQty = Math.max(1, ...Object.values(damageByReason));
+
+              function exportDamageByProductCsv() {
+                const rows = [['SKU','Product','Qty','Est. Value']];
+                damageByProduct.forEach(r => rows.push([r.sku, r.productName, r.qty, r.value ?? '']));
+                const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+                const a = document.createElement('a');
+                a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                a.download = 'damage_by_product.csv';
+                a.click();
+              }
+
+              function exportDamageEntriesCsv() {
+                const rows = [['Entry No','Date','SKU','Product','Qty','Reason','Note']];
+                damageEntries.forEach(r => rows.push([r.entryNumber, r.date, r.sku, r.productName, r.qty, r.reason, r.note ?? '']));
+                const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+                const a = document.createElement('a');
+                a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                a.download = 'damage_entries.csv';
+                a.click();
+              }
+
+              return (
+                <div style={{marginTop:'2rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'0.5rem',marginBottom:'1rem'}}>
+                    <span style={{fontSize:'1.25rem'}}>&#x26A0;</span>
+                    <h3 style={{margin:0,fontSize:'1.1rem',fontWeight:700,color:'var(--text)'}}>Damage Stock Summary</h3>
+                  </div>
+
+                  {totalDamageEntries === 0 ? (
+                    <div className="rpt-card" style={{textAlign:'center',padding:'2rem',color:'var(--text-muted)'}}>
+                      <div style={{fontSize:'2rem',marginBottom:'0.5rem'}}>&#x2714;</div>
+                      <div style={{fontWeight:600}}>No damage entries in this period</div>
+                      <div style={{fontSize:'0.85rem',marginTop:'0.25rem'}}>Record damage stock entries from the Damage Stock page.</div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Summary cards */}
+                      <div className="rpt-row" style={{marginBottom:'1rem'}}>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Total Damaged Units</div>
+                          <div className="rpt-card-value">{totalDamageQty}</div>
+                        </div>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Damage Entries</div>
+                          <div className="rpt-card-value">{totalDamageEntries}</div>
+                        </div>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Affected SKUs</div>
+                          <div className="rpt-card-value">{affectedSkuCount}</div>
+                        </div>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Est. Damage Value</div>
+                          <div className="rpt-card-value" style={{color:'var(--danger,#ef4444)'}}>
+                            {damageValue != null ? '₹' + Number(damageValue).toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Damage by reason */}
+                      {Object.keys(damageByReason).length > 0 && (
+                        <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                          <div style={{fontWeight:600,marginBottom:'0.75rem',fontSize:'0.9rem'}}>Damage by Reason</div>
+                          {Object.entries(damageByReason).sort((a,b)=>b[1]-a[1]).map(([reason, qty]) => (
+                            <div key={reason} className="rpt-pay-row">
+                              <span className="rpt-pay-label">{reason}</span>
+                              <div className="rpt-pay-bar-wrap">
+                                <div className="rpt-pay-bar" style={{width: Math.round((qty / maxReasonQty) * 100) + '%', background:'var(--danger,#ef4444)'}} />
+                              </div>
+                              <span className="rpt-pay-val">{qty} unit{qty !== 1 ? 's' : ''}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Damage by product table */}
+                      {damageByProduct.length > 0 && (
+                        <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                            <span style={{fontWeight:600,fontSize:'0.9rem'}}>Damage by Product / SKU</span>
+                            <button className="rpt-export-btn" onClick={exportDamageByProductCsv}>Export CSV</button>
+                          </div>
+                          <div style={{overflowX:'auto'}}>
+                            <table className="rpt-table">
+                              <thead>
+                                <tr>
+                                  <th>SKU</th>
+                                  <th>Product</th>
+                                  <th style={{textAlign:'right'}}>Qty</th>
+                                  <th style={{textAlign:'right'}}>Est. Value</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {damageByProduct.map((r,i) => (
+                                  <tr key={i}>
+                                    <td><code style={{fontSize:'0.8rem'}}>{r.sku}</code></td>
+                                    <td>{r.productName}</td>
+                                    <td style={{textAlign:'right'}}>{r.qty}</td>
+                                    <td style={{textAlign:'right',color:'var(--danger,#ef4444)'}}>
+                                      {r.value != null ? '₹' + Number(r.value).toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Damage entry log */}
+                      {damageEntries.length > 0 && (
+                        <div className="rpt-card">
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                            <span style={{fontWeight:600,fontSize:'0.9rem'}}>Damage Entry Log</span>
+                            <button className="rpt-export-btn" onClick={exportDamageEntriesCsv}>Export CSV</button>
+                          </div>
+                          <div style={{overflowX:'auto'}}>
+                            <table className="rpt-table">
+                              <thead>
+                                <tr>
+                                  <th>Entry No</th>
+                                  <th>Date</th>
+                                  <th>SKU</th>
+                                  <th>Product</th>
+                                  <th style={{textAlign:'right'}}>Qty</th>
+                                  <th>Reason</th>
+                                  <th>Note</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {damageEntries.map((r,i) => (
+                                  <tr key={i}>
+                                    <td><code style={{fontSize:'0.8rem'}}>{r.entryNumber}</code></td>
+                                    <td style={{whiteSpace:'nowrap'}}>{r.date}</td>
+                                    <td><code style={{fontSize:'0.8rem'}}>{r.sku}</code></td>
+                                    <td>{r.productName}</td>
+                                    <td style={{textAlign:'right'}}>{r.qty}</td>
+                                    <td>{r.reason}</td>
+                                    <td style={{color:'var(--text-muted)',fontSize:'0.85rem'}}>{r.note || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
             </>;
           })()}
 
