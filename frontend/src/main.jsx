@@ -4,7 +4,8 @@ import axios from 'axios';
 import './style.css';
 import LandingPage from './pages/LandingPage';
 
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8080/gosuas-core/api';
+const API     = import.meta.env.VITE_API_URL     ?? 'http://localhost:8080/gosuas-core/api';
+const BACKEND = import.meta.env.VITE_BACKEND_URL ?? API.replace(/\/api$/, '');
 
 function getSubdomain() {
   const host = window.location.hostname;
@@ -411,7 +412,6 @@ function Login({ onLogin }) {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const [shopInfo, setShopInfo] = useState({ name: '', logoUrl: null });
 
   useEffect(() => {
@@ -1528,7 +1528,6 @@ function App() {
   const [salesReturnsError, setSalesReturnsError] = useState('');
   const [returnStatusBusy, setReturnStatusBusy] = useState(null); // id of the return whose status is being changed
 
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const logoSrc = tenantInfo?.logoUrl ? `${BACKEND}${tenantInfo.logoUrl}` : '/logo.png';
 
   const UPGRADE_PLAN_PRICES = { STARTER: 999, PRO: 1699 }; // ₹/month, matches PLAN_CONFIG on the landing page
@@ -2134,10 +2133,9 @@ function App() {
     const variants = Object.entries(editAttrValues)
       .filter(([name]) => !['colour','color'].includes(name.trim().toLowerCase()))
       .map(([name, value]) => ({ name, value }));
-    const backendBase = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
     const makeSlot = (url) => ({
       file: null,
-      preview: url ? `${backendBase}${url}` : null,
+      preview: url ? `${BACKEND}${url}` : null,
       serverUrl: url || null,
     });
     // The colour photo lives inside imageUrl too (for display elsewhere), so exclude it here —
@@ -5744,7 +5742,6 @@ function ShopApp() {
   const [pdfForm, setPdfForm] = useState({ name: '', email: '', address: '', phone: '' });
   const [pdfPaying, setPdfPaying] = useState(false);
   const [pdfSuccess, setPdfSuccess] = useState(null); // email string after success
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const imgUrls = (p) => (p?.imageUrl || '').split(',').filter(Boolean);
   const imgSrc  = (url) => `${BACKEND}${url}`;
   const shopLogoSrc = shopInfo.logoUrl ? `${BACKEND}${shopInfo.logoUrl}` : '/logo.png';
@@ -6371,9 +6368,10 @@ function ShopApp() {
                         {!p.festiveOffer && isNew && p.stockQty > 0 && <div className="s2-new-badge">NEW</div>}
                         {p.featured && <div className="s2-fav-badge">❤</div>}
                         {urls.length > 0
-                          ? <img src={imgSrc(urls[0])} alt={p.name} className="s2-card-img" />
-                          : <div className="s2-card-placeholder"><span>💎</span></div>
-                        }
+                          ? <img src={imgSrc(urls[0])} alt={p.name} className="s2-card-img"
+                              onError={e => { e.currentTarget.style.display='none'; e.currentTarget.nextElementSibling.style.display='flex'; }} />
+                          : null}
+                        <div className="s2-card-placeholder" style={{display: urls.length > 0 ? 'none' : 'flex'}}><span>💎</span></div>
                         {p.stockQty > 0
                           ? <button className="s2-quick-add" onClick={e => { e.stopPropagation(); addToCart(p); }}>Add to Cart</button>
                           : <div className="s2-out-of-stock">Out of Stock</div>
