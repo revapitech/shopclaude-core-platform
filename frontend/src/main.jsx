@@ -46,7 +46,7 @@ axios.interceptors.response.use(
 );
 
 // Shop admin pages that can be opened directly via the URL hash (/#returns etc.)
-const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'print-labels', 'pdf-store'];
+const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'expenses', 'print-labels', 'pdf-store'];
 
 const FIELD_LABELS = {
   name: 'Product Name',
@@ -1503,6 +1503,24 @@ function App() {
   const [damageSubmitError, setDamageSubmitError] = useState('');
   const [damageSubmitLoading, setDamageSubmitLoading] = useState(false);
 
+  // ── Expenses state ──────────────────────────────────────────────────────────
+  const [expenses, setExpenses] = useState([]);
+  const [expenseLoading, setExpenseLoading] = useState(false);
+  const [expenseError, setExpenseError] = useState('');
+  const [expensePage, setExpensePage] = useState(1);
+  const [expenseSearch, setExpenseSearch] = useState('');
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('');
+  const [expensePaymentFilter, setExpensePaymentFilter] = useState('');
+  const [expenseDateFrom, setExpenseDateFrom] = useState('');
+  const [expenseDateTo, setExpenseDateTo] = useState('');
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const EXPENSE_FORM_EMPTY = { category: '', amount: '', expenseDate: new Date().toISOString().slice(0,10), description: '', paymentMethod: 'CASH', referenceNumber: '' };
+  const [expenseForm, setExpenseForm] = useState(EXPENSE_FORM_EMPTY);
+  const [expenseFormError, setExpenseFormError] = useState('');
+  const [expenseFormLoading, setExpenseFormLoading] = useState(false);
+  const [expenseEditId, setExpenseEditId] = useState(null);
+  const [expenseSummary, setExpenseSummary] = useState(null);
+
   // ── Sales Returns ──────────────────────────────────────────────────────────
   const [salesReturns, setSalesReturns] = useState([]);
   const [returnSearch, setReturnSearch] = useState('');
@@ -1682,6 +1700,105 @@ function App() {
     }
   };
 
+  const loadExpenses = async () => {
+    setExpenseLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (expenseDateFrom) params.set('from', expenseDateFrom);
+      if (expenseDateTo)   params.set('to', expenseDateTo);
+      const res = await axios.get(`${API}/expenses?${params}`);
+      setExpenses(res.data);
+      setExpenseError('');
+    } catch (e) {
+      setExpenseError(e.response?.data?.error || 'Could not load expenses.');
+    } finally {
+      setExpenseLoading(false);
+    }
+  };
+
+  const loadExpenseSummary = async () => {
+    try {
+      const res = await axios.get(`${API}/expenses/summary`);
+      setExpenseSummary(res.data);
+    } catch (e) {
+      // Non-critical — silent fail
+    }
+  };
+
+  // ── Expense CRUD handlers ──────────────────────────────────────────────────
+
+  const EXPENSE_CATEGORIES = [
+    { value:'DAILY_EXPENSE',  label:'Daily Expense' },
+    { value:'RENT',           label:'Rent' },
+    { value:'ELECTRICITY',    label:'Electricity' },
+    { value:'WATER_BILL',     label:'Water Bill' },
+    { value:'SALARY',         label:'Salary' },
+    { value:'TRANSPORT',      label:'Transport' },
+    { value:'OTHER_EXPENSE',  label:'Other Expense' },
+  ];
+  const EXPENSE_PAYMENT_METHODS = [
+    { value:'CASH',  label:'Cash' },
+    { value:'CARD',  label:'Card' },
+    { value:'UPI',   label:'UPI' },
+    { value:'OTHER', label:'Other' },
+  ];
+
+  const saveExpense = async (e) => {
+    e.preventDefault();
+    if (expenseFormLoading) return;
+    setExpenseFormError('');
+    if (!expenseForm.category) { setExpenseFormError('Category is required'); return; }
+    const amt = parseFloat(expenseForm.amount);
+    if (!expenseForm.amount || isNaN(amt) || amt <= 0) { setExpenseFormError('Amount must be greater than zero'); return; }
+    if (!expenseForm.expenseDate) { setExpenseFormError('Expense date is required'); return; }
+    setExpenseFormLoading(true);
+    try {
+      const payload = {
+        category:        expenseForm.category,
+        amount:          amt,
+        expenseDate:     expenseForm.expenseDate,
+        description:     expenseForm.description || null,
+        paymentMethod:   expenseForm.paymentMethod || 'CASH',
+        referenceNumber: expenseForm.referenceNumber || null,
+      };
+      if (expenseEditId) {
+        await axios.put(`${API}/expenses/${expenseEditId}`, payload);
+        showToast('Expense updated');
+      } else {
+        await axios.post(`${API}/expenses`, payload);
+        showToast('Expense added');
+      }
+      setShowExpenseForm(false);
+      setExpenseForm(EXPENSE_FORM_EMPTY);
+      setExpenseEditId(null);
+      await loadExpenses();
+      loadExpenseSummary();
+    } catch (err) {
+      setExpenseFormError(err.response?.data?.error || err.response?.data?.message || 'Failed to save expense');
+    } finally {
+      setExpenseFormLoading(false);
+    }
+  };
+
+  const deleteExpense = (id, category) => {
+    const catLabel = EXPENSE_CATEGORIES.find(c => c.value === category)?.label || category;
+    setConfirmDialog({
+      title: 'Delete Expense',
+      message: `Delete this ${catLabel} expense? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await axios.delete(`${API}/expenses/${id}`);
+          setExpenses(prev => prev.filter(ex => ex.id !== id));
+          loadExpenseSummary();
+          showToast('Expense deleted');
+        } catch (err) {
+          showToast('Failed to delete expense: ' + (err.response?.data?.error || err.message), 'error');
+        }
+      }
+    });
+  };
+
   useEffect(() => {
     const current = window.location.hash.replace(/^#\/?/, '');
     if (current === activePage || (!current && activePage === 'home')) return;
@@ -1698,7 +1815,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isLoggedIn) { loadProducts(); loadTenantInfo(); loadTenantCategories(); loadDigitalProducts(); }
+    if (isLoggedIn) { loadProducts(); loadTenantInfo(); loadTenantCategories(); loadDigitalProducts(); loadExpenseSummary(); }
   }, [isLoggedIn]);
 
   useEffect(() => {
@@ -1715,6 +1832,7 @@ function App() {
       axios.get(`${API}/rentals`).then(r => setRentals(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'returns') loadSalesReturns();
     if (isLoggedIn && activePage === 'damage') loadDamages();
+  if (isLoggedIn && activePage === 'expenses') loadExpenses();
   }, [activePage, isLoggedIn]);
 
   useEffect(() => {
@@ -2536,6 +2654,9 @@ function App() {
           <button className={`nav-item ${activePage==='damage'?'nav-active':''}`} onClick={() => { setActivePage('damage'); setSidebarOpen(false); }}>
             🗑 Damage Stock
           </button>
+          <button className={`nav-item ${activePage==='expenses'?'nav-active':''}`} onClick={() => { setActivePage('expenses'); setSidebarOpen(false); }}>
+            💸 Expenses
+          </button>
           <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }}>
             🏷 Print Labels
           </button>
@@ -2571,7 +2692,7 @@ function App() {
           <button className="hamburger-btn" onClick={e => { e.stopPropagation(); setSidebarOpen(o => !o); }}>
             {sidebarOpen ? '✕' : '☰'}
           </button>
-          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock' }[activePage] || 'Home'}</h2>
+          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock', expenses:'Expenses' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
             <a href={`https://${getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
               title="Visit your store"
@@ -2766,6 +2887,30 @@ function App() {
               >
                 {regeneratingBill ? 'Retrieving…' : '↺ Regenerate Bill'}
               </button>
+            </div>
+          )}
+        </section>
+
+        {/* ── Expense Quick Widget ── */}
+        <section style={{marginTop:24,paddingTop:20,borderTop:'1.5px solid #e5e7eb'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:10}}>
+            <h2 style={{margin:0,fontSize:16,fontWeight:700}}>💸 Expenses</h2>
+            <button className="btn-primary" style={{fontSize:13}} onClick={() => { setActivePage('expenses'); setSidebarOpen(false); }}>
+              + Add Expense
+            </button>
+          </div>
+          {expenseSummary && (
+            <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+              {[
+                { label:'Today',      value: expenseSummary.totalToday,  color:'#dc2626' },
+                { label:'This Week',  value: expenseSummary.totalWeek,   color:'#d97706' },
+                { label:'This Month', value: expenseSummary.totalMonth,  color:'#7c3aed' },
+              ].map(c => (
+                <div key={c.label} className="rpt-card" style={{flex:'1 1 140px',minWidth:0,borderTop:`3px solid ${c.color}`}}>
+                  <div className="rpt-card-label">{c.label}</div>
+                  <div className="rpt-card-value" style={{color:c.color}}>₹{fmt(c.value)}</div>
+                </div>
+              ))}
             </div>
           )}
         </section>
@@ -3457,6 +3602,122 @@ function App() {
                                     <td style={{textAlign:'right'}}>{r.qty}</td>
                                     <td>{r.reason}</td>
                                     <td style={{color:'var(--text-muted)',fontSize:'0.85rem'}}>{r.note || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── Expense Summary ── */}
+            {(() => {
+              const expenseTotal = rptStats.expenseTotal ?? 0;
+              const expenseByCat = rptStats.expenseByCat ?? {};
+              const expenseDaily = rptStats.expenseDaily ?? [];
+              const expenseCount = rptStats.expenseCount ?? 0;
+
+              const EXPENSE_CAT_LABELS = {
+                DAILY_EXPENSE:'Daily Expense', RENT:'Rent', ELECTRICITY:'Electricity',
+                WATER_BILL:'Water Bill', SALARY:'Salary', TRANSPORT:'Transport', OTHER_EXPENSE:'Other Expense',
+              };
+              const EXPENSE_CAT_COLORS = {
+                DAILY_EXPENSE:'#7C3AED', RENT:'#2563EB', ELECTRICITY:'#D97706',
+                WATER_BILL:'#0891B2', SALARY:'#059669', TRANSPORT:'#F97316', OTHER_EXPENSE:'#6B7280',
+              };
+              const catValues = Object.values(expenseByCat).map(v => Number(v));
+              const maxCatAmt = Math.max(1, ...catValues);
+
+              function exportExpenseCsv() {
+                const rows = [['Category','Amount (INR)']];
+                Object.entries(EXPENSE_CAT_LABELS).forEach(([k, label]) => {
+                  rows.push([label, Number(expenseByCat[k] || 0).toFixed(2)]);
+                });
+                const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+                const a = document.createElement('a');
+                a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                a.download = 'expense_report.csv';
+                a.click();
+              }
+
+              return (
+                <div style={{marginTop:'2rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'0.5rem',marginBottom:'1rem'}}>
+                    <span style={{fontSize:'1.25rem'}}>💸</span>
+                    <h3 style={{margin:0,fontSize:'1.1rem',fontWeight:700,color:'var(--text)'}}>Expense Summary</h3>
+                  </div>
+
+                  {expenseCount === 0 ? (
+                    <div className="rpt-card" style={{textAlign:'center',padding:'2rem',color:'var(--text-muted)'}}>
+                      <div style={{fontSize:'2rem',marginBottom:'0.5rem'}}>✔</div>
+                      <div style={{fontWeight:600}}>No expenses recorded in this period</div>
+                      <div style={{fontSize:'0.85rem',marginTop:'0.25rem'}}>Add expenses from the Expenses page.</div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Summary cards */}
+                      <div className="rpt-row" style={{marginBottom:'1rem'}}>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Total Expenses</div>
+                          <div className="rpt-card-value" style={{color:'var(--danger,#ef4444)'}}>
+                            {'₹' + Number(expenseTotal).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                          </div>
+                        </div>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Expense Entries</div>
+                          <div className="rpt-card-value">{expenseCount}</div>
+                        </div>
+                      </div>
+
+                      {/* Category breakdown */}
+                      <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                          <span style={{fontWeight:600,fontSize:'0.9rem'}}>Category Breakdown</span>
+                          <button className="rpt-export-btn" onClick={exportExpenseCsv}>Export CSV</button>
+                        </div>
+                        {Object.entries(EXPENSE_CAT_LABELS).map(([key, label]) => {
+                          const amt = Number(expenseByCat[key] || 0);
+                          return (
+                            <div key={key} className="rpt-pay-row">
+                              <span className="rpt-pay-label">{label}</span>
+                              <div className="rpt-pay-bar-wrap">
+                                <div className="rpt-pay-bar" style={{
+                                  width: amt > 0 ? Math.round((amt/maxCatAmt)*100)+'%' : '0%',
+                                  background: EXPENSE_CAT_COLORS[key] || '#6b7280'
+                                }} />
+                              </div>
+                              <span className="rpt-pay-val">
+                                {'₹' + amt.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Daily breakdown */}
+                      {expenseDaily.length > 0 && (
+                        <div className="rpt-card">
+                          <div style={{fontWeight:600,fontSize:'0.9rem',marginBottom:'0.75rem'}}>Daily Expense Breakdown</div>
+                          <div style={{overflowX:'auto'}}>
+                            <table className="rpt-table">
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th style={{textAlign:'right'}}>Amount (₹)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {expenseDaily.map((r,i) => (
+                                  <tr key={i}>
+                                    <td>{r.date}</td>
+                                    <td style={{textAlign:'right',color:'var(--danger,#ef4444)',fontWeight:600}}>
+                                      {'₹' + Number(r.amount).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -4960,6 +5221,292 @@ function App() {
                   <button className="btn-secondary" disabled={damagePage === 1} onClick={() => setDamagePage(p => p - 1)}>‹ Prev</button>
                   <span style={{padding:'6px 12px',fontSize:13,color:'#374151'}}>Page {damagePage} of {totalDamagePages}</span>
                   <button className="btn-secondary" disabled={damagePage === totalDamagePages} onClick={() => setDamagePage(p => p + 1)}>Next ›</button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Expenses page ── */}
+        {activePage === 'expenses' && (() => {
+          const EXPENSE_CAT_LABELS = {
+            DAILY_EXPENSE:'Daily Expense', RENT:'Rent', ELECTRICITY:'Electricity',
+            WATER_BILL:'Water Bill', SALARY:'Salary', TRANSPORT:'Transport', OTHER_EXPENSE:'Other Expense',
+          };
+          const EXPENSE_CAT_COLORS = {
+            DAILY_EXPENSE:'#7C3AED', RENT:'#2563EB', ELECTRICITY:'#D97706',
+            WATER_BILL:'#0891B2', SALARY:'#059669', TRANSPORT:'#F97316', OTHER_EXPENSE:'#6B7280',
+          };
+          const ITEMS_PER_PAGE = 15;
+
+          const lq = expenseSearch.toLowerCase();
+          const filtered = expenses.filter(ex => {
+            if (expenseCategoryFilter && ex.category !== expenseCategoryFilter) return false;
+            if (expensePaymentFilter && ex.paymentMethod !== expensePaymentFilter) return false;
+            if (lq && !(
+              (ex.description || '').toLowerCase().includes(lq) ||
+              (EXPENSE_CAT_LABELS[ex.category] || '').toLowerCase().includes(lq) ||
+              (ex.referenceNumber || '').toLowerCase().includes(lq)
+            )) return false;
+            return true;
+          });
+
+          const totalExpPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+          const pageExps = filtered.slice((expensePage - 1) * ITEMS_PER_PAGE, expensePage * ITEMS_PER_PAGE);
+
+          return (
+            <div className="page-content">
+              {/* Header */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:12}}>
+                <div style={{fontSize:13,color:'#6b7280'}}>Manage your daily, recurring, and one-time business expenses.</div>
+                <button className="btn-primary" onClick={() => {
+                  if (showExpenseForm && !expenseEditId) {
+                    setShowExpenseForm(false);
+                  } else {
+                    setExpenseForm(EXPENSE_FORM_EMPTY); setExpenseEditId(null); setExpenseFormError(''); setShowExpenseForm(true);
+                  }
+                }}>
+                  {showExpenseForm && !expenseEditId ? '✕ Cancel' : '+ Add Expense'}
+                </button>
+              </div>
+
+              {/* Summary cards */}
+              {expenseSummary && (
+                <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:20}}>
+                  {[
+                    { label:'Today',       value: expenseSummary.totalToday,    color:'#dc2626' },
+                    { label:'This Week',   value: expenseSummary.totalWeek,     color:'#d97706' },
+                    { label:'This Month',  value: expenseSummary.totalMonth,    color:'#7c3aed' },
+                    { label:'This Period', value: expenseSummary.totalForRange, color:'#0891b2' },
+                  ].map(c => (
+                    <div key={c.label} className="rpt-card" style={{flex:'1 1 130px',minWidth:0,borderTop:`3px solid ${c.color}`}}>
+                      <div className="rpt-card-label">{c.label}</div>
+                      <div className="rpt-card-value" style={{color:c.color}}>
+                        {'₹' + Number(c.value || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add / Edit form */}
+              {(showExpenseForm || expenseEditId) && (
+                <div style={{background:'#f9fafb',border:'1.5px solid #e5e7eb',borderRadius:12,padding:'20px 24px',marginBottom:24}}>
+                  <h3 style={{margin:'0 0 16px',fontSize:16,color:'#1f2937'}}>
+                    {expenseEditId ? 'Edit Expense' : 'New Expense'}
+                  </h3>
+                  <form onSubmit={saveExpense}>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))',gap:14}}>
+                      <div>
+                        <label className="modal-label">Category <span style={{color:'#dc2626'}}>*</span></label>
+                        <select value={expenseForm.category}
+                          onChange={e => setExpenseForm(f => ({...f, category: e.target.value}))}
+                          style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                          <option value="">Select category…</option>
+                          {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="modal-label">Amount (₹) <span style={{color:'#dc2626'}}>*</span></label>
+                        <input type="number" min="0.01" step="0.01" placeholder="e.g. 1500.00"
+                          value={expenseForm.amount}
+                          onChange={e => setExpenseForm(f => ({...f, amount: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                      <div>
+                        <label className="modal-label">Date <span style={{color:'#dc2626'}}>*</span></label>
+                        <input type="date"
+                          value={expenseForm.expenseDate}
+                          onChange={e => setExpenseForm(f => ({...f, expenseDate: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                      <div>
+                        <label className="modal-label">Payment Method</label>
+                        <select value={expenseForm.paymentMethod}
+                          onChange={e => setExpenseForm(f => ({...f, paymentMethod: e.target.value}))}
+                          style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                          {EXPENSE_PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                        </select>
+                      </div>
+                      <div style={{gridColumn:'1 / -1'}}>
+                        <label className="modal-label">Description <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+                        <input placeholder="e.g. Monthly shop rent for October"
+                          value={expenseForm.description}
+                          onChange={e => setExpenseForm(f => ({...f, description: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                      <div>
+                        <label className="modal-label">Reference No. <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+                        <input placeholder="e.g. REC-001"
+                          value={expenseForm.referenceNumber}
+                          onChange={e => setExpenseForm(f => ({...f, referenceNumber: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                    </div>
+                    {expenseFormError && <div style={{fontSize:13,color:'#dc2626',marginTop:12}}>{expenseFormError}</div>}
+                    <div style={{marginTop:16,display:'flex',gap:10,justifyContent:'flex-end'}}>
+                      <button type="button" className="btn-secondary" onClick={() => {
+                        setShowExpenseForm(false); setExpenseForm(EXPENSE_FORM_EMPTY); setExpenseEditId(null); setExpenseFormError('');
+                      }}>
+                        Cancel
+                      </button>
+                      <button type="submit" className="btn-primary" disabled={expenseFormLoading}>
+                        {expenseFormLoading ? 'Saving…' : (expenseEditId ? '✓ Update Expense' : '✓ Save Expense')}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Filters */}
+              <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+                <input placeholder="Search description, category, reference…"
+                  value={expenseSearch}
+                  onChange={e => { setExpenseSearch(e.target.value); setExpensePage(1); }}
+                  style={{flex:'1 1 200px',padding:'8px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}} />
+                <select value={expenseCategoryFilter}
+                  onChange={e => { setExpenseCategoryFilter(e.target.value); setExpensePage(1); }}
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none',flexShrink:0}}>
+                  <option value="">All Categories</option>
+                  {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+                <select value={expensePaymentFilter}
+                  onChange={e => { setExpensePaymentFilter(e.target.value); setExpensePage(1); }}
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none',flexShrink:0}}>
+                  <option value="">All Payment Methods</option>
+                  {EXPENSE_PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+                <input type="date" value={expenseDateFrom}
+                  onChange={e => { setExpenseDateFrom(e.target.value); setExpensePage(1); }}
+                  title="From date"
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none',flexShrink:0}} />
+                <span style={{fontSize:13,color:'#9ca3af',flexShrink:0}}>to</span>
+                <input type="date" value={expenseDateTo}
+                  onChange={e => { setExpenseDateTo(e.target.value); setExpensePage(1); }}
+                  title="To date"
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none',flexShrink:0}} />
+                {(expenseDateFrom || expenseDateTo) && (
+                  <button className="btn-secondary" style={{fontSize:12,padding:'6px 12px',flexShrink:0}}
+                    onClick={() => { setExpenseDateFrom(''); setExpenseDateTo(''); }}>
+                    Clear Dates
+                  </button>
+                )}
+                <button className="btn-secondary" style={{fontSize:12,padding:'6px 14px',flexShrink:0}}
+                  onClick={loadExpenses}>
+                  Apply
+                </button>
+              </div>
+
+              {/* Error */}
+              {expenseError && (
+                <div style={{padding:'12px 16px',background:'#fef2f2',borderRadius:8,color:'#dc2626',fontSize:13,marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  {expenseError}
+                  <button className="btn-secondary" style={{fontSize:12,padding:'4px 12px'}} onClick={loadExpenses}>Retry</button>
+                </div>
+              )}
+
+              {/* Loading */}
+              {expenseLoading && (
+                <div style={{textAlign:'center',padding:'32px',color:'#6b7280',fontSize:14}}>Loading expenses…</div>
+              )}
+
+              {/* Table */}
+              {!expenseLoading && (
+                <div className="table-scroll-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Category</th>
+                        <th>Description</th>
+                        <th>Payment</th>
+                        <th>Reference</th>
+                        <th style={{textAlign:'right'}}>Amount (₹)</th>
+                        <th style={{textAlign:'center'}}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageExps.length === 0 ? (
+                        <tr><td colSpan={7} style={{textAlign:'center',padding:'32px',color:'#9ca3af'}}>
+                          {expenses.length === 0
+                            ? 'No expenses yet. Click "+ Add Expense" to record your first expense.'
+                            : 'No expenses match the current filters.'}
+                        </td></tr>
+                      ) : pageExps.map(ex => (
+                        <tr key={ex.id}>
+                          <td style={{whiteSpace:'nowrap',color:'#374151'}}>
+                            {ex.expenseDate
+                              ? new Date(ex.expenseDate + 'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
+                              : '—'}
+                          </td>
+                          <td>
+                            <span style={{display:'inline-block',padding:'2px 10px',borderRadius:12,fontSize:11,fontWeight:700,
+                              background:(EXPENSE_CAT_COLORS[ex.category]||'#6B7280')+'18',
+                              color:EXPENSE_CAT_COLORS[ex.category]||'#6B7280',
+                              border:'1px solid '+(EXPENSE_CAT_COLORS[ex.category]||'#6B7280')+'44'}}>
+                              {EXPENSE_CAT_LABELS[ex.category] || ex.category}
+                            </span>
+                          </td>
+                          <td style={{color:'#4b5563',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                            {ex.description || '—'}
+                          </td>
+                          <td style={{color:'#6b7280',fontSize:12}}>{ex.paymentMethod || 'CASH'}</td>
+                          <td style={{color:'#9ca3af',fontSize:12,fontFamily:'monospace'}}>{ex.referenceNumber || '—'}</td>
+                          <td style={{textAlign:'right',fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>
+                            {'₹' + Number(ex.amount).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                          </td>
+                          <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
+                            <button className="btn-secondary" style={{fontSize:11,padding:'3px 10px',marginRight:4}}
+                              onClick={() => {
+                                setExpenseEditId(ex.id);
+                                setExpenseForm({
+                                  category: ex.category,
+                                  amount: String(ex.amount),
+                                  expenseDate: ex.expenseDate,
+                                  description: ex.description || '',
+                                  paymentMethod: ex.paymentMethod || 'CASH',
+                                  referenceNumber: ex.referenceNumber || '',
+                                });
+                                setShowExpenseForm(true);
+                                setExpenseFormError('');
+                                window.scrollTo({top:0,behavior:'smooth'});
+                              }}>
+                              Edit
+                            </button>
+                            <button style={{fontSize:11,padding:'3px 10px',background:'#fef2f2',color:'#dc2626',border:'1.5px solid #fecaca',borderRadius:6,cursor:'pointer',fontWeight:600}}
+                              onClick={() => deleteExpense(ex.id, ex.category)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {pageExps.length > 0 && (
+                      <tfoot>
+                        <tr style={{background:'#f9fafb',fontWeight:700}}>
+                          <td colSpan={5} style={{textAlign:'right',padding:'10px 16px',color:'#374151',fontSize:13}}>
+                            {filtered.length < expenses.length
+                              ? `Filtered Total (${filtered.length} entries):`
+                              : `Total (${expenses.length} entries):`}
+                          </td>
+                          <td style={{textAlign:'right',padding:'10px 16px',color:'#dc2626',fontWeight:800}}>
+                            {'₹' + filtered.reduce((s,ex) => s + parseFloat(ex.amount||0), 0)
+                              .toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                          </td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
+
+              {/* Pagination */}
+              {totalExpPages > 1 && (
+                <div style={{display:'flex',justifyContent:'center',gap:6,marginTop:16}}>
+                  <button className="btn-secondary" disabled={expensePage === 1} onClick={() => setExpensePage(p => p - 1)}>‹ Prev</button>
+                  <span style={{padding:'6px 12px',fontSize:13,color:'#374151'}}>Page {expensePage} of {totalExpPages}</span>
+                  <button className="btn-secondary" disabled={expensePage === totalExpPages} onClick={() => setExpensePage(p => p + 1)}>Next ›</button>
                 </div>
               )}
             </div>
