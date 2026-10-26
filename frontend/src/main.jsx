@@ -3457,6 +3457,70 @@ function App() {
                 </div>
               )}
 
+            {/* ── Profit & Loss Summary ── */}
+            {(() => {
+              const plGross    = Number(s.plGrossSales      ?? 0);
+              const plDisc     = Number(s.plDiscounts       ?? 0);
+              const plRef      = Number(s.plRefunds         ?? 0);
+              const plNet      = Number(s.plNetSalesRevenue ?? 0);
+              const plExp      = Number(s.plExpenses        ?? 0);
+              const plResult   = Number(s.plNetResult       ?? 0);
+              const plMargin   = s.plMarginPct;   // string or null
+              const plStatus   = s.plStatus;      // "PROFIT" | "LOSS" | "BREAKEVEN"
+              const inr = v => '₹' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+              const statusColor = plStatus === 'PROFIT' ? '#059669' : plStatus === 'LOSS' ? '#dc2626' : '#d97706';
+              const statusLabel = plStatus === 'PROFIT' ? 'Profit' : plStatus === 'LOSS' ? 'Loss' : 'Break-even';
+              return (
+                <div style={{marginTop:'2rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'0.5rem',marginBottom:'1rem'}}>
+                    <span style={{fontSize:'1.25rem'}}>📊</span>
+                    <h3 style={{margin:0,fontSize:'1.1rem',fontWeight:700,color:'var(--text)'}}>Estimated Operating Profit / Loss</h3>
+                  </div>
+                  <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                    <p style={{fontSize:11.5,color:'#9ca3af',margin:'0 0 12px',lineHeight:1.5}}>
+                      <strong>Formula:</strong> Net Sales Revenue = Gross Sales − Discounts − Refunds &nbsp;|&nbsp;
+                      Estimated Operating Result = Net Sales Revenue − Recorded Expenses.
+                      Cost of goods sold (inventory cost) and taxes are <em>not</em> included — consult your accountant for final profitability.
+                    </p>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                      <tbody>
+                        {[
+                          { label:'Gross Sales',              value: inr(plGross),    note:'POS (pre-discount) + Online + Shopify (incl. refunded)', color:'#1f2937' },
+                          { label:'− Discounts',              value: inr(plDisc),     note:'POS discounts applied',                                  color:'#f97316' },
+                          { label:'− Refunds',                value: inr(plRef),      note:'Shopify refunded orders',                                color:'#f97316' },
+                          { label:'Net Sales Revenue',        value: inr(plNet),      note:'Gross Sales − Discounts − Refunds',                      color:'#2563eb', bold:true },
+                          { label:'− Total Expenses',         value: inr(plExp),      note:'Recorded operating expenses (payment date in period)',    color:'#dc2626' },
+                        ].map(row => (
+                          <tr key={row.label} style={{borderBottom:'1px solid #f3f4f6'}}>
+                            <td style={{padding:'7px 0',color: row.bold ? row.color : '#374151',fontWeight: row.bold ? 700 : 400}}>{row.label}</td>
+                            <td style={{padding:'7px 0',color:'#6b7280',fontSize:11,paddingLeft:8}}>{row.note}</td>
+                            <td style={{padding:'7px 0',textAlign:'right',fontWeight: row.bold ? 700 : 500,color: row.color,whiteSpace:'nowrap'}}>{row.value}</td>
+                          </tr>
+                        ))}
+                        <tr style={{borderTop:'2px solid '+statusColor}}>
+                          <td style={{padding:'10px 0',fontWeight:800,color:statusColor,fontSize:14}}>
+                            Estimated Operating {statusLabel}
+                          </td>
+                          <td style={{padding:'10px 0',paddingLeft:8}}>
+                            {plMargin != null && (
+                              <span style={{fontSize:12,color:statusColor,fontWeight:600}}>Margin: {plMargin}%</span>
+                            )}
+                          </td>
+                          <td style={{padding:'10px 0',textAlign:'right',fontWeight:800,color:statusColor,fontSize:15,whiteSpace:'nowrap'}}>
+                            {inr(Math.abs(plResult))}
+                            <span style={{fontSize:11,marginLeft:6,padding:'2px 8px',borderRadius:99,
+                              background:statusColor+'18',color:statusColor,fontWeight:700,border:'1px solid '+statusColor+'44'}}>
+                              {statusLabel.toUpperCase()}
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ── Damage Stock Summary ── */}
             {(() => {
               const totalDamageQty = rptStats.totalDamageQty ?? 0;
@@ -3621,10 +3685,14 @@ function App() {
 
             {/* ── Expense Summary ── */}
             {(() => {
-              const expenseTotal = rptStats.expenseTotal ?? 0;
-              const expenseByCat = rptStats.expenseByCat ?? {};
-              const expenseDaily = rptStats.expenseDaily ?? [];
-              const expenseCount = rptStats.expenseCount ?? 0;
+              const expenseTotal   = rptStats.expenseTotal    ?? 0;
+              const expenseByCat   = rptStats.expenseByCat    ?? {};
+              const expenseDaily   = rptStats.expenseDaily    ?? [];
+              const expenseCount   = rptStats.expenseCount    ?? 0;
+              const expTotalToday  = rptStats.expTotalToday   ?? 0;
+              const expTotalWeek   = rptStats.expTotalWeek    ?? 0;
+              const expTotalMonth  = rptStats.expTotalMonth   ?? 0;
+              const expenseEntries = rptStats.expenseEntries  ?? [];
 
               const EXPENSE_CAT_LABELS = {
                 DAILY_EXPENSE:'Daily Expense', RENT:'Rent', ELECTRICITY:'Electricity',
@@ -3664,18 +3732,88 @@ function App() {
                     </div>
                   ) : (
                     <>
-                      {/* Summary cards */}
+                      {/* Summary cards — fixed periods + selected period */}
                       <div className="rpt-row" style={{marginBottom:'1rem'}}>
-                        <div className="rpt-card">
-                          <div className="rpt-card-label">Total Expenses</div>
-                          <div className="rpt-card-value" style={{color:'var(--danger,#ef4444)'}}>
-                            {'₹' + Number(expenseTotal).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                        {[
+                          { label:'Today',        value: expTotalToday,  color:'#dc2626' },
+                          { label:'This Week',     value: expTotalWeek,   color:'#d97706' },
+                          { label:'This Month',    value: expTotalMonth,  color:'#7c3aed' },
+                          { label:'This Period',   value: expenseTotal,   color:'#0891b2' },
+                        ].map(c => (
+                          <div key={c.label} className="rpt-card">
+                            <div className="rpt-card-label">{c.label}</div>
+                            <div className="rpt-card-value" style={{color:c.color}}>
+                              {'₹' + Number(c.value).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                            </div>
                           </div>
+                        ))}
+                      </div>
+
+                      {/* Expense Details table */}
+                      <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                          <span style={{fontWeight:600,fontSize:'0.9rem'}}>Expense Details ({expenseEntries.length}{expenseEntries.length === 200 ? '+' : ''} entries)</span>
+                          {expenseEntries.length > 0 && (
+                            <button className="rpt-export-btn" onClick={() => exportToCsv('expense_details.csv', expenseEntries, [
+                              { label:'Date',           key:'date' },
+                              { label:'Category',       key:'category' },
+                              { label:'Description',    key:'description' },
+                              { label:'Payment Method', key:'paymentMethod' },
+                              { label:'Reference',      key:'referenceNumber' },
+                              { label:'Amount (INR)',   key: r => Number(r.amount || 0).toFixed(2) },
+                            ])}>Export CSV</button>
+                          )}
                         </div>
-                        <div className="rpt-card">
-                          <div className="rpt-card-label">Expense Entries</div>
-                          <div className="rpt-card-value">{expenseCount}</div>
-                        </div>
+                        {expenseEntries.length === 0 ? (
+                          <div style={{textAlign:'center',padding:'1rem',color:'var(--text-muted)',fontSize:13}}>No expense records in this period.</div>
+                        ) : (
+                          <div style={{overflowX:'auto'}}>
+                            <table className="rpt-table">
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th>Category</th>
+                                  <th>Description</th>
+                                  <th>Payment</th>
+                                  <th>Reference</th>
+                                  <th style={{textAlign:'right'}}>Amount (₹)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {expenseEntries.map((e,i) => (
+                                  <tr key={e.id || i}>
+                                    <td style={{whiteSpace:'nowrap'}}>{e.date ? new Date(e.date + 'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                                    <td>
+                                      <span style={{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:700,
+                                        background:(EXPENSE_CAT_COLORS[e.category]||'#6B7280')+'18',
+                                        color:EXPENSE_CAT_COLORS[e.category]||'#6B7280',
+                                        border:'1px solid '+(EXPENSE_CAT_COLORS[e.category]||'#6B7280')+'44'}}>
+                                        {EXPENSE_CAT_LABELS[e.category] || e.category}
+                                      </span>
+                                    </td>
+                                    <td style={{maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'#4b5563'}}>{e.description || '—'}</td>
+                                    <td style={{color:'#6b7280',fontSize:12}}>{e.paymentMethod || '—'}</td>
+                                    <td style={{color:'#9ca3af',fontSize:12,fontFamily:'monospace'}}>{e.referenceNumber || '—'}</td>
+                                    <td style={{textAlign:'right',fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>
+                                      {'₹' + Number(e.amount || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr style={{background:'#f9fafb',fontWeight:700}}>
+                                  <td colSpan={5} style={{textAlign:'right',padding:'8px 12px',color:'#374151',fontSize:12}}>
+                                    Total ({expenseEntries.length} entries):
+                                  </td>
+                                  <td style={{textAlign:'right',padding:'8px 12px',color:'#dc2626',fontWeight:800}}>
+                                    {'₹' + expenseEntries.reduce((s,e) => s + parseFloat(e.amount||0), 0)
+                                      .toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
                       </div>
 
                       {/* Category breakdown */}
