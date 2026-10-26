@@ -81,6 +81,8 @@ public class ProductService {
                 .description(request.description())
                 .subcategory(request.subcategory())
                 .variantAttrs(request.variantAttrs())
+                .hsnCode(request.hsnCode())
+                .gstRate(request.gstRate())
                 .active(request.active() != null ? request.active() : Boolean.FALSE)
                 .festiveOffer(request.festiveOffer() != null ? request.festiveOffer() : Boolean.FALSE)
                 // Choosing "Rental" as the product type always makes it rental-eligible,
@@ -181,6 +183,9 @@ public class ProductService {
         if (request.festiveOffer() != null) product.setFestiveOffer(request.festiveOffer());
         if (request.subcategory() != null) product.setSubcategory(request.subcategory());
         if (request.active() != null) product.setActive(request.active());
+        if (request.hsnCode() != null) product.setHsnCode(request.hsnCode());
+        // Allow explicitly setting gstRate to null (to remove GST from a product)
+        product.setGstRate(request.gstRate());
         if (request.productType() != null) product.setProductType(request.productType());
         boolean isRental = "RENTAL".equalsIgnoreCase(product.getProductType());
         if (isRental) product.setRentalAvailable(true);

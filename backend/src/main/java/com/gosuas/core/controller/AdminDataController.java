@@ -104,6 +104,8 @@ public class AdminDataController {
             m.put("financialStatus",   b.getPaymentStatus()   != null ? b.getPaymentStatus()   : "paid");
             m.put("fulfillmentStatus", "fulfilled");
             m.put("paymentMethod",     b.getPaymentMode()     != null ? b.getPaymentMode()     : "");
+            m.put("subTotal",          b.getSubTotal()        != null ? b.getSubTotal()        : 0);
+            m.put("discountAmount",    b.getDiscountAmount()  != null ? b.getDiscountAmount()  : 0);
             m.put("total",             b.getGrandTotal()      != null ? b.getGrandTotal()      : 0);
             m.put("orderedAt",         b.getBillDate()        != null ? b.getBillDate().toString() : "");
             m.put("city",              "");

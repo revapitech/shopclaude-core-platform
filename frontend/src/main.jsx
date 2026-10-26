@@ -4,7 +4,8 @@ import axios from 'axios';
 import './style.css';
 import LandingPage from './pages/LandingPage';
 
-const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8080/gosuas-core/api';
+const API     = import.meta.env.VITE_API_URL     ?? 'http://localhost:8080/gosuas-core/api';
+const BACKEND = import.meta.env.VITE_BACKEND_URL ?? API.replace(/\/api$/, '');
 
 function getSubdomain() {
   const host = window.location.hostname;
@@ -33,7 +34,7 @@ axios.interceptors.request.use(config => {
 axios.interceptors.response.use(
   res => res,
   err => {
-    if (err.response?.status === 401 || err.response?.status === 403) {
+    if (err.response?.status === 401) {
       const isFileUpload = err.config?.headers?.['Content-Type']?.includes('multipart/form-data');
       if (!isFileUpload) {
         const token = localStorage.getItem('gosuas_token');
@@ -43,6 +44,9 @@ axios.interceptors.response.use(
     return Promise.reject(err);
   }
 );
+
+// Shop admin pages that can be opened directly via the URL hash (/#returns etc.)
+const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'print-labels', 'pdf-store'];
 
 const FIELD_LABELS = {
   name: 'Product Name',
@@ -408,7 +412,6 @@ function Login({ onLogin }) {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const [shopInfo, setShopInfo] = useState({ name: '', logoUrl: null });
 
   useEffect(() => {
@@ -606,7 +609,10 @@ function printBillReceipt(bill, shopName = 'GOSUAS') {
   <div class="info-row"><span>Bill No:</span><span>${bill.billNo || 'N/A'}</span></div>
   <div class="info-row"><span>Date:</span><span>${date}</span></div>
   <div class="info-row"><span>Customer:</span><span>${bill.customerName || 'Walk-in'}</span></div>
-  <div class="info-row"><span>Payment:</span><span>${bill.paymentMode || 'UPI'}</span></div>
+  ${bill.paymentMode === 'SPLIT' && bill.payments && bill.payments.length > 0
+    ? `<div class="info-row"><span>Payment:</span><span>Split</span></div>` +
+      bill.payments.map(p => `<div class="info-row" style="font-size:11px;padding-left:10px"><span>${p.method}</span><span>₹${fmt(p.amount)}</span></div>`).join('')
+    : `<div class="info-row"><span>Payment:</span><span>${bill.paymentMode || 'CASH'}</span></div>`}
   <div class="dash"></div>
   <table>
     <thead>
@@ -619,6 +625,12 @@ function printBillReceipt(bill, shopName = 'GOSUAS') {
   <div class="dash"></div>
   <div class="total-row"><span>Sub Total</span><span>₹${fmt(bill.subTotal)}</span></div>
   ${Number(bill.discountAmount) > 0 ? `<div class="total-row"><span>Discount</span><span>- ₹${fmt(bill.discountAmount)}</span></div>` : ''}
+  ${Number(bill.totalGst) > 0 ? `
+  <div class="total-row" style="font-size:11px;color:#555"><span>Taxable Value</span><span>₹${fmt(bill.taxableAmount)}</span></div>
+  ${Number(bill.cgst) > 0 ? `<div class="total-row" style="font-size:11px;color:#555"><span>CGST</span><span>₹${fmt(bill.cgst)}</span></div>` : ''}
+  ${Number(bill.sgst) > 0 ? `<div class="total-row" style="font-size:11px;color:#555"><span>SGST</span><span>₹${fmt(bill.sgst)}</span></div>` : ''}
+  ${Number(bill.igst) > 0 ? `<div class="total-row" style="font-size:11px;color:#555"><span>IGST</span><span>₹${fmt(bill.igst)}</span></div>` : ''}
+  <div class="total-row" style="font-size:11px;color:#555"><span>Total GST</span><span>₹${fmt(bill.totalGst)}</span></div>` : ''}
   <div class="grand"><span>TOTAL</span><span>₹${fmt(bill.grandTotal)}</span></div>
   <div class="dash"></div>
   <p class="status">★ ${bill.paymentStatus || 'PAID'} ★</p>
@@ -1385,7 +1397,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [products, setProducts] = useState([]);
-  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '' };
+  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '', hsnCode: '', gstRate: '' };
   const [form, setForm] = useState(EMPTY_FORM);
   const makeEmptyImageSlots = (n) => Array.from({length:n}, () => ({file:null,preview:null}));
   const [imageSlots, setImageSlots] = useState(makeEmptyImageSlots(2));
@@ -1393,6 +1405,8 @@ function App() {
   const [barcode, setBarcode] = useState('');
   const [cart, setCart] = useState([]);
   const [lastBill, setLastBill] = useState(null);
+  const [lastBillId, setLastBillId] = useState(null);
+  const [regeneratingBill, setRegeneratingBill] = useState(false);
   const [scanError, setScanError] = useState('');
   const [billError, setBillError] = useState('');
   const [inventorySearch, setInventorySearch] = useState('');
@@ -1413,9 +1427,17 @@ function App() {
   const [custNameInput, setCustNameInput] = useState('');
   const [custMobileInput, setCustMobileInput] = useState('');
   const [custLookupFound, setCustLookupFound] = useState(false);
+  const [paymentType, setPaymentType] = useState('CASH');
+  const [splitEntries, setSplitEntries] = useState([{ method: 'CASH', amount: '' }]);
+  const [splitError, setSplitError] = useState('');
   const [editModal, setEditModal] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [activePage, setActivePage] = useState('home');
+  // The current page lives in the URL hash (e.g. /#returns) so a page can be opened
+  // directly or bookmarked, and survives a browser refresh instead of falling back to Home.
+  const [activePage, setActivePage] = useState(() => {
+    const h = window.location.hash.replace(/^#\/?/, '');
+    return ADMIN_PAGES.includes(h) ? h : 'home';
+  });
   const [tenantCategories, setTenantCategories] = useState([]);
   const [newCatDraft, setNewCatDraft] = useState({ name: '', attributes: [] });
   const [newAttrDraft, setNewAttrDraft] = useState({ name: '', options: '' });
@@ -1467,6 +1489,20 @@ function App() {
   const [returnModal, setReturnModal] = useState(null);
   const [rentalEditError, setRentalEditError] = useState('');
 
+  // ── Damage Stock ───────────────────────────────────────────────────────────
+  const [damages, setDamages] = useState([]);
+  const [damageSearch, setDamageSearch] = useState('');
+  const [damagePage, setDamagePage] = useState(1);
+  const [damageError, setDamageError] = useState('');
+  const [showDamageForm, setShowDamageForm] = useState(false);
+  const [damageSku, setDamageSku] = useState('');
+  const [damageProduct, setDamageProduct] = useState(null);
+  const [damageSkuError, setDamageSkuError] = useState('');
+  const [damageSkuLoading, setDamageSkuLoading] = useState(false);
+  const [damageForm, setDamageForm] = useState({ qty: '', reason: 'OTHER', notes: '' });
+  const [damageSubmitError, setDamageSubmitError] = useState('');
+  const [damageSubmitLoading, setDamageSubmitLoading] = useState(false);
+
   // ── Sales Returns ──────────────────────────────────────────────────────────
   const [salesReturns, setSalesReturns] = useState([]);
   const [returnSearch, setReturnSearch] = useState('');
@@ -1482,8 +1518,16 @@ function App() {
   const [returnFormMeta, setReturnFormMeta] = useState({ returnReason: '', remarks: '', refundMode: 'CASH' });
   const [returnSubmitError, setReturnSubmitError] = useState('');
   const [returnSubmitLoading, setReturnSubmitLoading] = useState(false);
+  const [returnMode, setReturnMode] = useState('bill'); // 'bill' | 'direct'
+  const [returnDirectSku, setReturnDirectSku] = useState('');
+  const [returnDirectProduct, setReturnDirectProduct] = useState(null);
+  const [returnDirectError, setReturnDirectError] = useState('');
+  const [returnDirectLoading, setReturnDirectLoading] = useState(false);
+  const [returnDirectItems, setReturnDirectItems] = useState([]);
+  const [returnDirectCustomer, setReturnDirectCustomer] = useState({ name: '', mobile: '' });
+  const [salesReturnsError, setSalesReturnsError] = useState('');
+  const [returnStatusBusy, setReturnStatusBusy] = useState(null); // id of the return whose status is being changed
 
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const logoSrc = tenantInfo?.logoUrl ? `${BACKEND}${tenantInfo.logoUrl}` : '/logo.png';
 
   const UPGRADE_PLAN_PRICES = { STARTER: 999, PRO: 1699 }; // ₹/month, matches PLAN_CONFIG on the landing page
@@ -1567,6 +1611,9 @@ function App() {
       if (shopEditModal?.bankBranchName !== undefined) infoUpdate.bankBranchName = shopEditModal.bankBranchName;
       if (shopEditModal?.razorpayMerchantKeyId !== undefined) infoUpdate.razorpayMerchantKeyId = shopEditModal.razorpayMerchantKeyId;
       if (shopEditModal?.razorpayMerchantKeySecret) infoUpdate.razorpayMerchantKeySecret = shopEditModal.razorpayMerchantKeySecret;
+      if (shopEditModal?.gstin !== undefined) infoUpdate.gstin = shopEditModal.gstin;
+      infoUpdate.gstRegistered = String(shopEditModal?.gstRegistered || false);
+      if (shopEditModal?.supplyType) infoUpdate.supplyType = shopEditModal.supplyType;
       if (Object.keys(infoUpdate).length > 0) {
         const res = await axios.put(`${API}/tenant/info`, infoUpdate);
         setTenantInfo(res.data);
@@ -1619,8 +1666,36 @@ function App() {
     try {
       const res = await axios.get(`${API}/returns`);
       setSalesReturns(res.data);
-    } catch (e) {}
+      setSalesReturnsError('');
+    } catch (e) {
+      setSalesReturnsError(e.response?.data?.error || 'Could not load returns. Check your connection and try again.');
+    }
   };
+
+  const loadDamages = async () => {
+    try {
+      const res = await axios.get(`${API}/damage`);
+      setDamages(res.data);
+      setDamageError('');
+    } catch (e) {
+      setDamageError(e.response?.data?.error || 'Could not load damage entries.');
+    }
+  };
+
+  useEffect(() => {
+    const current = window.location.hash.replace(/^#\/?/, '');
+    if (current === activePage || (!current && activePage === 'home')) return;
+    window.location.hash = activePage;
+  }, [activePage]);
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const h = window.location.hash.replace(/^#\/?/, '');
+      setActivePage(ADMIN_PAGES.includes(h) ? h : 'home');
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   useEffect(() => {
     if (isLoggedIn) { loadProducts(); loadTenantInfo(); loadTenantCategories(); loadDigitalProducts(); }
@@ -1639,6 +1714,7 @@ function App() {
     if (isLoggedIn && activePage === 'rental')
       axios.get(`${API}/rentals`).then(r => setRentals(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'returns') loadSalesReturns();
+    if (isLoggedIn && activePage === 'damage') loadDamages();
   }, [activePage, isLoggedIn]);
 
   useEffect(() => {
@@ -1830,7 +1906,9 @@ function App() {
 
   const handleLogin = (token) => {
     localStorage.setItem('gosuas_token', token);
-    window.location.reload();
+    // Navigate to home (strip hash) so the app starts fresh instead of
+    // reloading at whatever protected page triggered the session-expiry redirect.
+    window.location.replace(window.location.pathname);
   };
 
   const handleLogout = () => {
@@ -1935,6 +2013,7 @@ function App() {
         name: form.name, category: form.category, subcategory: null,
         purchasePrice: Number(form.purchasePrice), ...pricing, stockQty: Number(form.stockQty),
         lowStockAlertQty: null, imageUrl, active: form.showToWebsite, festiveOffer: form.festiveOffer,
+        hsnCode: form.hsnCode || null, gstRate: form.gstRate !== '' ? Number(form.gstRate) : null,
         rentalAvailable: form.rentalAvailable, productType: form.productType,
         description: form.description || null,
       };
@@ -2002,7 +2081,7 @@ function App() {
     setCart(prev => {
       const existing = prev.find(i => i.barcode === found.barcode);
       if (existing) return prev.map(i => i.barcode === found.barcode ? { ...i, quantity: i.quantity + 1 } : i);
-      return [...prev, { barcode: found.barcode, name: found.name, quantity: 1, price: found.sellingPrice }];
+      return [...prev, { barcode: found.barcode, name: found.name, quantity: 1, price: found.sellingPrice, gstRate: found.gstRate ?? null, hsnCode: found.hsnCode ?? null }];
     });
     setBarcode('');
     setScanError('');
@@ -2054,10 +2133,9 @@ function App() {
     const variants = Object.entries(editAttrValues)
       .filter(([name]) => !['colour','color'].includes(name.trim().toLowerCase()))
       .map(([name, value]) => ({ name, value }));
-    const backendBase = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
     const makeSlot = (url) => ({
       file: null,
-      preview: url ? `${backendBase}${url}` : null,
+      preview: url ? `${BACKEND}${url}` : null,
       serverUrl: url || null,
     });
     // The colour photo lives inside imageUrl too (for display elsewhere), so exclude it here —
@@ -2112,6 +2190,8 @@ function App() {
       rentalAvailable: p.rentalAvailable ?? false,
       showToWebsite: p.active ?? false,
       imageSlots: Array.from({length: slotCount}, (_, i) => makeSlot(existingUrls[i])),
+      hsnCode: p.hsnCode || '',
+      gstRate: p.gstRate != null ? String(p.gstRate) : '',
     });
   };
 
@@ -2178,6 +2258,8 @@ function App() {
       festiveOffer: editModal.festiveOffer ?? false,
       rentalAvailable: editModal.rentalAvailable ?? false,
       active: editModal.showToWebsite,
+      hsnCode: editModal.hsnCode || null,
+      gstRate: editModal.gstRate !== '' && editModal.gstRate != null ? Number(editModal.gstRate) : null,
     };
       if (editAttrs.length > 0) {
         const color = attrVals[editAttrs[0]?.name] || null;
@@ -2285,29 +2367,33 @@ function App() {
     }
   };
 
-  const generateBill = async (customerName, customerMobile) => {
+  const generateBill = async (customerName, customerMobile, pmtType, pmtSplitEntries) => {
     try {
       const subtotal = cart.reduce((s, i) => s + Number(i.price) * i.quantity, 0);
       const discountAmount = calcDiscount(subtotal);
+      const isSplit = pmtType === 'SPLIT' && pmtSplitEntries && pmtSplitEntries.length > 0;
       const payload = {
         customerName: (customerName || '').trim() || 'Walk-in Customer',
         customerMobile: (customerMobile || '').trim(),
         discountAmount,
-        paymentMode: 'UPI',
+        paymentMode: isSplit ? null : pmtType,
+        splitPayments: isSplit
+          ? pmtSplitEntries.map(e => ({ method: e.method, amount: parseFloat(e.amount) }))
+          : null,
         items: cart.map(i => ({ barcode: i.barcode, quantity: i.quantity }))
       };
       const res = await axios.post(`${API}/bills`, payload);
       setLastBill(res.data);
+      setLastBillId(res.data.id);
       setCart([]);
       setDiscountInput('');
       setDiscountType('AMOUNT');
       setBillError('');
       loadProducts();
       printBillReceipt(res.data, tenantInfo?.name);
-      // Give the print job a few seconds to go out, then reset the session so the
-      // screen is clean and the barcode field is refocused for the next customer.
+      // Refocus the barcode field for the next customer. lastBill stays visible so
+      // the cashier can still regenerate the receipt; they dismiss it with the × button.
       setTimeout(() => {
-        setLastBill(null);
         barcodeInputRef.current?.focus();
       }, 3000);
       showToast('Bill Successfully generated');
@@ -2408,7 +2494,7 @@ function App() {
                   onError={e => { e.currentTarget.onerror = null; e.currentTarget.style.display = 'none'; }} />
               : <div className="sidebar-logo-img" style={{display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,background:'rgba(255,255,255,0.15)'}}>🏪</div>
             }
-            <button title="Edit shop name & logo" onClick={() => { setShopEditModal({name: tenantInfo?.name || '', address: tenantInfo?.shopAddress || '', phoneNumber: tenantInfo?.phoneNumber || '', bankAccountNumber: tenantInfo?.bankAccountNumber || '', confirmBankAccountNumber: tenantInfo?.bankAccountNumber || '', bankAccountHolderName: tenantInfo?.bankAccountHolderName || '', bankIfscCode: tenantInfo?.bankIfscCode || '', bankBranchName: tenantInfo?.bankBranchName || '', razorpayMerchantKeyId: tenantInfo?.razorpayMerchantKeyId || '', razorpayMerchantKeySecret: ''}); setRzpHelpOpen(false); setShopLogoFile(null); setShopLogoPreview(null); }}
+            <button title="Edit shop name & logo" onClick={() => { setShopEditModal({name: tenantInfo?.name || '', address: tenantInfo?.shopAddress || '', phoneNumber: tenantInfo?.phoneNumber || '', bankAccountNumber: tenantInfo?.bankAccountNumber || '', confirmBankAccountNumber: tenantInfo?.bankAccountNumber || '', bankAccountHolderName: tenantInfo?.bankAccountHolderName || '', bankIfscCode: tenantInfo?.bankIfscCode || '', bankBranchName: tenantInfo?.bankBranchName || '', razorpayMerchantKeyId: tenantInfo?.razorpayMerchantKeyId || '', razorpayMerchantKeySecret: '', gstin: tenantInfo?.gstin || '', gstRegistered: tenantInfo?.gstRegistered || false, supplyType: tenantInfo?.supplyType || 'INTRA'}); setRzpHelpOpen(false); setShopLogoFile(null); setShopLogoPreview(null); }}
               style={{position:'absolute',bottom:-4,right:-4,width:20,height:20,background:'#fff',border:'1.5px solid #d1d5db',borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,padding:0,lineHeight:1}}>
               ✏️
             </button>
@@ -2445,7 +2531,10 @@ function App() {
             💎 My Plan
           </button>
           <button className={`nav-item ${activePage==='returns'?'nav-active':''}`} onClick={() => { setActivePage('returns'); setSidebarOpen(false); }}>
-            ↩ Sales Returns
+            🔄 Sales Returns
+          </button>
+          <button className={`nav-item ${activePage==='damage'?'nav-active':''}`} onClick={() => { setActivePage('damage'); setSidebarOpen(false); }}>
+            🗑 Damage Stock
           </button>
           <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }}>
             🏷 Print Labels
@@ -2482,7 +2571,7 @@ function App() {
           <button className="hamburger-btn" onClick={e => { e.stopPropagation(); setSidebarOpen(o => !o); }}>
             {sidebarOpen ? '✕' : '☰'}
           </button>
-          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns' }[activePage] || 'Home'}</h2>
+          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
             <a href={`https://${getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
               title="Visit your store"
@@ -2591,15 +2680,50 @@ function App() {
                   <span>Total</span>
                   <strong>₹{(subtotal - discount).toFixed(2)}</strong>
                 </div>
+                {tenantInfo?.gstRegistered && (() => {
+                  const grandTotal = subtotal - discount;
+                  const isInter = tenantInfo?.supplyType === 'INTER';
+                  let totalTaxable = 0, totalCgst = 0, totalSgst = 0, totalIgst = 0;
+                  cart.forEach(i => {
+                    const rate = i.gstRate ? Number(i.gstRate) : 0;
+                    const effectiveLine = (Number(i.price) * i.quantity) * (subtotal > 0 ? grandTotal / subtotal : 1);
+                    if (rate > 0) {
+                      const taxable = effectiveLine / (1 + rate / 100);
+                      const gst = effectiveLine - taxable;
+                      totalTaxable += taxable;
+                      if (isInter) totalIgst += gst;
+                      else { totalCgst += gst / 2; totalSgst += gst / 2; }
+                    } else {
+                      totalTaxable += effectiveLine;
+                    }
+                  });
+                  const totalGst = totalCgst + totalSgst + totalIgst;
+                  if (totalGst === 0) return null;
+                  return (
+                    <div className="gst-breakdown">
+                      <div className="cart-total-row gst-row"><span>Taxable Value</span><span>₹{totalTaxable.toFixed(2)}</span></div>
+                      {isInter
+                        ? <div className="cart-total-row gst-row"><span>IGST</span><span>₹{totalIgst.toFixed(2)}</span></div>
+                        : <><div className="cart-total-row gst-row"><span>CGST</span><span>₹{totalCgst.toFixed(2)}</span></div>
+                           <div className="cart-total-row gst-row"><span>SGST</span><span>₹{totalSgst.toFixed(2)}</span></div></>
+                      }
+                      <div className="cart-total-row gst-row gst-total-row"><span>Total GST</span><span>₹{totalGst.toFixed(2)}</span></div>
+                    </div>
+                  );
+                })()}
               </>
             );
           })()}
 
-          <button disabled={!cart.length} onClick={() => { setCustNameInput(''); setCustMobileInput(''); setCustLookupFound(false); setCustModal(true); }}>Generate Bill</button>
+          <button disabled={!cart.length} onClick={() => { setCustNameInput(''); setCustMobileInput(''); setCustLookupFound(false); setPaymentType('CASH'); setSplitEntries([{ method: 'CASH', amount: '' }]); setSplitError(''); setCustModal(true); }}>Generate Bill</button>
           {billError && <p className="error-msg">{billError}</p>}
 
           {lastBill && (
             <div className="bill-result">
+              <div className="bill-result-header">
+                <span className="bill-result-title">Bill Generated</span>
+                <button className="bill-result-dismiss" title="Dismiss" onClick={() => { setLastBill(null); setLastBillId(null); barcodeInputRef.current?.focus(); }}>×</button>
+              </div>
               <div className="bill-result-row">
                 <span>Bill No:</span><strong>{lastBill.billNo || '—'}</strong>
               </div>
@@ -2611,6 +2735,36 @@ function App() {
               </div>
               <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
                 🖨 Reprint Receipt
+              </button>
+              <button className="regenerate-bill-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
+                ↺ Regenerate Bill
+              </button>
+            </div>
+          )}
+          {!lastBill && lastBillId && (
+            <div className="bill-result bill-result-compact">
+              <div className="bill-result-header">
+                <span className="bill-result-title">Last bill saved</span>
+                <button className="bill-result-dismiss" title="Clear" onClick={() => { setLastBillId(null); }}>×</button>
+              </div>
+              <button
+                className="regenerate-bill-btn"
+                disabled={regeneratingBill}
+                onClick={async () => {
+                  setRegeneratingBill(true);
+                  setBillError('');
+                  try {
+                    const res = await axios.get(`${API}/bills/${lastBillId}`);
+                    setLastBill(res.data);
+                    printBillReceipt(res.data, tenantInfo?.name);
+                  } catch {
+                    setBillError('Could not retrieve the bill. Please check your connection.');
+                  } finally {
+                    setRegeneratingBill(false);
+                  }
+                }}
+              >
+                {regeneratingBill ? 'Retrieving…' : '↺ Regenerate Bill'}
               </button>
             </div>
           )}
@@ -2851,6 +3005,24 @@ function App() {
                 min="0"
               />
             ))}
+            {tenantInfo?.gstRegistered && (
+              <div style={{display:'flex',gap:8,marginTop:4}}>
+                <input
+                  placeholder="HSN / SAC Code (optional)"
+                  value={form.hsnCode}
+                  onChange={e => setForm({...form, hsnCode: e.target.value})}
+                  style={{flex:2}}
+                />
+                <select value={form.gstRate} onChange={e => setForm({...form, gstRate: e.target.value})} style={{flex:1,padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff',outline:'none'}}>
+                  <option value="">GST Rate</option>
+                  <option value="0">0% (Exempt)</option>
+                  <option value="5">5%</option>
+                  <option value="12">12%</option>
+                  <option value="18">18%</option>
+                  <option value="28">28%</option>
+                </select>
+              </div>
+            )}
             <label className="modal-label">Product Images (up to {maxPhotosForPlan(tenantInfo?.plan)}) <span style={{fontWeight:400,color:'#9ca3af'}}>— {tenantInfo?.plan === 'PRO' ? 'PRO plan' : 'upgrade to PRO for up to 6 photos'}</span></label>
             <div className="edit-img-slots">
               {imageSlots.map((slot, idx) => (
@@ -3019,16 +3191,16 @@ function App() {
           {rptStats && (() => {
             const s = rptStats;
             const statCards = [
-              { label:'Total Orders',       value: s.totalOrders,                        color:'#1565c0', sub: `${s.offlineOrders} POS · ${s.onlineOrders} Online · ${s.shopifyOrders} Shopify` },
-              { label:'Total Revenue',      value: `₹${fmt(s.totalRevenue)}`,            color:'#2e7d32', sub: 'All channels combined' },
-              { label:'Offline (POS)',       value: `₹${fmt(s.offlineRevenue)}`,          color:'#1E3A5F', sub: `${s.offlineOrders} bills` },
-              { label:'Online Shop',        value: `₹${fmt(s.onlineRevenue)}`,           color:'#c2185b', sub: `${s.onlineOrders} orders` },
-              { label:'Shopify Imported',   value: `₹${fmt(s.shopifyRevenue)}`,          color:'#00695c', sub: `${s.shopifyOrders} orders` },
-              { label:'Avg Order Value',    value: `₹${fmt(s.avgOrderValue)}`,           color:'#6a1b9a', sub: 'Across all channels' },
-              { label:'POS Discount Given', value: `₹${fmt(s.offlineDiscount)}`,         color:'#e65100', sub: 'Total discounts offline' },
-              { label:'Refunds',            value: `₹${fmt(s.refundAmount)}`,            color:'#c62828', sub: `${s.refundCount} orders refunded` },
+              { label:'Total Orders',       value: s.totalOrders,                        color:'#2563EB', sub: `${s.offlineOrders} POS · ${s.onlineOrders} Online · ${s.shopifyOrders} Shopify` },
+              { label:'Total Revenue',      value: `₹${fmt(s.totalRevenue)}`,            color:'#059669', sub: 'All channels combined' },
+              { label:'Offline (POS)',       value: `₹${fmt(s.offlineRevenue)}`,          color:'#7C3AED', sub: `${s.offlineOrders} bills` },
+              { label:'Online Shop',        value: `₹${fmt(s.onlineRevenue)}`,           color:'#DB2777', sub: `${s.onlineOrders} orders` },
+              { label:'Shopify Imported',   value: `₹${fmt(s.shopifyRevenue)}`,          color:'#0D9488', sub: `${s.shopifyOrders} orders` },
+              { label:'Avg Order Value',    value: `₹${fmt(s.avgOrderValue)}`,           color:'#4F46E5', sub: 'Across all channels' },
+              { label:'POS Discount Given', value: `₹${fmt(s.offlineDiscount)}`,         color:'#F97316', sub: 'Total discounts offline' },
+              { label:'Refunds',            value: `₹${fmt(s.refundAmount)}`,            color:'#DC2626', sub: `${s.refundCount} orders refunded` },
               ...(tenantInfo?.subdomain === 'gosuas' ? [
-                { label:'Rental Deposits Returned', value: `₹${fmt(s.rentalReturnAmount)}`, color:'#8d6e63',
+                { label:'Rental Deposits Returned', value: `₹${fmt(s.rentalReturnAmount)}`, color:'#D97706',
                   sub: `${s.rentalReturnCount} returned · not counted in revenue${s.rentalDeductionAmount > 0 ? ` · ₹${fmt(s.rentalDeductionAmount)} deducted for damage` : ''}` },
               ] : []),
             ];
@@ -3067,9 +3239,9 @@ function App() {
                     ))}
                   </div>
                   <div className="rpt-bar-legend">
-                    <span><span className="rpt-leg-dot" style={{background:'#1565c0'}}/>POS</span>
-                    <span><span className="rpt-leg-dot" style={{background:'#c2185b'}}/>Online</span>
-                    <span><span className="rpt-leg-dot" style={{background:'#2e7d32'}}/>Shopify</span>
+                    <span><span className="rpt-leg-dot" style={{background:'#2563EB'}}/>POS</span>
+                    <span><span className="rpt-leg-dot" style={{background:'#DB2777'}}/>Online</span>
+                    <span><span className="rpt-leg-dot" style={{background:'#059669'}}/>Shopify</span>
                   </div>
                 </div>
 
@@ -3092,6 +3264,23 @@ function App() {
                   </div>
                 )}
               </div>
+
+              {/* GST Summary */}
+              {s.gstTotal > 0 && (
+                <div className="rpt-chart-card" style={{marginTop:20}}>
+                  <div className="rpt-chart-title">GST Summary (POS Bills)</div>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,marginTop:8}}>
+                    <tbody>
+                      <tr style={{borderBottom:'1px solid #e5e7eb'}}><td style={{padding:'6px 0',color:'#374151'}}>Taxable Value</td><td style={{textAlign:'right',fontWeight:600}}>₹{fmt(s.gstTaxableValue)}</td></tr>
+                      {s.gstCgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>CGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstCgst)}</td></tr>}
+                      {s.gstSgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>SGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstSgst)}</td></tr>}
+                      {s.gstIgst > 0 && <tr style={{borderBottom:'1px solid #f3f4f6'}}><td style={{padding:'4px 0',color:'#6b7280'}}>IGST</td><td style={{textAlign:'right'}}>₹{fmt(s.gstIgst)}</td></tr>}
+                      <tr><td style={{padding:'6px 0',fontWeight:700,color:'#0D9488',borderTop:'2px solid #0D9488'}}>Total GST</td><td style={{textAlign:'right',fontWeight:700,color:'#0D9488',borderTop:'2px solid #0D9488'}}>₹{fmt(s.gstTotal)}</td></tr>
+                    </tbody>
+                  </table>
+                  <p style={{fontSize:11.5,color:'#9ca3af',margin:'8px 0 0',lineHeight:1.5}}>GST shown is the tax component embedded in POS bills. This is not a substitute for a formal GST return — consult your accountant for ITC claims, reversals, and final tax liability.</p>
+                </div>
+              )}
 
               {/* Top products */}
               {s.topProducts && s.topProducts.length > 0 && (
@@ -3118,6 +3307,169 @@ function App() {
                   </table>
                 </div>
               )}
+
+            {/* ── Damage Stock Summary ── */}
+            {(() => {
+              const totalDamageQty = rptStats.totalDamageQty ?? 0;
+              const totalDamageEntries = rptStats.totalDamageEntries ?? 0;
+              const affectedSkuCount = rptStats.affectedSkuCount ?? 0;
+              const damageValue = rptStats.damageValue ?? null;
+              const damageByReason = rptStats.damageByReason ?? {};
+              const damageByProduct = rptStats.damageByProduct ?? [];
+              const damageEntries = rptStats.damageEntries ?? [];
+
+              const maxReasonQty = Math.max(1, ...Object.values(damageByReason));
+
+              function exportDamageByProductCsv() {
+                const rows = [['SKU','Product','Qty','Est. Value']];
+                damageByProduct.forEach(r => rows.push([r.sku, r.productName, r.qty, r.value ?? '']));
+                const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+                const a = document.createElement('a');
+                a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                a.download = 'damage_by_product.csv';
+                a.click();
+              }
+
+              function exportDamageEntriesCsv() {
+                const rows = [['Entry No','Date','SKU','Product','Qty','Reason','Note']];
+                damageEntries.forEach(r => rows.push([r.entryNumber, r.date, r.sku, r.productName, r.qty, r.reason, r.note ?? '']));
+                const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+                const a = document.createElement('a');
+                a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                a.download = 'damage_entries.csv';
+                a.click();
+              }
+
+              return (
+                <div style={{marginTop:'2rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'0.5rem',marginBottom:'1rem'}}>
+                    <span style={{fontSize:'1.25rem'}}>&#x26A0;</span>
+                    <h3 style={{margin:0,fontSize:'1.1rem',fontWeight:700,color:'var(--text)'}}>Damage Stock Summary</h3>
+                  </div>
+
+                  {totalDamageEntries === 0 ? (
+                    <div className="rpt-card" style={{textAlign:'center',padding:'2rem',color:'var(--text-muted)'}}>
+                      <div style={{fontSize:'2rem',marginBottom:'0.5rem'}}>&#x2714;</div>
+                      <div style={{fontWeight:600}}>No damage entries in this period</div>
+                      <div style={{fontSize:'0.85rem',marginTop:'0.25rem'}}>Record damage stock entries from the Damage Stock page.</div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Summary cards */}
+                      <div className="rpt-row" style={{marginBottom:'1rem'}}>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Total Damaged Units</div>
+                          <div className="rpt-card-value">{totalDamageQty}</div>
+                        </div>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Damage Entries</div>
+                          <div className="rpt-card-value">{totalDamageEntries}</div>
+                        </div>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Affected SKUs</div>
+                          <div className="rpt-card-value">{affectedSkuCount}</div>
+                        </div>
+                        <div className="rpt-card">
+                          <div className="rpt-card-label">Est. Damage Value</div>
+                          <div className="rpt-card-value" style={{color:'var(--danger,#ef4444)'}}>
+                            {damageValue != null ? '₹' + Number(damageValue).toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Damage by reason */}
+                      {Object.keys(damageByReason).length > 0 && (
+                        <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                          <div style={{fontWeight:600,marginBottom:'0.75rem',fontSize:'0.9rem'}}>Damage by Reason</div>
+                          {Object.entries(damageByReason).sort((a,b)=>b[1]-a[1]).map(([reason, qty]) => (
+                            <div key={reason} className="rpt-pay-row">
+                              <span className="rpt-pay-label">{reason}</span>
+                              <div className="rpt-pay-bar-wrap">
+                                <div className="rpt-pay-bar" style={{width: Math.round((qty / maxReasonQty) * 100) + '%', background:'var(--danger,#ef4444)'}} />
+                              </div>
+                              <span className="rpt-pay-val">{qty} unit{qty !== 1 ? 's' : ''}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Damage by product table */}
+                      {damageByProduct.length > 0 && (
+                        <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                            <span style={{fontWeight:600,fontSize:'0.9rem'}}>Damage by Product / SKU</span>
+                            <button className="rpt-export-btn" onClick={exportDamageByProductCsv}>Export CSV</button>
+                          </div>
+                          <div style={{overflowX:'auto'}}>
+                            <table className="rpt-table">
+                              <thead>
+                                <tr>
+                                  <th>SKU</th>
+                                  <th>Product</th>
+                                  <th style={{textAlign:'right'}}>Qty</th>
+                                  <th style={{textAlign:'right'}}>Est. Value</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {damageByProduct.map((r,i) => (
+                                  <tr key={i}>
+                                    <td><code style={{fontSize:'0.8rem'}}>{r.sku}</code></td>
+                                    <td>{r.productName}</td>
+                                    <td style={{textAlign:'right'}}>{r.qty}</td>
+                                    <td style={{textAlign:'right',color:'var(--danger,#ef4444)'}}>
+                                      {r.value != null ? '₹' + Number(r.value).toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Damage entry log */}
+                      {damageEntries.length > 0 && (
+                        <div className="rpt-card">
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                            <span style={{fontWeight:600,fontSize:'0.9rem'}}>Damage Entry Log</span>
+                            <button className="rpt-export-btn" onClick={exportDamageEntriesCsv}>Export CSV</button>
+                          </div>
+                          <div style={{overflowX:'auto'}}>
+                            <table className="rpt-table">
+                              <thead>
+                                <tr>
+                                  <th>Entry No</th>
+                                  <th>Date</th>
+                                  <th>SKU</th>
+                                  <th>Product</th>
+                                  <th style={{textAlign:'right'}}>Qty</th>
+                                  <th>Reason</th>
+                                  <th>Note</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {damageEntries.map((r,i) => (
+                                  <tr key={i}>
+                                    <td><code style={{fontSize:'0.8rem'}}>{r.entryNumber}</code></td>
+                                    <td style={{whiteSpace:'nowrap'}}>{r.date}</td>
+                                    <td><code style={{fontSize:'0.8rem'}}>{r.sku}</code></td>
+                                    <td>{r.productName}</td>
+                                    <td style={{textAlign:'right'}}>{r.qty}</td>
+                                    <td>{r.reason}</td>
+                                    <td style={{color:'var(--text-muted)',fontSize:'0.85rem'}}>{r.note || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+
             </>;
           })()}
 
@@ -3513,6 +3865,43 @@ function App() {
                                   ))}
                                 </tbody>
                               </table>
+                              {/* Order-level discount totals — POS bills only */}
+                              {o.source === 'POS' && (
+                                <div style={{display:'flex',justifyContent:'flex-end',marginTop:10}}>
+                                  <div style={{minWidth:260,fontSize:13}}>
+                                    {Number(o.discountAmount||0) > 0 && (
+                                      <>
+                                        <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',color:'#374151'}}>
+                                          <span>Subtotal</span>
+                                          <span>₹{Number(o.subTotal||0).toFixed(2)}</span>
+                                        </div>
+                                        <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',color:'#dc2626',fontWeight:600}}>
+                                          <span>Discount</span>
+                                          <span>− ₹{Number(o.discountAmount||0).toFixed(2)}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    {Number(o.totalGst||0) > 0 && (
+                                      <>
+                                        <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12}}>
+                                          <span>Taxable Value</span>
+                                          <span>₹{Number(o.taxableAmount||0).toFixed(2)}</span>
+                                        </div>
+                                        {Number(o.cgst||0) > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12}}><span>CGST</span><span>₹{Number(o.cgst||0).toFixed(2)}</span></div>}
+                                        {Number(o.sgst||0) > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12}}><span>SGST</span><span>₹{Number(o.sgst||0).toFixed(2)}</span></div>}
+                                        {Number(o.igst||0) > 0 && <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12}}><span>IGST</span><span>₹{Number(o.igst||0).toFixed(2)}</span></div>}
+                                        <div style={{display:'flex',justifyContent:'space-between',padding:'2px 0',color:'#6b7280',fontSize:12,fontWeight:600}}>
+                                          <span>Total GST</span><span>₹{Number(o.totalGst||0).toFixed(2)}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    <div style={{display:'flex',justifyContent:'space-between',padding:'5px 0',borderTop:'2px solid #1E3A5F',marginTop:2,fontWeight:700,fontSize:14,color:'#1E3A5F'}}>
+                                      <span>Total</span>
+                                      <span>₹{Number(o.total||0).toFixed(2)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -3830,14 +4219,100 @@ function App() {
             } finally { setReturnSubmitLoading(false); }
           };
 
-          const changeStatus = async (retId, newStatus) => {
+          const applyStatus = async (retId, newStatus) => {
+            if (returnStatusBusy) return;
+            setReturnStatusBusy(retId);
             try {
               await axios.put(`${API}/returns/${retId}/status`, { status: newStatus });
-              loadSalesReturns();
+              await loadSalesReturns();
+              // Approve / cancel move stock — refresh inventory so Home and Stock Alerts match the DB
+              if (newStatus === 'APPROVED' || newStatus === 'CANCELLED') await loadProducts();
               showToast(`Return ${newStatus.toLowerCase()}`);
             } catch (err) {
-              showToast(err.response?.data?.error || 'Failed to update status', 'error');
+              showToast(err.response?.data?.error || 'Failed to update status. Check your connection and try again.', 'error');
+              loadSalesReturns();
+            } finally { setReturnStatusBusy(null); }
+          };
+
+          // Status changes that move stock need an explicit confirmation first.
+          const changeStatus = (ret, newStatus) => {
+            const restockQty = (ret.items || []).filter(i => i.restockable).reduce((s, i) => s + (i.returnedQty || 0), 0);
+            if (newStatus === 'APPROVED') {
+              setConfirmDialog({
+                title: `Approve ${ret.returnNo}?`,
+                message: restockQty > 0
+                  ? `${restockQty} unit(s) marked Restock will be added back to inventory.`
+                  : 'No items are marked Restock, so inventory will not change.',
+                confirmLabel: 'Approve',
+                onConfirm: () => { setConfirmDialog(null); applyStatus(ret.id, newStatus); },
+              });
+            } else if (newStatus === 'CANCELLED' && ret.stockRestored) {
+              setConfirmDialog({
+                title: `Cancel ${ret.returnNo}?`,
+                message: `${restockQty} unit(s) already restocked by this return will be removed from inventory again.`,
+                confirmLabel: 'Cancel Return',
+                onConfirm: () => { setConfirmDialog(null); applyStatus(ret.id, newStatus); },
+              });
+            } else {
+              applyStatus(ret.id, newStatus);
             }
+          };
+
+          const lookupDirectProduct = async () => {
+            if (!returnDirectSku.trim()) return;
+            setReturnDirectLoading(true); setReturnDirectError(''); setReturnDirectProduct(null);
+            try {
+              const res = await axios.get(`${API}/returns/product-lookup`, { params: { sku: returnDirectSku.trim() } });
+              setReturnDirectProduct({ ...res.data, returnedQty: 1, restockable: true });
+            } catch (err) {
+              setReturnDirectError(err.response?.data?.error || 'Product not found. Check the SKU or barcode.');
+            } finally { setReturnDirectLoading(false); }
+          };
+
+          const addDirectItem = () => {
+            if (!returnDirectProduct) return;
+            if (returnDirectProduct.returnedQty < 1) { setReturnDirectError('Quantity must be at least 1.'); return; }
+            const barcode = returnDirectProduct.barcode;
+            const existing = returnDirectItems.find(i => i.barcode === barcode);
+            if (existing) {
+              setReturnDirectItems(prev => prev.map(i => i.barcode === barcode
+                ? { ...i, returnedQty: i.returnedQty + returnDirectProduct.returnedQty } : i));
+            } else {
+              setReturnDirectItems(prev => [...prev, {
+                productId: returnDirectProduct.productId,
+                productName: returnDirectProduct.productName,
+                barcode: returnDirectProduct.barcode,
+                unitPrice: returnDirectProduct.sellingPrice || 0,
+                returnedQty: returnDirectProduct.returnedQty,
+                restockable: returnDirectProduct.restockable,
+              }]);
+            }
+            setReturnDirectProduct(null); setReturnDirectSku(''); setReturnDirectError('');
+          };
+
+          const submitDirectReturn = async () => {
+            if (!returnDirectItems.length) { setReturnSubmitError('Add at least one item.'); return; }
+            setReturnSubmitLoading(true); setReturnSubmitError('');
+            try {
+              await axios.post(`${API}/returns`, {
+                sourceType: 'DIRECT',
+                sourceBillId: null,
+                customerName: returnDirectCustomer.name || null,
+                customerMobile: returnDirectCustomer.mobile || null,
+                returnReason: returnFormMeta.returnReason || null,
+                remarks: returnFormMeta.remarks || null,
+                refundMode: returnFormMeta.refundMode || null,
+                items: returnDirectItems.map(i => ({
+                  barcode: i.barcode, returnedQty: i.returnedQty, restockable: i.restockable
+                })),
+              });
+              setShowCreateReturn(false); setReturnPreview(null); setReturnPreviewRef({ sourceType:'POS', ref:'' });
+              setReturnDirectSku(''); setReturnDirectProduct(null); setReturnDirectItems([]);
+              setReturnDirectCustomer({ name: '', mobile: '' });
+              loadSalesReturns(); showToast('Return created successfully');
+            } catch (err) {
+              setReturnSubmitError(err.response?.data?.error || 'Failed to create return.');
+            } finally { setReturnSubmitLoading(false); }
           };
 
           return (
@@ -3858,8 +4333,20 @@ function App() {
                 <button className="btn-primary" style={{marginLeft:'auto'}} onClick={() => {
                   setShowCreateReturn(true); setReturnPreview(null);
                   setReturnPreviewRef({ sourceType:'POS', ref:'' }); setReturnPreviewError('');
+                  setReturnMode('bill');
+                  setReturnDirectSku(''); setReturnDirectProduct(null); setReturnDirectError('');
+                  setReturnDirectItems([]); setReturnDirectCustomer({ name: '', mobile: '' });
+                  setReturnFormMeta({ returnReason: '', remarks: '', refundMode: 'CASH' });
+                  setReturnSubmitError('');
                 }}>+ New Return</button>
               </div>
+
+              {salesReturnsError && (
+                <div style={{padding:'10px 14px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:12,display:'flex',alignItems:'center',gap:12}}>
+                  {salesReturnsError}
+                  <button className="btn-secondary" style={{fontSize:12,padding:'4px 12px'}} onClick={loadSalesReturns}>Retry</button>
+                </div>
+              )}
 
               {/* Returns table */}
               <div className="data-table-wrap">
@@ -3915,19 +4402,20 @@ function App() {
                                 {/* Status action buttons */}
                                 <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                                   {r.status === 'PENDING' && <>
-                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'APPROVED'); }}>Approve</button>
-                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px',color:'#dc2626',borderColor:'#fca5a5'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'REJECTED'); }}>Reject</button>
-                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'CANCELLED'); }}>Cancel</button>
+                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'APPROVED'); }}>Approve</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px',color:'#dc2626',borderColor:'#fca5a5'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'REJECTED'); }}>Reject</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'CANCELLED'); }}>Cancel</button>
                                   </>}
                                   {r.status === 'APPROVED' && <>
-                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'COMPLETED'); }}>Mark Completed</button>
-                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}}
-                                      onClick={e => { e.stopPropagation(); changeStatus(r.id, 'CANCELLED'); }}>Cancel</button>
+                                    <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'COMPLETED'); }}>Mark Completed</button>
+                                    <button className="btn-secondary" style={{fontSize:13,padding:'6px 14px'}} disabled={returnStatusBusy === r.id}
+                                      onClick={e => { e.stopPropagation(); changeStatus(r, 'CANCELLED'); }}>Cancel</button>
                                   </>}
+                                  {returnStatusBusy === r.id && <span style={{fontSize:13,color:'#6b7280',alignSelf:'center'}}>Updating…</span>}
                                 </div>
                               </div>
                             </td>
@@ -3952,138 +4440,526 @@ function App() {
               {/* Create Return Modal */}
               {showCreateReturn && (
                 <div className="modal-overlay" onClick={() => setShowCreateReturn(false)}>
-                  <div className="modal-box" style={{width:660,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}}
+                  <div className="modal-box" style={{width:680,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}}
                     onClick={e => e.stopPropagation()}>
-                    <h3 style={{marginBottom:16}}>New Sales Return</h3>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+                      <h3 style={{margin:0}}>New Sales Return</h3>
+                      <button type="button" style={{background:'none',border:'none',fontSize:22,cursor:'pointer',color:'#666',lineHeight:1}} onClick={() => setShowCreateReturn(false)}>×</button>
+                    </div>
 
-                    {/* Step 1: Look up the original sale */}
-                    {!returnPreview && (
-                      <div>
-                        <div style={{display:'flex',gap:10,marginBottom:8}}>
-                          <select value={returnPreviewRef.sourceType}
-                            onChange={e => setReturnPreviewRef(r => ({...r, sourceType: e.target.value}))}
-                            style={{padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff'}}>
-                            <option value="POS">POS / Offline Bill</option>
-                            <option value="ONLINE">Online Order</option>
-                          </select>
-                          <input style={{flex:1,padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14}}
-                            placeholder={returnPreviewRef.sourceType==='POS' ? 'Bill number, e.g. GOS-20241013-0001' : 'Order number, e.g. WEB-20241013-0001'}
-                            value={returnPreviewRef.ref}
-                            onChange={e => setReturnPreviewRef(r => ({...r, ref: e.target.value}))}
-                            onKeyDown={e => e.key==='Enter' && lookupPreview()} />
-                          <button className="btn-primary" onClick={lookupPreview} disabled={returnPreviewLoading}>
-                            {returnPreviewLoading ? '…' : 'Look Up'}
-                          </button>
-                        </div>
-                        {returnPreviewError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:8}}>{returnPreviewError}</div>}
-                        <div style={{fontSize:13,color:'#6b7280'}}>Enter the original bill or order number to load its items.</div>
-                      </div>
+                    {/* Mode tabs */}
+                    <div style={{display:'flex',borderRadius:8,overflow:'hidden',border:'1.5px solid #e5e7eb',marginBottom:18}}>
+                      <button type="button" style={{flex:1,padding:'9px',fontSize:13,fontWeight:600,background:returnMode==='bill'?'#1E3A5F':'#fff',color:returnMode==='bill'?'#fff':'#374151',border:'none',cursor:'pointer'}}
+                        onClick={() => { setReturnMode('bill'); setReturnPreview(null); setReturnPreviewRef({sourceType:'POS',ref:''}); setReturnPreviewError(''); setReturnSubmitError(''); }}>
+                        By Bill / Order #
+                      </button>
+                      <button type="button" style={{flex:1,padding:'9px',fontSize:13,fontWeight:600,background:returnMode==='direct'?'#1E3A5F':'#fff',color:returnMode==='direct'?'#fff':'#374151',border:'none',cursor:'pointer',borderLeft:'1px solid #e5e7eb'}}
+                        onClick={() => { setReturnMode('direct'); setReturnSubmitError(''); }}>
+                        By SKU / Direct
+                      </button>
+                    </div>
+
+                    {/* ── Bill / Order mode ── */}
+                    {returnMode === 'bill' && (
+                      <>
+                        {!returnPreview && (
+                          <div>
+                            <div style={{display:'flex',gap:10,marginBottom:8}}>
+                              <select value={returnPreviewRef.sourceType}
+                                onChange={e => setReturnPreviewRef(r => ({...r, sourceType: e.target.value}))}
+                                style={{padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff'}}>
+                                <option value="POS">POS / Offline Bill</option>
+                                <option value="ONLINE">Online Order</option>
+                              </select>
+                              <input style={{flex:1,padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14}}
+                                placeholder={returnPreviewRef.sourceType==='POS' ? 'Bill number, e.g. GOS-20241013-0001' : 'Order number, e.g. WEB-20241013-0001'}
+                                value={returnPreviewRef.ref}
+                                onChange={e => setReturnPreviewRef(r => ({...r, ref: e.target.value}))}
+                                onKeyDown={e => e.key==='Enter' && lookupPreview()} />
+                              <button className="btn-primary" onClick={lookupPreview} disabled={returnPreviewLoading}>
+                                {returnPreviewLoading ? '…' : 'Look Up'}
+                              </button>
+                            </div>
+                            {returnPreviewError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:8}}>{returnPreviewError}</div>}
+                            <div style={{fontSize:13,color:'#6b7280'}}>Enter the original bill or order number to load its items.</div>
+                          </div>
+                        )}
+
+                        {returnPreview && (
+                          <div>
+                            <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:13}}>
+                              <strong>{returnPreview.sourceBillNo}</strong> · {returnPreview.customerName || 'Walk-in'}
+                              {returnPreview.customerMobile ? ` · ${returnPreview.customerMobile}` : ''}
+                              <button style={{marginLeft:12,fontSize:12,color:'#6b7280',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}
+                                onClick={() => { setReturnPreview(null); setReturnPreviewRef(r => ({...r, ref:''})); }}>Change</button>
+                            </div>
+
+                            <div style={{overflowX:'auto',marginBottom:14}}>
+                              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                                <thead><tr style={{background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
+                                  <th style={{padding:'8px',textAlign:'left'}}>Product</th>
+                                  <th style={{padding:'8px',textAlign:'right'}}>Returnable</th>
+                                  <th style={{padding:'8px',textAlign:'right',width:90}}>Return Qty</th>
+                                  <th style={{padding:'8px',textAlign:'center',width:80}}>Restock?</th>
+                                  <th style={{padding:'8px',textAlign:'right'}}>Subtotal</th>
+                                </tr></thead>
+                                <tbody>
+                                  {returnFormItems.map((item, idx) => (
+                                    <tr key={idx} style={{borderBottom:'1px solid #f3f4f6'}}>
+                                      <td style={{padding:'8px'}}>
+                                        <div style={{fontWeight:600}}>{item.productName}</div>
+                                        <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{item.barcode}</div>
+                                      </td>
+                                      <td style={{padding:'8px',textAlign:'right',color:'#6b7280'}}>{item.returnableQty}</td>
+                                      <td style={{padding:'8px',textAlign:'right'}}>
+                                        <input type="number" min="0" step="1" max={item.returnableQty}
+                                          style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
+                                          value={item.returnedQty}
+                                          onChange={e => {
+                                            // Whole units only — the backend field is an integer and would silently truncate 2.5
+                                            const v = Math.min(item.returnableQty, Math.max(0, Math.floor(Number(e.target.value)||0)));
+                                            setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, returnedQty: v} : x));
+                                          }} />
+                                      </td>
+                                      <td style={{padding:'8px',textAlign:'center'}}>
+                                        <input type="checkbox" checked={item.restockable}
+                                          onChange={e => setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, restockable: e.target.checked} : x))} />
+                                      </td>
+                                      <td style={{padding:'8px',textAlign:'right'}}>
+                                        ₹{(Number(item.unitPrice||0) * item.returnedQty).toFixed(2)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr style={{borderTop:'2px solid #e5e7eb',fontWeight:700}}>
+                                    <td colSpan={4} style={{padding:'8px',textAlign:'right'}}>Total Return Amount</td>
+                                    <td style={{padding:'8px',textAlign:'right'}}>
+                                      ₹{returnFormItems.reduce((s,i) => s + Number(i.unitPrice||0)*i.returnedQty, 0).toFixed(2)}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Return Reason</label>
+                                <select value={returnFormMeta.returnReason}
+                                  onChange={e => setReturnFormMeta(m => ({...m, returnReason: e.target.value}))}
+                                  style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                                  <option value="">— Select reason —</option>
+                                  <option value="DEFECTIVE">Defective / Damaged</option>
+                                  <option value="SIZE_ISSUE">Wrong Size</option>
+                                  <option value="WRONG_ITEM">Wrong Item Delivered</option>
+                                  <option value="CHANGE_OF_MIND">Change of Mind</option>
+                                  <option value="OTHER">Other</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Refund Mode</label>
+                                <select value={returnFormMeta.refundMode}
+                                  onChange={e => setReturnFormMeta(m => ({...m, refundMode: e.target.value}))}
+                                  style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                                  <option value="CASH">Cash</option>
+                                  <option value="UPI">UPI</option>
+                                  <option value="BANK_TRANSFER">Bank Transfer</option>
+                                  <option value="STORE_CREDIT">Store Credit</option>
+                                  <option value="ONLINE">Online (Razorpay)</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div style={{marginBottom:14}}>
+                              <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Remarks (optional)</label>
+                              <textarea rows={2} style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+                                placeholder="Additional notes about this return…"
+                                value={returnFormMeta.remarks}
+                                onChange={e => setReturnFormMeta(m => ({...m, remarks: e.target.value}))} />
+                            </div>
+
+                            {returnSubmitError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:10}}>{returnSubmitError}</div>}
+                            <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+                              <button className="btn-secondary" onClick={() => setShowCreateReturn(false)}>Cancel</button>
+                              <button className="btn-primary" onClick={submitReturn} disabled={returnSubmitLoading}>
+                                {returnSubmitLoading ? 'Saving…' : 'Create Return'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
-                    {/* Step 2: Fill in return details */}
-                    {returnPreview && (
+                    {/* ── Direct / SKU mode ── */}
+                    {returnMode === 'direct' && (
                       <div>
-                        <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 14px',marginBottom:14,fontSize:13}}>
-                          <strong>{returnPreview.sourceBillNo}</strong> · {returnPreview.customerName || 'Walk-in'}
-                          {returnPreview.customerMobile ? ` · ${returnPreview.customerMobile}` : ''}
-                          <button style={{marginLeft:12,fontSize:12,color:'#6b7280',background:'none',border:'none',cursor:'pointer',textDecoration:'underline'}}
-                            onClick={() => { setReturnPreview(null); setReturnPreviewRef(r => ({...r, ref:''})); }}>Change</button>
-                        </div>
-
-                        {/* Items table */}
-                        <div style={{overflowX:'auto',marginBottom:14}}>
-                          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-                            <thead><tr style={{background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
-                              <th style={{padding:'8px',textAlign:'left'}}>Product</th>
-                              <th style={{padding:'8px',textAlign:'right'}}>Returnable</th>
-                              <th style={{padding:'8px',textAlign:'right',width:90}}>Return Qty</th>
-                              <th style={{padding:'8px',textAlign:'center',width:80}}>Restock?</th>
-                              <th style={{padding:'8px',textAlign:'right'}}>Subtotal</th>
-                            </tr></thead>
-                            <tbody>
-                              {returnFormItems.map((item, idx) => (
-                                <tr key={idx} style={{borderBottom:'1px solid #f3f4f6'}}>
-                                  <td style={{padding:'8px'}}>
-                                    <div style={{fontWeight:600}}>{item.productName}</div>
-                                    <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{item.barcode}</div>
-                                  </td>
-                                  <td style={{padding:'8px',textAlign:'right',color:'#6b7280'}}>{item.returnableQty}</td>
-                                  <td style={{padding:'8px',textAlign:'right'}}>
-                                    <input type="number" min="0" max={item.returnableQty}
-                                      style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
-                                      value={item.returnedQty}
-                                      onChange={e => {
-                                        const v = Math.min(item.returnableQty, Math.max(0, Number(e.target.value)||0));
-                                        setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, returnedQty: v} : x));
-                                      }} />
-                                  </td>
-                                  <td style={{padding:'8px',textAlign:'center'}}>
-                                    <input type="checkbox" checked={item.restockable}
-                                      onChange={e => setReturnFormItems(prev => prev.map((x,i) => i===idx ? {...x, restockable: e.target.checked} : x))} />
-                                  </td>
-                                  <td style={{padding:'8px',textAlign:'right'}}>
-                                    ₹{(Number(item.unitPrice||0) * item.returnedQty).toFixed(2)}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot>
-                              <tr style={{borderTop:'2px solid #e5e7eb',fontWeight:700}}>
-                                <td colSpan={4} style={{padding:'8px',textAlign:'right'}}>Total Return Amount</td>
-                                <td style={{padding:'8px',textAlign:'right'}}>
-                                  ₹{returnFormItems.reduce((s,i) => s + Number(i.unitPrice||0)*i.returnedQty, 0).toFixed(2)}
-                                </td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-
-                        {/* Return meta */}
-                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
-                          <div>
-                            <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Return Reason</label>
-                            <select value={returnFormMeta.returnReason}
-                              onChange={e => setReturnFormMeta(m => ({...m, returnReason: e.target.value}))}
-                              style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
-                              <option value="">— Select reason —</option>
-                              <option value="DEFECTIVE">Defective / Damaged</option>
-                              <option value="SIZE_ISSUE">Wrong Size</option>
-                              <option value="WRONG_ITEM">Wrong Item Delivered</option>
-                              <option value="CHANGE_OF_MIND">Change of Mind</option>
-                              <option value="OTHER">Other</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Refund Mode</label>
-                            <select value={returnFormMeta.refundMode}
-                              onChange={e => setReturnFormMeta(m => ({...m, refundMode: e.target.value}))}
-                              style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
-                              <option value="CASH">Cash</option>
-                              <option value="UPI">UPI</option>
-                              <option value="BANK_TRANSFER">Bank Transfer</option>
-                              <option value="STORE_CREDIT">Store Credit</option>
-                              <option value="ONLINE">Online (Razorpay)</option>
-                            </select>
-                          </div>
-                        </div>
-                        <div style={{marginBottom:14}}>
-                          <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Remarks (optional)</label>
-                          <textarea rows={2} style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
-                            placeholder="Additional notes about this return…"
-                            value={returnFormMeta.remarks}
-                            onChange={e => setReturnFormMeta(m => ({...m, remarks: e.target.value}))} />
-                        </div>
-
-                        {returnSubmitError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:10}}>{returnSubmitError}</div>}
-                        <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
-                          <button className="btn-secondary" onClick={() => setShowCreateReturn(false)}>Cancel</button>
-                          <button className="btn-primary" onClick={submitReturn} disabled={returnSubmitLoading}>
-                            {returnSubmitLoading ? 'Saving…' : 'Create Return'}
+                        {/* SKU / barcode lookup */}
+                        <div style={{display:'flex',gap:8,marginBottom:8}}>
+                          <input style={{flex:1,padding:'9px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14}}
+                            placeholder="Enter product SKU or scan barcode…"
+                            value={returnDirectSku}
+                            onChange={e => { setReturnDirectSku(e.target.value); setReturnDirectError(''); setReturnDirectProduct(null); }}
+                            onKeyDown={e => e.key==='Enter' && lookupDirectProduct()} />
+                          <button className="btn-primary" onClick={lookupDirectProduct} disabled={returnDirectLoading}>
+                            {returnDirectLoading ? '…' : 'Look Up'}
                           </button>
                         </div>
+                        {returnDirectError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:8}}>{returnDirectError}</div>}
+
+                        {/* Product card */}
+                        {returnDirectProduct && (
+                          <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'12px 14px',marginBottom:14}}>
+                            <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>{returnDirectProduct.productName}</div>
+                            <div style={{fontSize:12,color:'#6b7280',marginBottom:10}}>
+                              SKU: {returnDirectProduct.sku} · Barcode: {returnDirectProduct.barcode}
+                              {returnDirectProduct.color ? ` · Colour: ${returnDirectProduct.color}` : ''}
+                              {returnDirectProduct.size ? ` · Size: ${returnDirectProduct.size}` : ''}
+                              {' '}· Current stock: <strong>{returnDirectProduct.stockQty}</strong> · ₹{Number(returnDirectProduct.sellingPrice||0).toFixed(2)}
+                            </div>
+                            <div style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+                              <label style={{fontSize:13,fontWeight:600,display:'flex',alignItems:'center',gap:6}}>
+                                Qty to Return:
+                                <input type="number" min="1" step="1"
+                                  style={{width:70,padding:'5px',border:'1.5px solid #e5e7eb',borderRadius:6,textAlign:'right',fontSize:13}}
+                                  value={returnDirectProduct.returnedQty}
+                                  onChange={e => setReturnDirectProduct(p => ({...p, returnedQty: Math.max(1, Math.floor(Number(e.target.value)||1))}))} />
+                              </label>
+                              <label style={{fontSize:13,display:'flex',alignItems:'center',gap:5,cursor:'pointer'}}>
+                                <input type="checkbox" checked={returnDirectProduct.restockable}
+                                  onChange={e => setReturnDirectProduct(p => ({...p, restockable: e.target.checked}))} />
+                                Restock to inventory
+                              </label>
+                              <button className="btn-primary" style={{fontSize:13,padding:'6px 14px'}} onClick={addDirectItem}>+ Add to Return</button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Items added so far */}
+                        {returnDirectItems.length > 0 && (
+                          <div style={{marginBottom:14}}>
+                            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                              <thead><tr style={{background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
+                                <th style={{padding:'8px',textAlign:'left'}}>Product</th>
+                                <th style={{padding:'8px',textAlign:'right'}}>Qty</th>
+                                <th style={{padding:'8px',textAlign:'right'}}>Unit Price</th>
+                                <th style={{padding:'8px',textAlign:'right'}}>Subtotal</th>
+                                <th style={{padding:'8px',textAlign:'center'}}>Restock?</th>
+                                <th style={{padding:'8px'}}></th>
+                              </tr></thead>
+                              <tbody>
+                                {returnDirectItems.map((item, idx) => (
+                                  <tr key={idx} style={{borderBottom:'1px solid #f3f4f6'}}>
+                                    <td style={{padding:'8px'}}>
+                                      <div style={{fontWeight:600}}>{item.productName}</div>
+                                      <div style={{fontSize:11,color:'#9ca3af',fontFamily:'monospace'}}>{item.barcode}</div>
+                                    </td>
+                                    <td style={{padding:'8px',textAlign:'right'}}>{item.returnedQty}</td>
+                                    <td style={{padding:'8px',textAlign:'right'}}>₹{Number(item.unitPrice||0).toFixed(2)}</td>
+                                    <td style={{padding:'8px',textAlign:'right'}}>₹{(Number(item.unitPrice||0)*item.returnedQty).toFixed(2)}</td>
+                                    <td style={{padding:'8px',textAlign:'center'}}>{item.restockable ? '✓' : '✗'}</td>
+                                    <td style={{padding:'8px',textAlign:'center'}}>
+                                      <button type="button" style={{background:'none',border:'none',color:'#dc2626',cursor:'pointer',fontSize:18,lineHeight:1}} onClick={() => setReturnDirectItems(prev => prev.filter((_,i) => i!==idx))}>×</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr style={{borderTop:'2px solid #e5e7eb',fontWeight:700}}>
+                                  <td colSpan={3} style={{padding:'8px',textAlign:'right'}}>Total</td>
+                                  <td style={{padding:'8px',textAlign:'right'}}>₹{returnDirectItems.reduce((s,i) => s + Number(i.unitPrice||0)*i.returnedQty, 0).toFixed(2)}</td>
+                                  <td colSpan={2}></td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
+
+                        {returnDirectItems.length > 0 && (
+                          <div>
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Customer Name (optional)</label>
+                                <input style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}
+                                  placeholder="Walk-in customer"
+                                  value={returnDirectCustomer.name}
+                                  onChange={e => setReturnDirectCustomer(c => ({...c, name: e.target.value}))} />
+                              </div>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Mobile (optional)</label>
+                                <input style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}
+                                  placeholder="e.g. 9876543210"
+                                  value={returnDirectCustomer.mobile}
+                                  onChange={e => setReturnDirectCustomer(c => ({...c, mobile: e.target.value}))} />
+                              </div>
+                            </div>
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Return Reason</label>
+                                <select value={returnFormMeta.returnReason}
+                                  onChange={e => setReturnFormMeta(m => ({...m, returnReason: e.target.value}))}
+                                  style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                                  <option value="">— Select reason —</option>
+                                  <option value="DEFECTIVE">Defective / Damaged</option>
+                                  <option value="SIZE_ISSUE">Wrong Size</option>
+                                  <option value="WRONG_ITEM">Wrong Item Delivered</option>
+                                  <option value="CHANGE_OF_MIND">Change of Mind</option>
+                                  <option value="OTHER">Other</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Refund Mode</label>
+                                <select value={returnFormMeta.refundMode}
+                                  onChange={e => setReturnFormMeta(m => ({...m, refundMode: e.target.value}))}
+                                  style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff'}}>
+                                  <option value="CASH">Cash</option>
+                                  <option value="UPI">UPI</option>
+                                  <option value="BANK_TRANSFER">Bank Transfer</option>
+                                  <option value="STORE_CREDIT">Store Credit</option>
+                                  <option value="ONLINE">Online (Razorpay)</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div style={{marginBottom:14}}>
+                              <label style={{display:'block',fontSize:12,fontWeight:600,color:'#374151',marginBottom:4}}>Remarks (optional)</label>
+                              <textarea rows={2} style={{width:'100%',padding:'9px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+                                placeholder="Additional notes about this return…"
+                                value={returnFormMeta.remarks}
+                                onChange={e => setReturnFormMeta(m => ({...m, remarks: e.target.value}))} />
+                            </div>
+                            {returnSubmitError && <div style={{padding:'10px',background:'#fef2f2',borderRadius:8,fontSize:13,color:'#dc2626',marginBottom:10}}>{returnSubmitError}</div>}
+                            <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+                              <button className="btn-secondary" onClick={() => setShowCreateReturn(false)}>Cancel</button>
+                              <button className="btn-primary" onClick={submitDirectReturn} disabled={returnSubmitLoading}>
+                                {returnSubmitLoading ? 'Saving…' : 'Create Return'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Damage Stock page ── */}
+        {activePage === 'damage' && (() => {
+          const DAMAGE_REASONS = [
+            { value:'DAMAGED_IN_TRANSIT', label:'Damaged in Transit' },
+            { value:'EXPIRED',            label:'Expired' },
+            { value:'MANUFACTURING_DEFECT', label:'Manufacturing Defect' },
+            { value:'WATER_DAMAGE',       label:'Water Damage' },
+            { value:'BREAKAGE',           label:'Breakage' },
+            { value:'OTHER',              label:'Other' },
+          ];
+          const ITEMS_PER_PAGE = 15;
+          const dq = damageSearch.toLowerCase();
+          const filtered = damages.filter(d =>
+            !dq ||
+            (d.damageNo || '').toLowerCase().includes(dq) ||
+            (d.productName || '').toLowerCase().includes(dq) ||
+            (d.sku || '').toLowerCase().includes(dq) ||
+            (d.reason || '').toLowerCase().includes(dq)
+          );
+          const totalDamagePages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+          const pageDamages = filtered.slice((damagePage - 1) * ITEMS_PER_PAGE, damagePage * ITEMS_PER_PAGE);
+
+          const lookupDamageProduct = async () => {
+            if (!damageSku.trim()) return;
+            setDamageSkuError(''); setDamageSkuLoading(true); setDamageProduct(null);
+            try {
+              const res = await axios.get(`${API}/damage/product-lookup?sku=${encodeURIComponent(damageSku.trim())}`);
+              setDamageProduct(res.data);
+            } catch (e) {
+              setDamageSkuError(e.response?.data?.error || e.response?.data || 'Product not found');
+            } finally { setDamageSkuLoading(false); }
+          };
+
+          const submitDamage = async () => {
+            if (!damageProduct) { setDamageSubmitError('Look up a product first'); return; }
+            const qty = parseInt(damageForm.qty, 10);
+            if (!qty || qty <= 0) { setDamageSubmitError('Enter a valid damage quantity'); return; }
+            if (qty > damageProduct.stockQty) { setDamageSubmitError(`Quantity ${qty} exceeds current stock of ${damageProduct.stockQty}`); return; }
+            setDamageSubmitError(''); setDamageSubmitLoading(true);
+            try {
+              await axios.post(`${API}/damage`, {
+                sku: damageProduct.sku || damageSku.trim(),
+                damageQty: qty,
+                reason: damageForm.reason,
+                notes: damageForm.notes || null,
+              });
+              await loadDamages();
+              setShowDamageForm(false);
+              setDamageSku(''); setDamageProduct(null);
+              setDamageForm({ qty: '', reason: 'OTHER', notes: '' });
+              showToast('Damage entry recorded');
+            } catch (e) {
+              setDamageSubmitError(e.response?.data?.error || e.response?.data || 'Failed to record damage');
+            } finally { setDamageSubmitLoading(false); }
+          };
+
+          return (
+            <div className="page-content">
+              {/* Header row */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:12}}>
+                <div>
+                  <div style={{fontSize:13,color:'#6b7280'}}>Record products removed from sellable inventory due to damage, expiry, or defects.</div>
+                </div>
+                <button className="btn-primary" onClick={() => { setShowDamageForm(v=>!v); setDamageSkuError(''); setDamageSubmitError(''); }}>
+                  {showDamageForm ? '✕ Cancel' : '+ Record Damage'}
+                </button>
+              </div>
+
+              {/* Entry form */}
+              {showDamageForm && (
+                <div style={{background:'#f9fafb',border:'1.5px solid #e5e7eb',borderRadius:12,padding:'20px 24px',marginBottom:24}}>
+                  <h3 style={{margin:'0 0 16px',fontSize:16,color:'#1f2937'}}>New Damage Entry</h3>
+
+                  {/* SKU lookup */}
+                  <div style={{display:'flex',gap:10,alignItems:'flex-end',marginBottom:16}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">SKU or Barcode</label>
+                      <input placeholder="Enter SKU or scan barcode"
+                        value={damageSku}
+                        onChange={e => { setDamageSku(e.target.value); setDamageProduct(null); setDamageSkuError(''); }}
+                        onKeyDown={e => e.key === 'Enter' && lookupDamageProduct()}
+                        style={{marginTop:4}} />
+                    </div>
+                    <button className="btn-secondary" onClick={lookupDamageProduct} disabled={damageSkuLoading || !damageSku.trim()}
+                      style={{whiteSpace:'nowrap'}}>
+                      {damageSkuLoading ? 'Looking up…' : 'Look Up'}
+                    </button>
+                  </div>
+                  {damageSkuError && <div style={{fontSize:13,color:'#dc2626',marginBottom:12}}>{damageSkuError}</div>}
+
+                  {/* Product card */}
+                  {damageProduct && (
+                    <div style={{display:'flex',alignItems:'center',gap:14,background:'#fff',border:'1.5px solid #d1fae5',borderRadius:10,padding:'12px 16px',marginBottom:16}}>
+                      {damageProduct.imageUrl && (
+                        <img src={`${BACKEND}${damageProduct.imageUrl}`} alt=""
+                          style={{width:56,height:56,objectFit:'cover',borderRadius:8,flexShrink:0,background:'#f3f4f6'}} />
+                      )}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:700,fontSize:15,color:'#111827',marginBottom:2}}>{damageProduct.productName}</div>
+                        <div style={{fontSize:12,color:'#6b7280',fontFamily:'monospace'}}>SKU: {damageProduct.sku} &nbsp;|&nbsp; Barcode: {damageProduct.barcode}</div>
+                        {damageProduct.color && <div style={{fontSize:12,color:'#6b7280'}}>Colour: {damageProduct.color}</div>}
+                        <div style={{fontSize:13,fontWeight:600,color:'#1d4ed8',marginTop:4}}>Stock: {damageProduct.stockQty}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Form fields */}
+                  {damageProduct && (
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+                      <div>
+                        <label className="modal-label">Damage Quantity <span style={{color:'#dc2626'}}>*</span></label>
+                        <input type="number" min="1" max={damageProduct.stockQty} placeholder="e.g. 2"
+                          value={damageForm.qty}
+                          onChange={e => setDamageForm(f => ({...f, qty: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                      <div>
+                        <label className="modal-label">Reason</label>
+                        <select value={damageForm.reason}
+                          onChange={e => setDamageForm(f => ({...f, reason: e.target.value}))}
+                          style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                          {DAMAGE_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                        </select>
+                      </div>
+                      <div style={{gridColumn:'1 / -1'}}>
+                        <label className="modal-label">Notes <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+                        <input placeholder="e.g. Fell off shelf during restocking"
+                          value={damageForm.notes}
+                          onChange={e => setDamageForm(f => ({...f, notes: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                    </div>
+                  )}
+
+                  {damageSubmitError && <div style={{fontSize:13,color:'#dc2626',marginTop:12}}>{damageSubmitError}</div>}
+
+                  {damageProduct && (
+                    <div style={{marginTop:16,display:'flex',gap:10,justifyContent:'flex-end'}}>
+                      <button className="btn-secondary" onClick={() => { setShowDamageForm(false); setDamageSku(''); setDamageProduct(null); setDamageForm({ qty:'', reason:'OTHER', notes:'' }); }}>
+                        Cancel
+                      </button>
+                      <button className="btn-primary" onClick={submitDamage} disabled={damageSubmitLoading}>
+                        {damageSubmitLoading ? 'Recording…' : '✓ Confirm Damage'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Search */}
+              <div style={{marginBottom:16}}>
+                <input placeholder="Search by damage no, product, SKU or reason…"
+                  value={damageSearch}
+                  onChange={e => { setDamageSearch(e.target.value); setDamagePage(1); }}
+                  style={{width:'100%',padding:'9px 14px',border:'1.5px solid #e5e7eb',borderRadius:9,fontSize:13,outline:'none',boxSizing:'border-box'}} />
+              </div>
+
+              {/* Error */}
+              {damageError && (
+                <div style={{padding:'12px 16px',background:'#fef2f2',borderRadius:8,color:'#dc2626',fontSize:13,marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  {damageError}
+                  <button className="btn-secondary" style={{fontSize:12,padding:'4px 12px'}} onClick={loadDamages}>Retry</button>
+                </div>
+              )}
+
+              {/* History table */}
+              <div className="table-scroll-wrap">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>Damage No</th>
+                      <th>Product</th>
+                      <th>SKU</th>
+                      <th style={{textAlign:'right'}}>Qty</th>
+                      <th style={{textAlign:'right'}}>Before</th>
+                      <th style={{textAlign:'right'}}>After</th>
+                      <th>Reason</th>
+                      <th>Notes</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageDamages.length === 0 ? (
+                      <tr><td colSpan={9} style={{textAlign:'center',padding:'32px',color:'#9ca3af'}}>
+                        {damages.length === 0 ? 'No damage entries yet. Use "Record Damage" to log damaged stock.' : 'No entries match your search.'}
+                      </td></tr>
+                    ) : pageDamages.map(d => (
+                      <tr key={d.id}>
+                        <td style={{fontFamily:'monospace',fontWeight:600,color:'#1d4ed8'}}>{d.damageNo}</td>
+                        <td style={{fontWeight:600}}>{d.productName}</td>
+                        <td style={{fontFamily:'monospace',fontSize:12,color:'#6b7280'}}>{d.sku}</td>
+                        <td style={{textAlign:'right',fontWeight:700,color:'#dc2626'}}>{d.damageQty}</td>
+                        <td style={{textAlign:'right',color:'#6b7280'}}>{d.stockBefore ?? '—'}</td>
+                        <td style={{textAlign:'right',color:'#374151'}}>{d.stockAfter ?? '—'}</td>
+                        <td>
+                          <span style={{display:'inline-block',padding:'2px 8px',borderRadius:12,fontSize:11,fontWeight:600,
+                            background: d.reason === 'EXPIRED' ? '#fef9c3' : d.reason === 'BREAKAGE' ? '#fee2e2' : '#f3f4f6',
+                            color: d.reason === 'EXPIRED' ? '#92400e' : d.reason === 'BREAKAGE' ? '#991b1b' : '#374151'}}>
+                            {(DAMAGE_REASONS.find(r => r.value === d.reason)?.label) || d.reason || '—'}
+                          </span>
+                        </td>
+                        <td style={{color:'#6b7280',fontSize:12,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.notes || '—'}</td>
+                        <td style={{fontSize:12,color:'#9ca3af',whiteSpace:'nowrap'}}>
+                          {d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {totalDamagePages > 1 && (
+                <div style={{display:'flex',justifyContent:'center',gap:6,marginTop:16}}>
+                  <button className="btn-secondary" disabled={damagePage === 1} onClick={() => setDamagePage(p => p - 1)}>‹ Prev</button>
+                  <span style={{padding:'6px 12px',fontSize:13,color:'#374151'}}>Page {damagePage} of {totalDamagePages}</span>
+                  <button className="btn-secondary" disabled={damagePage === totalDamagePages} onClick={() => setDamagePage(p => p + 1)}>Next ›</button>
                 </div>
               )}
             </div>
@@ -4225,6 +5101,36 @@ function App() {
               Get these from your own Razorpay Dashboard → Settings → API Keys. We never see or store your sales money — it goes straight to your Razorpay account.
             </p>
 
+            {/* GST Settings */}
+            <label className="modal-label" style={{marginTop:16}}>GST Settings</label>
+            <div style={{background:'#f8faff',border:'1.5px solid #dbeafe',borderRadius:8,padding:'12px 14px',marginTop:4,display:'flex',flexDirection:'column',gap:10}}>
+              <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,fontWeight:600,color:'#1E3A5F'}}>
+                <input type="checkbox" checked={shopEditModal.gstRegistered || false}
+                  onChange={e => setShopEditModal(m => ({...m, gstRegistered: e.target.checked}))} />
+                GST Registered Business
+              </label>
+              {shopEditModal.gstRegistered && (
+                <>
+                  <div>
+                    <label className="modal-label">GSTIN</label>
+                    <input value={shopEditModal.gstin || ''} onChange={e => setShopEditModal(m => ({...m, gstin: e.target.value.toUpperCase()}))}
+                      placeholder="e.g. 29ABCDE1234F1Z5" maxLength={15} style={{marginTop:4,fontFamily:'monospace',letterSpacing:1}} />
+                  </div>
+                  <div>
+                    <label className="modal-label">Supply Type</label>
+                    <select value={shopEditModal.supplyType || 'INTRA'} onChange={e => setShopEditModal(m => ({...m, supplyType: e.target.value}))}
+                      style={{marginTop:4,padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none',width:'100%'}}>
+                      <option value="INTRA">Intra-State (CGST + SGST)</option>
+                      <option value="INTER">Inter-State (IGST)</option>
+                    </select>
+                  </div>
+                </>
+              )}
+            </div>
+            <p style={{fontSize:11.5,color:'#9ca3af',margin:'4px 0 0'}}>
+              When enabled, GST will be computed on every POS bill and shown on receipts. Set the applicable rate per product in the Products page.
+            </p>
+
             <div style={{display:'flex',gap:10,marginTop:18}}>
               <button className="btn-primary" onClick={saveShopSettings} disabled={shopEditSaving} style={{flex:1}}>
                 {shopEditSaving ? 'Saving…' : 'Save'}
@@ -4302,6 +5208,26 @@ function App() {
                 </>
               )}
             </div>
+
+            {tenantInfo?.gstRegistered && (
+              <div style={{display:'flex',gap:8,marginTop:10}}>
+                <div style={{flex:2}}>
+                  <label className="modal-label">HSN / SAC Code</label>
+                  <input value={editModal.hsnCode || ''} onChange={e => setEditModal(m => ({...m, hsnCode: e.target.value}))} placeholder="HSN / SAC Code (optional)" />
+                </div>
+                <div style={{flex:1}}>
+                  <label className="modal-label">GST Rate</label>
+                  <select value={editModal.gstRate ?? ''} onChange={e => setEditModal(m => ({...m, gstRate: e.target.value}))} style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff',outline:'none',width:'100%'}}>
+                    <option value="">None</option>
+                    <option value="0">0% (Exempt)</option>
+                    <option value="5">5%</option>
+                    <option value="12">12%</option>
+                    <option value="18">18%</option>
+                    <option value="28">28%</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             <div className="edit-restock-banner" style={{marginTop:'10px'}}>
               <span className="edit-restock-label">Stock Quantity</span>
@@ -4557,7 +5483,7 @@ function App() {
             <p style={{color:'#555',fontSize:14,margin:'10px 0 0'}}>{confirmDialog.message}</p>
             <div className="modal-actions">
               <button className="modal-cancel" onClick={() => setConfirmDialog(null)}>Cancel</button>
-              <button className="modal-danger" onClick={confirmDialog.onConfirm}>Delete</button>
+              <button className="modal-danger" onClick={confirmDialog.onConfirm}>{confirmDialog.confirmLabel || 'Delete'}</button>
             </div>
           </div>
         </div>
@@ -4579,10 +5505,82 @@ function App() {
             <label className="modal-label" style={{marginTop:'10px'}}>Name</label>
             <input placeholder="Walk-in Customer" value={custNameInput}
               onChange={e => setCustNameInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { setCustModal(false); generateBill(custNameInput, custMobileInput); } }} />
+              onKeyDown={e => { if (e.key === 'Enter' && paymentType !== 'SPLIT') { setCustModal(false); generateBill(custNameInput, custMobileInput, paymentType, splitEntries); } }} />
+
+            {/* ── Payment type selector ── */}
+            <label className="modal-label" style={{marginTop:'14px'}}>Payment Method</label>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
+              {['CASH','CARD','QR','SPLIT'].map(m => (
+                <button key={m} type="button"
+                  onClick={() => { setPaymentType(m); setSplitError(''); if (m !== 'SPLIT') setSplitEntries([{ method: m, amount: '' }]); }}
+                  style={{padding:'6px 14px',borderRadius:6,border:'2px solid',cursor:'pointer',fontWeight:600,fontSize:13,
+                    borderColor: paymentType===m ? '#4f46e5':'#d1d5db',
+                    background: paymentType===m ? '#ede9fe':'#f9fafb',
+                    color: paymentType===m ? '#4f46e5':'#374151'}}>
+                  {m==='CASH'?'💵 Cash':m==='CARD'?'💳 Card':m==='QR'?'📱 QR':'✂️ Split'}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Split payment breakdown ── */}
+            {paymentType === 'SPLIT' && (() => {
+              const subtotal = cart.reduce((s, i) => s + Number(i.price) * i.quantity, 0);
+              const discount = calcDiscount(subtotal);
+              const grandTotal = subtotal - discount;
+              const splitSum = splitEntries.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+              const remaining = Math.round((grandTotal - splitSum) * 100) / 100;
+              return (
+                <div style={{background:'#f8f7ff',border:'1px solid #e0dcff',borderRadius:8,padding:'12px 14px',marginBottom:8}}>
+                  {splitEntries.map((entry, idx) => (
+                    <div key={idx} style={{display:'flex',gap:8,alignItems:'center',marginBottom:8}}>
+                      <select value={entry.method}
+                        onChange={e => setSplitEntries(prev => prev.map((x, i) => i===idx ? {...x, method:e.target.value} : x))}
+                        style={{flex:'0 0 100px',padding:'5px 8px',borderRadius:6,border:'1px solid #d1d5db',fontSize:13}}>
+                        <option value="CASH">Cash</option>
+                        <option value="CARD">Card</option>
+                        <option value="QR">QR</option>
+                        <option value="UPI">UPI</option>
+                      </select>
+                      <input type="number" min="0.01" step="0.01" placeholder="Amount"
+                        value={entry.amount}
+                        onChange={e => setSplitEntries(prev => prev.map((x, i) => i===idx ? {...x, amount:e.target.value} : x))}
+                        style={{flex:1,padding:'5px 8px',borderRadius:6,border:'1px solid #d1d5db',fontSize:13}} />
+                      {splitEntries.length > 1 && (
+                        <button type="button" onClick={() => setSplitEntries(prev => prev.filter((_, i) => i!==idx))}
+                          style={{background:'none',border:'none',color:'#ef4444',cursor:'pointer',fontSize:18,lineHeight:1,padding:'0 4px'}}>✕</button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button"
+                    onClick={() => setSplitEntries(prev => [...prev, { method: 'CASH', amount: '' }])}
+                    style={{fontSize:13,color:'#4f46e5',background:'none',border:'none',cursor:'pointer',padding:'2px 0',fontWeight:600}}>
+                    + Add payment row
+                  </button>
+                  <div style={{display:'flex',justifyContent:'space-between',marginTop:10,paddingTop:8,borderTop:'1px solid #e0dcff',fontSize:13,fontWeight:600}}>
+                    <span>Bill total: ₹{grandTotal.toFixed(2)}</span>
+                    <span style={{color: remaining===0 ? '#16a34a' : '#dc2626'}}>
+                      {remaining===0 ? '✓ Balanced' : remaining > 0 ? `₹${remaining.toFixed(2)} remaining` : `Over by ₹${Math.abs(remaining).toFixed(2)}`}
+                    </span>
+                  </div>
+                  {splitError && <p style={{color:'#dc2626',fontSize:12,margin:'6px 0 0'}}>{splitError}</p>}
+                </div>
+              );
+            })()}
+
             <div className="modal-actions">
               <button className="modal-cancel" onClick={() => setCustModal(false)}>Back</button>
-              <button className="modal-print" onClick={() => { setCustModal(false); generateBill(custNameInput, custMobileInput); }}>
+              <button className="modal-print" onClick={() => {
+                if (paymentType === 'SPLIT') {
+                  const subtotal = cart.reduce((s, i) => s + Number(i.price) * i.quantity, 0);
+                  const grandTotal = subtotal - calcDiscount(subtotal);
+                  const splitSum = splitEntries.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+                  if (Math.abs(splitSum - grandTotal) > 0.001) { setSplitError(`Split total ₹${splitSum.toFixed(2)} must equal bill total ₹${grandTotal.toFixed(2)}`); return; }
+                  if (splitEntries.some(e => !e.method || !(parseFloat(e.amount) > 0))) { setSplitError('Each payment row needs a method and a positive amount.'); return; }
+                  setSplitError('');
+                }
+                setCustModal(false);
+                generateBill(custNameInput, custMobileInput, paymentType, splitEntries);
+              }}>
                 Generate Bill
               </button>
             </div>
@@ -4744,7 +5742,6 @@ function ShopApp() {
   const [pdfForm, setPdfForm] = useState({ name: '', email: '', address: '', phone: '' });
   const [pdfPaying, setPdfPaying] = useState(false);
   const [pdfSuccess, setPdfSuccess] = useState(null); // email string after success
-  const BACKEND = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8080/gosuas-core';
   const imgUrls = (p) => (p?.imageUrl || '').split(',').filter(Boolean);
   const imgSrc  = (url) => `${BACKEND}${url}`;
   const shopLogoSrc = shopInfo.logoUrl ? `${BACKEND}${shopInfo.logoUrl}` : '/logo.png';
@@ -4776,7 +5773,7 @@ function ShopApp() {
   };
 
   const cartTotal = cart.reduce((s, i) => s + Number(i.price) * i.qty, 0);
-  const cartCount = cart.reduce((s, i) => s + i.qty, 0);
+  const cartCount = cart.length;
 
   const placeOrder = async (e) => {
     e.preventDefault();
@@ -4936,7 +5933,8 @@ function ShopApp() {
     // Exclude colour siblings from "You May Also Like" since they're shown in the colour picker above
     const similar = products.filter(p => p.category === dp.category && p.id !== dp.id && !(hasColorFamily && baseSkuOf(p.sku) === dpBaseSku)).slice(0, 8);
     return (
-      <div className="s2-detail-page">
+      <>
+        <div className="s2-detail-page">
         {/* Header */}
         <header className="s2-header" style={{position:'sticky',top:0,zIndex:100}}>
           <div className="s2-header-inner">
@@ -5080,71 +6078,109 @@ function ShopApp() {
           </div>
         )}
 
-        {/* Cart drawer (shared) */}
-        {showCart && (
-          <div className="s2-cart-overlay" onClick={() => setShowCart(false)}>
-            <div className="s2-cart-drawer" onClick={e => e.stopPropagation()}>
-              <div className="s2-cart-hdr"><span>Your Cart ({cartCount})</span><button onClick={() => setShowCart(false)}>✕</button></div>
-              {cart.length === 0 ? <p className="s2-cart-empty">Your cart is empty.</p> : <>
-                <div className="s2-cart-items">
-                  {cart.map(i => (
-                    <div key={i.barcode} className="s2-cart-item">
-                      {i.imageUrl && <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-item-img" />}
-                      <div className="s2-cart-item-info">
-                        <div className="s2-cart-item-name">{i.name}</div>
-                        <div className="s2-cart-item-price">₹{Number(i.price).toFixed(2)}</div>
-                      </div>
-                      <div className="s2-cart-qty">
-                        <button onClick={() => updateCartQty(i.key, -1)}>−</button>
-                        <span>{i.qty}</span>
-                        <button onClick={() => updateCartQty(i.key, 1)}>+</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="s2-cart-footer">
-                  <div className="s2-cart-total">Total: ₹{cartTotal.toFixed(2)}</div>
-                  <button className="s2-checkout-btn" onClick={() => { setShowCart(false); setCheckout(true); }}>Checkout →</button>
-                </div>
-              </>}
-            </div>
-          </div>
-        )}
-
-        {/* Checkout modal (shared) */}
-        {checkout && (
-          <div className="s2-modal-overlay" onClick={() => setCheckout(false)}>
-            <div className="s2-modal" onClick={e => e.stopPropagation()}>
-              <button className="s2-modal-close" onClick={() => setCheckout(false)}>✕</button>
-              <h2 className="s2-modal-title">Checkout</h2>
-              <form onSubmit={placeOrder}>
-                <label className="s2-lbl">Full Name *</label>
-                <input className="s2-inp" value={orderForm.name} onChange={e=>setOrderForm(f=>({...f,name:e.target.value}))} required />
-                <label className="s2-lbl">Mobile Number *</label>
-                <input className="s2-inp" type="tel" inputMode="numeric" maxLength={10} value={orderForm.phone}
-                  onChange={e=>setOrderForm(f=>({...f,phone:e.target.value.replace(/\D/g,'').slice(0,10)}))} required />
-                <label className="s2-lbl">Delivery Address *</label>
-                <label className="s2-lbl">House / Flat No. *</label>
-                <input className="s2-inp" value={orderForm.houseNo} onChange={e=>setOrderForm(f=>({...f,houseNo:e.target.value}))} required />
-                <label className="s2-lbl">Street / Area *</label>
-                <input className="s2-inp" value={orderForm.street} onChange={e=>setOrderForm(f=>({...f,street:e.target.value}))} required />
-                <div className="s2-addr-row">
-                  <div><label className="s2-lbl">City *</label><input className="s2-inp" value={orderForm.city} onChange={e=>setOrderForm(f=>({...f,city:e.target.value}))} required /></div>
-                  <div><label className="s2-lbl">Pincode *</label><input className="s2-inp" value={orderForm.pincode} onChange={e=>setOrderForm(f=>({...f,pincode:e.target.value}))} required /></div>
-                </div>
-                <label className="s2-lbl">State *</label>
-                <select className="s2-inp" value={orderForm.state} onChange={e=>setOrderForm(f=>({...f,state:e.target.value}))} required>
-                  <option value="">Select state</option>
-                  {INDIA_STATES.map(s=><option key={s}>{s}</option>)}
-                </select>
-                {orderError && <p className="error-msg">{orderError}</p>}
-                <button type="submit" className="s2-place-btn">Place Order</button>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
-    );
+
+      {/* Cart Drawer */}
+      {showCart && (
+        <div className="s2-overlay" onClick={() => setShowCart(false)}>
+          <div className="s2-drawer" onClick={e => e.stopPropagation()}>
+            <div className="s2-drawer-hdr">
+              <h3>Your Cart ({cartCount})</h3>
+              <button className="s2-drawer-close" onClick={() => setShowCart(false)}>✕</button>
+            </div>
+            {cart.length === 0
+              ? <div className="s2-cart-empty">Your cart is empty<br/><small>Add some items to get started!</small></div>
+              : <>
+                  <div className="s2-cart-items">
+                    {cart.map(i => (
+                      <div key={i.key} className="s2-cart-row">
+                        {i.imageUrl
+                          ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
+                          : <div className="s2-cart-thumb-ph">💎</div>}
+                        <div className="s2-cart-info">
+                          <div className="s2-cart-name">{i.name}</div>
+                          {(i.selectedColor || i.selectedSize) && (
+                            <div className="s2-cart-variant">
+                              {i.selectedColor && (
+                                <span className="s2-cart-color-dot"
+                                  style={{background: COLOR_CSS[i.selectedColor] || '#ccc',
+                                    border: i.selectedColor==='White'?'1px solid #ddd':'none'}} />
+                              )}
+                              {[i.selectedColor, i.selectedSize].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                          <div className="s2-cart-price-each">₹{Number(i.price).toFixed(2)}</div>
+                        </div>
+                        <div className="s2-qty-wrap">
+                          <button className="s2-qty-btn" onClick={() => updateCartQty(i.key, -1)}>−</button>
+                          <span className="s2-qty-num">{i.qty}</span>
+                          <button className="s2-qty-btn" onClick={() => updateCartQty(i.key, 1)}>+</button>
+                        </div>
+                        <div className="s2-cart-line">₹{(Number(i.price) * i.qty).toFixed(2)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="s2-cart-footer">
+                    <div className="s2-cart-subtotal"><span>Subtotal</span><strong>₹{cartTotal.toFixed(2)}</strong></div>
+                    <button className="s2-checkout-btn" onClick={() => { setShowCart(false); setCheckout(true); }}>
+                      Proceed to Checkout →
+                    </button>
+                  </div>
+                </>
+            }
+          </div>
+        </div>
+      )}
+
+      {/* Checkout Modal */}
+      {checkout && (
+        <div className="s2-overlay s2-center-overlay" onClick={() => setCheckout(false)}>
+          <div className="s2-checkout-modal" onClick={e => e.stopPropagation()}>
+            <div className="s2-drawer-hdr">
+              <h3>Checkout</h3>
+              <button className="s2-drawer-close" onClick={() => setCheckout(false)}>✕</button>
+            </div>
+            <form onSubmit={placeOrder} className="s2-checkout-form">
+              <div className="s2-form-group">
+                <label>Full Name *</label>
+                <input placeholder="Your full name" value={orderForm.name} onChange={e => setOrderForm({...orderForm, name: e.target.value})} />
+              </div>
+              <div className="s2-form-group">
+                <label>Phone Number *</label>
+                <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile number"
+                  value={orderForm.phone}
+                  onChange={e => setOrderForm({...orderForm, phone: e.target.value.replace(/\D/g, '').slice(0, 10)})} />
+              </div>
+              <div className="s2-addr-section">
+                <div className="s2-addr-title">Delivery Address *</div>
+                <input placeholder="House / Flat / Building No. *" value={orderForm.houseNo} onChange={e => setOrderForm({...orderForm, houseNo: e.target.value})} required />
+                <input placeholder="Street / Area / Locality *" value={orderForm.street} onChange={e => setOrderForm({...orderForm, street: e.target.value})} required />
+                <div className="s2-form-row">
+                  <input placeholder="City *" value={orderForm.city} onChange={e => setOrderForm({...orderForm, city: e.target.value})} required />
+                  <input placeholder="PIN Code *" value={orderForm.pincode} onChange={e => setOrderForm({...orderForm, pincode: e.target.value})} required />
+                </div>
+                <select value={orderForm.state} onChange={e => setOrderForm({...orderForm, state: e.target.value})} required>
+                  <option value="">Select State *</option>
+                  {INDIA_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="s2-order-summary">
+                <div className="s2-summary-title">Order Summary</div>
+                {cart.map(i => (
+                  <div key={i.barcode} className="s2-summary-row">
+                    <span>{i.name} × {i.qty}</span><span>₹{(Number(i.price)*i.qty).toFixed(2)}</span>
+                  </div>
+                ))}
+                <div className="s2-summary-total"><span>Total</span><strong>₹{cartTotal.toFixed(2)}</strong></div>
+              </div>
+              {orderError && <p className="s2-form-error">{orderError}</p>}
+              <button type="submit" className="s2-place-btn">Place Order</button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
   }
 
   /* ── Order success screen ── */
@@ -5332,9 +6368,10 @@ function ShopApp() {
                         {!p.festiveOffer && isNew && p.stockQty > 0 && <div className="s2-new-badge">NEW</div>}
                         {p.featured && <div className="s2-fav-badge">❤</div>}
                         {urls.length > 0
-                          ? <img src={imgSrc(urls[0])} alt={p.name} className="s2-card-img" />
-                          : <div className="s2-card-placeholder"><span>💎</span></div>
-                        }
+                          ? <img src={imgSrc(urls[0])} alt={p.name} className="s2-card-img"
+                              onError={e => { e.currentTarget.style.display='none'; e.currentTarget.nextElementSibling.style.display='flex'; }} />
+                          : null}
+                        <div className="s2-card-placeholder" style={{display: urls.length > 0 ? 'none' : 'flex'}}><span>💎</span></div>
                         {p.stockQty > 0
                           ? <button className="s2-quick-add" onClick={e => { e.stopPropagation(); addToCart(p); }}>Add to Cart</button>
                           : <div className="s2-out-of-stock">Out of Stock</div>

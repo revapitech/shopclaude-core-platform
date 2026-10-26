@@ -30,9 +30,30 @@ public class Bill {
     private String paymentStatus;
     private LocalDateTime billDate;
 
+    // GST breakdown — populated only when the tenant is GST-registered.
+    // Null on older bills created before this feature was added.
+    @Column(name = "taxable_amount", precision = 12, scale = 2)
+    private BigDecimal taxableAmount;
+
+    @Column(name = "cgst", precision = 12, scale = 2)
+    private BigDecimal cgst;
+
+    @Column(name = "sgst", precision = 12, scale = 2)
+    private BigDecimal sgst;
+
+    @Column(name = "igst", precision = 12, scale = 2)
+    private BigDecimal igst;
+
+    @Column(name = "total_gst", precision = 12, scale = 2)
+    private BigDecimal totalGst;
+
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<BillItem> items = new ArrayList<>();
+
+    @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<BillPayment> payments = new ArrayList<>();
 
     @PrePersist
     public void prePersist() {

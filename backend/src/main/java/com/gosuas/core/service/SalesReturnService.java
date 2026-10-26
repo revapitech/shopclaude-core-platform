@@ -6,6 +6,8 @@ import com.gosuas.core.entity.*;
 import com.gosuas.core.repository.*;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -24,7 +26,7 @@ public class SalesReturnService {
     private final ProductRepository     productRepository;
 
     private static final Set<String> VALID_SOURCE_TYPES =
-            Set.of("POS", "ONLINE", "SHOPIFY");
+            Set.of("POS", "ONLINE", "SHOPIFY", "DIRECT");
     private static final Set<String> TERMINAL_STATUSES =
             Set.of("REJECTED", "COMPLETED", "CANCELLED");
 
@@ -35,9 +37,9 @@ public class SalesReturnService {
         UUID tenantId = TenantContext.getTenantId();
 
         if (request.sourceType() == null || !VALID_SOURCE_TYPES.contains(request.sourceType().toUpperCase())) {
-            throw new IllegalArgumentException("sourceType must be one of POS, ONLINE, SHOPIFY");
+            throw new IllegalArgumentException("sourceType must be one of POS, ONLINE, SHOPIFY, DIRECT");
         }
-        if (request.sourceBillId() == null) {
+        if (request.sourceBillId() == null && !"DIRECT".equalsIgnoreCase(request.sourceType())) {
             throw new IllegalArgumentException("sourceBillId is required");
         }
         if (request.items() == null || request.items().isEmpty()) {
@@ -58,7 +60,7 @@ public class SalesReturnService {
 
         switch (srcType) {
             case "POS" -> {
-                Bill bill = billRepository.findById(request.sourceBillId())
+                Bill bill = billRepository.findByIdForUpdate(request.sourceBillId())
                         .filter(b -> tenantId.equals(b.getTenantId()))
                         .orElseThrow(() -> new IllegalArgumentException(
                                 "POS bill not found: " + request.sourceBillId()));
@@ -73,7 +75,7 @@ public class SalesReturnService {
                                 i.getUnitPrice(), i.getQuantity())));
             }
             case "ONLINE" -> {
-                ShopOrder order = shopOrderRepository.findById(request.sourceBillId())
+                ShopOrder order = shopOrderRepository.findByIdForUpdate(request.sourceBillId())
                         .filter(o -> tenantId.equals(o.getTenantId()))
                         .orElseThrow(() -> new IllegalArgumentException(
                                 "Online order not found: " + request.sourceBillId()));
@@ -85,6 +87,13 @@ public class SalesReturnService {
                         i -> new OriginalItemInfo(
                                 i.getProductId(), i.getProductName(), i.getBarcode(),
                                 i.getUnitPrice(), i.getQuantity())));
+            }
+            case "DIRECT" -> {
+                // Walk-in / direct return — no original bill; product is looked up by barcode in the item loop
+                sourceBillNo   = "DIRECT";
+                customerName   = request.customerName();
+                customerMobile = request.customerMobile();
+                originals      = Map.of();
             }
             default -> {
                 // SHOPIFY — imported data only; no stock link, qty validation skipped
@@ -101,7 +110,7 @@ public class SalesReturnService {
         for (SalesReturnItemRequest itemReq : request.items()) {
             OriginalItemInfo orig = originals.get(itemReq.barcode());
 
-            if (orig == null && !"SHOPIFY".equals(srcType)) {
+            if (orig == null && !"SHOPIFY".equals(srcType) && !"DIRECT".equals(srcType)) {
                 throw new IllegalArgumentException(
                         "Barcode '" + itemReq.barcode() + "' was not found in the original sale");
             }
@@ -118,12 +127,27 @@ public class SalesReturnService {
                 }
             }
 
-            BigDecimal unitPrice = orig != null ? orig.unitPrice() : BigDecimal.ZERO;
+            UUID   itemProductId;
+            String itemProductName;
+            BigDecimal unitPrice;
+            if ("DIRECT".equals(srcType)) {
+                Product p = productRepository.findByBarcodeAndTenantId(itemReq.barcode(), tenantId)
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Product not found for barcode: " + itemReq.barcode()));
+                itemProductId   = p.getId();
+                itemProductName = p.getName() + (p.getColor() != null && !p.getColor().isBlank()
+                        ? " (" + p.getColor() + ")" : "");
+                unitPrice       = p.getSellingPrice() != null ? p.getSellingPrice() : BigDecimal.ZERO;
+            } else {
+                itemProductId   = orig != null ? orig.productId() : null;
+                itemProductName = orig != null ? orig.productName() : itemReq.barcode();
+                unitPrice       = orig != null ? orig.unitPrice() : BigDecimal.ZERO;
+            }
             BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(itemReq.returnedQty()));
 
             returnItems.add(SalesReturnItem.builder()
-                    .productId(orig != null ? orig.productId() : null)
-                    .productName(orig != null ? orig.productName() : itemReq.barcode())
+                    .productId(itemProductId)
+                    .productName(itemProductName)
                     .barcode(itemReq.barcode())
                     .returnedQty(itemReq.returnedQty())
                     .unitPrice(unitPrice)
@@ -150,6 +174,7 @@ public class SalesReturnService {
                 .status("PENDING")
                 .refundStatus("PENDING")
                 .stockRestored(false)
+                .createdBy(currentUserId())
                 .build();
 
         returnItems.forEach(item -> item.setSalesReturn(ret));
@@ -181,7 +206,7 @@ public class SalesReturnService {
     public SalesReturnResponse updateStatus(UUID id, String newStatus) {
         UUID tenantId = TenantContext.getTenantId();
 
-        SalesReturn ret = returnRepository.findById(id)
+        SalesReturn ret = returnRepository.findByIdForUpdate(id)
                 .filter(r -> tenantId.equals(r.getTenantId()))
                 .orElseThrow(() -> new RuntimeException("Return not found: " + id));
 
@@ -285,7 +310,13 @@ public class SalesReturnService {
         if ("SHOPIFY".equals(ret.getSourceType())) return;
         for (SalesReturnItem item : ret.getItems()) {
             if (Boolean.TRUE.equals(item.getRestockable()) && item.getProductId() != null) {
-                productRepository.restoreStock(item.getProductId(), tenantId, item.getReturnedQty());
+                // 0 rows = the product was deleted since the sale. Fail the whole approval
+                // (rolls back any items already restocked) rather than mark it restored.
+                int updated = productRepository.restoreStock(item.getProductId(), tenantId, item.getReturnedQty());
+                if (updated != 1) {
+                    throw new IllegalArgumentException("Cannot restock '" + item.getProductName()
+                            + "': the product no longer exists in inventory. Untick Restock or reject the return.");
+                }
             }
         }
     }
@@ -312,6 +343,28 @@ public class SalesReturnService {
         }
     }
 
+    // ── SKU / direct return product lookup ───────────────────────────────────
+
+    @Transactional
+    public Map<String, Object> lookupProductForReturn(String sku) {
+        UUID tenantId = TenantContext.getTenantId();
+        Product p = productRepository.findBySkuAndTenantId(sku.trim(), tenantId)
+                .or(() -> productRepository.findByBarcodeAndTenantId(sku.trim(), tenantId))
+                .orElseThrow(() -> new RuntimeException("Product not found for SKU/barcode: " + sku));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("productId",    p.getId().toString());
+        result.put("productName",  p.getName() + (p.getColor() != null && !p.getColor().isBlank()
+                ? " (" + p.getColor() + ")" : ""));
+        result.put("sku",          p.getSku());
+        result.put("barcode",      p.getBarcode());
+        result.put("color",        p.getColor());
+        result.put("size",         p.getSize());
+        result.put("sellingPrice", p.getSellingPrice());
+        result.put("stockQty",     p.getStockQty());
+        result.put("imageUrl",     p.getImageUrl());
+        return result;
+    }
+
     private String generateReturnNo(UUID tenantId) {
         String prefix = "RET-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
         int maxSeq = returnRepository.findAllByTenantIdAndReturnNoStartingWith(tenantId, prefix)
@@ -336,7 +389,15 @@ public class SalesReturnService {
                 r.getCustomerName(), r.getCustomerMobile(),
                 r.getReturnDate(), r.getReturnReason(), r.getRemarks(),
                 r.getTotalReturnAmount(), r.getRefundMode(), r.getRefundStatus(),
-                r.getStatus(), r.isStockRestored(), r.getCreatedAt(), itemResps);
+                r.getStatus(), r.isStockRestored(), r.getCreatedBy(), r.getCreatedAt(), itemResps);
+    }
+
+    // JwtFilter sets the token subject (the user's id) as the authentication principal.
+    private UUID currentUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || auth.getName() == null) return null;
+        try { return UUID.fromString(auth.getName()); }
+        catch (IllegalArgumentException e) { return null; }
     }
 
     // Projection used internally during return creation

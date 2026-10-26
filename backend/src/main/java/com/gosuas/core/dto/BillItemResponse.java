@@ -9,5 +9,11 @@ public record BillItemResponse(
         String barcode,
         Integer quantity,
         BigDecimal unitPrice,
-        BigDecimal lineTotal
+        BigDecimal lineTotal,
+        String hsnCode,
+        BigDecimal gstRate,
+        BigDecimal taxableAmount,
+        BigDecimal cgst,
+        BigDecimal sgst,
+        BigDecimal igst
 ) {}

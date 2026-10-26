@@ -13,16 +13,19 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/admin/reports")
 @RequiredArgsConstructor
 public class ReportsController {
 
-    private final BillRepository       billRepo;
-    private final ShopOrderRepository  shopOrderRepo;
+    private final BillRepository        billRepo;
+    private final ShopOrderRepository   shopOrderRepo;
     private final OrderDetailRepository orderDetailRepo;
     private final RentalOrderRepository rentalOrderRepo;
+    private final DamageStockRepository damageRepo;
+    private final ProductRepository     productRepo;
 
     @GetMapping
     public Map<String, Object> getStats(
@@ -34,7 +37,7 @@ public class ReportsController {
         LocalDateTime toDt   = to   != null ? to.plusDays(1).atStartOfDay() : LocalDateTime.now().plusDays(1);
 
         // ── POS bills (offline) ──────────────────────────────────────────────
-        List<Bill> bills = billRepo.findAllByTenantId(tenantId).stream()
+        List<Bill> bills = billRepo.findAllByTenantIdWithPayments(tenantId).stream()
             .filter(b -> b.getBillDate() != null && !b.getBillDate().isBefore(fromDt) && b.getBillDate().isBefore(toDt))
             .collect(Collectors.toList());
 
@@ -42,10 +45,23 @@ public class ReportsController {
         double offlineDiscount = bills.stream().mapToDouble(b -> safeNum(b.getDiscountAmount())).sum();
         int    offlineOrders  = bills.size();
 
+        // ── GST totals (POS bills only) ───────────────────────────────────────
+        double totalTaxableValue = bills.stream().mapToDouble(b -> safeNum(b.getTaxableAmount())).sum();
+        double totalCgst  = bills.stream().mapToDouble(b -> safeNum(b.getCgst())).sum();
+        double totalSgst  = bills.stream().mapToDouble(b -> safeNum(b.getSgst())).sum();
+        double totalIgst  = bills.stream().mapToDouble(b -> safeNum(b.getIgst())).sum();
+        double totalGst   = bills.stream().mapToDouble(b -> safeNum(b.getTotalGst())).sum();
+
         Map<String, Double> paymentMethods = new LinkedHashMap<>();
         bills.forEach(b -> {
-            String pm = b.getPaymentMode() != null ? b.getPaymentMode() : "Other";
-            paymentMethods.merge(pm, safeNum(b.getGrandTotal()), Double::sum);
+            if ("SPLIT".equals(b.getPaymentMode()) && b.getPayments() != null && !b.getPayments().isEmpty()) {
+                b.getPayments().forEach(p ->
+                    paymentMethods.merge(p.getMethod(), p.getAmount().doubleValue(), Double::sum)
+                );
+            } else {
+                String pm = b.getPaymentMode() != null ? b.getPaymentMode() : "Other";
+                paymentMethods.merge(pm, safeNum(b.getGrandTotal()), Double::sum);
+            }
         });
 
         // ── Online shop orders ───────────────────────────────────────────────
@@ -143,6 +159,91 @@ public class ReportsController {
                 return p;
             }).collect(Collectors.toList());
 
+        // ── Damage Stock ─────────────────────────────────────────────────────
+        // Load all damage entries for this tenant, filter to date range.
+        List<DamageStock> damages = damageRepo.findAllByTenantIdOrderByCreatedAtDesc(tenantId).stream()
+            .filter(d -> d.getCreatedAt() != null && !d.getCreatedAt().isBefore(fromDt) && d.getCreatedAt().isBefore(toDt))
+            .collect(Collectors.toList());
+
+        // Build a productId → purchasePrice map in one query (avoids N+1).
+        Map<UUID, BigDecimal> productCostMap = productRepo.findAllByTenantId(tenantId).stream()
+            .filter(p -> p.getPurchasePrice() != null && p.getId() != null)
+            .collect(Collectors.toMap(Product::getId, Product::getPurchasePrice, (a, b) -> a));
+
+        long   totalDamageQty     = damages.stream().mapToLong(d -> d.getDamageQty() != null ? d.getDamageQty() : 0).sum();
+        long   totalDamageEntries = damages.size();
+        long   affectedSkuCount   = damages.stream().map(DamageStock::getSku).filter(Objects::nonNull).distinct().count();
+
+        // Estimated damage value — only when purchasePrice is known for the product.
+        double damageValue = damages.stream().mapToDouble(d -> {
+            if (d.getProductId() == null) return 0;
+            BigDecimal cost = productCostMap.get(d.getProductId());
+            return cost != null ? cost.doubleValue() * (d.getDamageQty() != null ? d.getDamageQty() : 0) : 0;
+        }).sum();
+
+        // Damage qty grouped by reason
+        Map<String, Long> damageByReason = damages.stream()
+            .collect(Collectors.groupingBy(
+                d -> d.getReason() != null ? d.getReason() : "OTHER",
+                LinkedHashMap::new,
+                Collectors.summingLong(d -> d.getDamageQty() != null ? d.getDamageQty() : 0)
+            ));
+
+        // Damage qty + estimated value grouped by SKU / product name
+        Map<String, long[]> dmgBySkuMap = new LinkedHashMap<>();
+        damages.forEach(d -> {
+            String key = (d.getSku() != null ? d.getSku() : "?") + "||" + (d.getProductName() != null ? d.getProductName() : "Unknown");
+            dmgBySkuMap.computeIfAbsent(key, k -> new long[]{0, 0});
+            long qty = d.getDamageQty() != null ? d.getDamageQty() : 0;
+            dmgBySkuMap.get(key)[0] += qty;
+            if (d.getProductId() != null) {
+                BigDecimal cost = productCostMap.get(d.getProductId());
+                if (cost != null) dmgBySkuMap.get(key)[1] += Math.round(cost.doubleValue() * qty);
+            }
+        });
+
+        List<Map<String, Object>> damageByProduct = dmgBySkuMap.entrySet().stream()
+            .sorted((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0]))
+            .map(e -> {
+                String[] parts = e.getKey().split("\\|\\|", 2);
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("sku",   parts[0]);
+                m.put("name",  parts.length > 1 ? parts[1] : "Unknown");
+                m.put("qty",   e.getValue()[0]);
+                m.put("value", e.getValue()[1] > 0 ? e.getValue()[1] : null);
+                return m;
+            }).collect(Collectors.toList());
+
+        // Damage qty grouped by date (ascending)
+        Map<String, Long> dmgByDateMap = new TreeMap<>();
+        damages.forEach(d -> {
+            String dateKey = d.getCreatedAt() != null ? d.getCreatedAt().toLocalDate().toString() : "unknown";
+            dmgByDateMap.merge(dateKey, d.getDamageQty() != null ? (long) d.getDamageQty() : 0L, Long::sum);
+        });
+        List<Map<String, Object>> damageByDate = dmgByDateMap.entrySet().stream()
+            .map(e -> { Map<String, Object> m = new LinkedHashMap<>(); m.put("date", e.getKey()); m.put("qty", e.getValue()); return m; })
+            .collect(Collectors.toList());
+
+        // Detailed damage entries (newest first, max 200)
+        List<Map<String, Object>> damageEntries = damages.stream().limit(200).map(d -> {
+            BigDecimal cost = d.getProductId() != null ? productCostMap.get(d.getProductId()) : null;
+            long       qty  = d.getDamageQty() != null ? d.getDamageQty() : 0;
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id",          d.getId() != null ? d.getId().toString() : null);
+            m.put("damageNo",    d.getDamageNo());
+            m.put("date",        d.getCreatedAt() != null ? d.getCreatedAt().toLocalDate().toString() : null);
+            m.put("productName", d.getProductName());
+            m.put("sku",         d.getSku());
+            m.put("color",       d.getColor());
+            m.put("damageQty",   qty);
+            m.put("reason",      d.getReason() != null ? d.getReason() : "OTHER");
+            m.put("notes",       d.getNotes());
+            m.put("createdBy",   d.getCreatedBy() != null ? d.getCreatedBy().toString() : null);
+            m.put("unitCost",    cost != null ? cost.doubleValue() : null);
+            m.put("lineValue",   cost != null ? Math.round(cost.doubleValue() * qty) : null);
+            return m;
+        }).collect(Collectors.toList());
+
         // ── Build response ───────────────────────────────────────────────────
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("totalOrders",    totalOrders);
@@ -164,6 +265,20 @@ public class ReportsController {
         res.put("paymentMethods", paymentMethods);
         res.put("daily",          daily);
         res.put("topProducts",    topProducts);
+        res.put("gstTaxableValue", Math.round(totalTaxableValue * 100.0) / 100.0);
+        res.put("gstCgst",         Math.round(totalCgst  * 100.0) / 100.0);
+        res.put("gstSgst",         Math.round(totalSgst  * 100.0) / 100.0);
+        res.put("gstIgst",         Math.round(totalIgst  * 100.0) / 100.0);
+        res.put("gstTotal",        Math.round(totalGst   * 100.0) / 100.0);
+        // Damage Stock summary — not counted in revenue or orders
+        res.put("totalDamageQty",     totalDamageQty);
+        res.put("totalDamageEntries", totalDamageEntries);
+        res.put("affectedSkuCount",   affectedSkuCount);
+        res.put("damageValue",        Math.round(damageValue * 100.0) / 100.0);
+        res.put("damageByReason",     damageByReason);
+        res.put("damageByProduct",    damageByProduct);
+        res.put("damageByDate",       damageByDate);
+        res.put("damageEntries",      damageEntries);
         return res;
     }
 
