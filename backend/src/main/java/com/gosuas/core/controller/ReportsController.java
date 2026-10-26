@@ -3,6 +3,7 @@ package com.gosuas.core.controller;
 import com.gosuas.core.config.TenantContext;
 import com.gosuas.core.entity.*;
 import com.gosuas.core.repository.*;
+import com.gosuas.core.service.ExpenseService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +27,7 @@ public class ReportsController {
     private final RentalOrderRepository rentalOrderRepo;
     private final DamageStockRepository damageRepo;
     private final ProductRepository     productRepo;
+    private final ExpenseRepository     expenseRepo;
 
     @GetMapping
     public Map<String, Object> getStats(
@@ -279,6 +281,33 @@ public class ReportsController {
         res.put("damageByProduct",    damageByProduct);
         res.put("damageByDate",       damageByDate);
         res.put("damageEntries",      damageEntries);
+
+        // ── Expense Summary ──────────────────────────────────────────────────
+        LocalDate expFrom = from != null ? from : LocalDate.of(2000, 1, 1);
+        LocalDate expTo   = to   != null ? to   : LocalDate.now();
+
+        long       expenseCount = expenseRepo.countByTenantIdAndDateRange(tenantId, expFrom, expTo);
+        BigDecimal expenseTotal = expenseRepo.sumByTenantIdAndDateRange(tenantId, expFrom, expTo);
+        if (expenseTotal == null) expenseTotal = BigDecimal.ZERO;
+
+        // Seed all 7 categories with zero — missing categories still appear.
+        Map<String, Object> expenseByCat = new LinkedHashMap<>();
+        for (String cat : ExpenseService.VALID_CATEGORIES) expenseByCat.put(cat, BigDecimal.ZERO);
+        expenseRepo.sumByCategoryAndDateRange(tenantId, expFrom, expTo)
+                .forEach(row -> expenseByCat.put((String) row[0], row[1]));
+
+        List<Map<String, Object>> expenseDaily = new ArrayList<>();
+        expenseRepo.sumByDayAndDateRange(tenantId, expFrom, expTo).forEach(row -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("date",   row[0].toString());
+            m.put("amount", row[1]);
+            expenseDaily.add(m);
+        });
+
+        res.put("expenseCount",  expenseCount);
+        res.put("expenseTotal",  expenseTotal);
+        res.put("expenseByCat",  expenseByCat);
+        res.put("expenseDaily",  expenseDaily);
         return res;
     }
 
