@@ -1517,8 +1517,7 @@ function App() {
   const [expenseSearch, setExpenseSearch] = useState('');
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('');
   const [expensePaymentFilter, setExpensePaymentFilter] = useState('');
-  const [expenseDateFrom, setExpenseDateFrom] = useState('');
-  const [expenseDateTo, setExpenseDateTo] = useState('');
+  const [expenseDateFilter, setExpenseDateFilter] = useState('');
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const EXPENSE_FORM_EMPTY = { category: '', amount: '', expenseDate: new Date().toISOString().slice(0,10), description: '', paymentMethod: 'CASH', referenceNumber: '' };
   const [expenseForm, setExpenseForm] = useState(EXPENSE_FORM_EMPTY);
@@ -1709,10 +1708,7 @@ function App() {
   const loadExpenses = async () => {
     setExpenseLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (expenseDateFrom) params.set('from', expenseDateFrom);
-      if (expenseDateTo)   params.set('to', expenseDateTo);
-      const res = await axios.get(`${API}/expenses?${params}`);
+      const res = await axios.get(`${API}/expenses`);
       setExpenses(res.data);
       setExpenseError('');
     } catch (e) {
@@ -5251,6 +5247,7 @@ function App() {
           const filtered = expenses.filter(ex => {
             if (expenseCategoryFilter && ex.category !== expenseCategoryFilter) return false;
             if (expensePaymentFilter && ex.paymentMethod !== expensePaymentFilter) return false;
+            if (expenseDateFilter && ex.expenseDate !== expenseDateFilter) return false;
             if (lq && !(
               (ex.description || '').toLowerCase().includes(lq) ||
               (EXPENSE_CAT_LABELS[ex.category] || '').toLowerCase().includes(lq) ||
@@ -5322,7 +5319,7 @@ function App() {
                           style={{marginTop:4}} />
                       </div>
                       <div>
-                        <label className="modal-label">Date <span style={{color:'#dc2626'}}>*</span></label>
+                        <label className="modal-label">Payment Date <span style={{color:'#dc2626'}}>*</span></label>
                         <input type="date"
                           value={expenseForm.expenseDate}
                           onChange={e => setExpenseForm(f => ({...f, expenseDate: e.target.value}))}
@@ -5384,25 +5381,16 @@ function App() {
                   <option value="">All Payment Methods</option>
                   {EXPENSE_PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
-                <input type="date" value={expenseDateFrom}
-                  onChange={e => { setExpenseDateFrom(e.target.value); setExpensePage(1); }}
-                  title="From date"
+                <input type="date" value={expenseDateFilter}
+                  onChange={e => { setExpenseDateFilter(e.target.value); setExpensePage(1); }}
+                  title="Filter by payment date"
                   style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none',flexShrink:0}} />
-                <span style={{fontSize:13,color:'#9ca3af',flexShrink:0}}>to</span>
-                <input type="date" value={expenseDateTo}
-                  onChange={e => { setExpenseDateTo(e.target.value); setExpensePage(1); }}
-                  title="To date"
-                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none',flexShrink:0}} />
-                {(expenseDateFrom || expenseDateTo) && (
+                {expenseDateFilter && (
                   <button className="btn-secondary" style={{fontSize:12,padding:'6px 12px',flexShrink:0}}
-                    onClick={() => { setExpenseDateFrom(''); setExpenseDateTo(''); }}>
-                    Clear Dates
+                    onClick={() => { setExpenseDateFilter(''); setExpensePage(1); }}>
+                    Clear
                   </button>
                 )}
-                <button className="btn-secondary" style={{fontSize:12,padding:'6px 14px',flexShrink:0}}
-                  onClick={loadExpenses}>
-                  Apply
-                </button>
               </div>
 
               {/* Error */}
