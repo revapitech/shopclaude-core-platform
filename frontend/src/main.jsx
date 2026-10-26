@@ -28,15 +28,21 @@ axios.interceptors.request.use(config => {
   return config;
 });
 
-// On 401/403, clear token and reload to login screen.
-// Skip auto-logout for file upload requests — those errors are handled by the
-// calling try/catch so the user sees a meaningful toast instead of a silent reload.
+// On 401, clear token and reload to login screen.
+// Guards to prevent false-positive logouts:
+//   1. File uploads — errors handled by the calling try/catch for a meaningful toast.
+//   2. Auth endpoints (/auth/) — a wrong-password login returns 401 legitimately; that
+//      must never clear an already-stored session token.
+//   3. Requests sent WITHOUT an Authorization header — if the request was unauthenticated
+//      to begin with, a 401 response cannot indicate an expired session.
 axios.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401) {
-      const isFileUpload = err.config?.headers?.['Content-Type']?.includes('multipart/form-data');
-      if (!isFileUpload) {
+      const isFileUpload   = err.config?.headers?.['Content-Type']?.includes('multipart/form-data');
+      const isAuthEndpoint = (err.config?.url || '').includes('/auth/');
+      const hadAuthHeader  = !!err.config?.headers?.['Authorization'];
+      if (!isFileUpload && !isAuthEndpoint && hadAuthHeader) {
         const token = localStorage.getItem('gosuas_token');
         if (token) { localStorage.removeItem('gosuas_token'); window.location.reload(); }
       }
@@ -2024,9 +2030,11 @@ function App() {
 
   const handleLogin = (token) => {
     localStorage.setItem('gosuas_token', token);
-    // Navigate to home (strip hash) so the app starts fresh instead of
-    // reloading at whatever protected page triggered the session-expiry redirect.
-    window.location.replace(window.location.pathname);
+    // Strip any stale URL hash left from the session-expiry redirect, then
+    // update React state directly — avoids an unreliable same-path reload.
+    if (window.location.hash) window.history.replaceState(null, '', window.location.pathname);
+    setIsLoggedIn(true);
+    setActivePage('home');
   };
 
   const handleLogout = () => {
