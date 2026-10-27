@@ -1458,6 +1458,12 @@ function App() {
   const [bills, setBills] = useState([]);
   const [showNotif, setShowNotif] = useState(false);
   const [customers, setCustomers] = useState([]);
+  const [custViewId, setCustViewId]         = useState(null);
+  const [custViewData, setCustViewData]     = useState(null);
+  const [custViewLoading, setCustViewLoading] = useState(false);
+  const [custEditModal, setCustEditModal]   = useState(null);
+  const [custEditError, setCustEditError]   = useState('');
+  const [custEditLoading, setCustEditLoading] = useState(false);
   const [orders, setOrders] = useState([]);
   const [expandedOrder, setExpandedOrder] = useState(null);
   const [custSearch, setCustSearch] = useState('');
@@ -1826,7 +1832,7 @@ function App() {
 
   useEffect(() => {
     if (isLoggedIn && activePage === 'reports') { loadBills(); if (!rptStats) loadReports('', ''); }
-    if (isLoggedIn && activePage === 'customers' && customers.length === 0)
+    if (isLoggedIn && activePage === 'customers')
       axios.get(`${API}/admin/customers`).then(r => setCustomers(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'orders' && orders.length === 0)
       axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {});
@@ -2634,11 +2640,11 @@ function App() {
           <button className={`nav-item ${activePage==='reports'?'nav-active':''}`} onClick={() => { setActivePage('reports'); setSidebarOpen(false); }}>
             📊 Reports
           </button>
-          <button className={`nav-item ${activePage==='customers'?'nav-active':''}`} onClick={() => { setActivePage('customers'); setSidebarOpen(false); }}>
-            👥 Customers
-          </button>
           <button className={`nav-item ${activePage==='orders'?'nav-active':''}`} onClick={() => { setActivePage('orders'); setSidebarOpen(false); }}>
             🛒 Orders
+          </button>
+          <button className={`nav-item ${activePage==='customers'?'nav-active':''}`} onClick={() => { setActivePage('customers'); setSidebarOpen(false); }}>
+            👥 Customer Data
           </button>
           {tenantInfo?.subdomain === 'gosuas' && (
             <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }}>
@@ -4088,43 +4094,178 @@ function App() {
         {/* ── CUSTOMERS PAGE ── */}
         {activePage === 'customers' && (() => {
           const q = custSearch.toLowerCase();
-          const filtered = customers.filter(c => !q || [c.firstName,c.lastName,c.email,c.phone,c.city].join(' ').toLowerCase().includes(q));
+          const filtered = customers.filter(c =>
+            !q || [c.firstName, c.lastName, c.phone, c.email].join(' ').toLowerCase().includes(q));
           const totalCustPages = Math.max(1, Math.ceil(filtered.length / PAGE_ROWS));
           const safeCustPage = Math.min(custPage, totalCustPages);
           const custSlice = filtered.slice((safeCustPage-1)*PAGE_ROWS, safeCustPage*PAGE_ROWS);
+
+          const openView = async (id) => {
+            setCustViewId(id); setCustViewData(null); setCustViewLoading(true);
+            try {
+              const r = await axios.get(`${API}/admin/customers/${id}`);
+              setCustViewData(r.data);
+            } catch(e) { setCustViewData(null); }
+            finally { setCustViewLoading(false); }
+          };
+
+          const saveCustomerEdit = async () => {
+            if (!custEditModal) return;
+            setCustEditError(''); setCustEditLoading(true);
+            try {
+              await axios.put(`${API}/admin/customers/${custEditModal.id}`, {
+                firstName: custEditModal.firstName,
+                lastName:  custEditModal.lastName,
+                phone:     custEditModal.phone,
+              });
+              setCustomers(cs => cs.map(c => c.id === custEditModal.id
+                ? { ...c, firstName: custEditModal.firstName, lastName: custEditModal.lastName, phone: custEditModal.phone }
+                : c));
+              if (custViewData?.id === custEditModal.id) {
+                setCustViewData(v => v ? { ...v, firstName: custEditModal.firstName, lastName: custEditModal.lastName, phone: custEditModal.phone } : v);
+              }
+              setCustEditModal(null);
+              showToast('Customer updated');
+            } catch(e) {
+              setCustEditError(e.response?.data?.error || 'Failed to update customer');
+            } finally { setCustEditLoading(false); }
+          };
+
+          const deleteCust = (c) => setConfirmDialog({
+            title: 'Delete Customer',
+            message: `Delete ${[c.firstName,c.lastName].filter(Boolean).join(' ') || c.phone}? Their billing history is preserved.`,
+            onConfirm: async () => {
+              setConfirmDialog(null);
+              try {
+                await axios.delete(`${API}/admin/customers/${c.id}`);
+                setCustomers(cs => cs.filter(x => x.id !== c.id));
+                if (custViewId === c.id) setCustViewId(null);
+                showToast('Customer deleted');
+              } catch(e) {
+                showToast('Failed to delete customer', 'error');
+              }
+            }
+          });
+
           return (
           <div className="page-content">
+            <div style={{fontSize:13,color:'#6b7280',marginBottom:16}}>
+              Customer records are created automatically when a phone number is entered during POS billing, and are updated on each purchase.
+            </div>
             <div className="cust-toolbar">
-              <input className="cust-search" placeholder="🔍 Search name, email, phone, city…"
+              <input className="cust-search" placeholder="🔍 Search name or phone…"
                 value={custSearch} onChange={e => { setCustSearch(e.target.value); setCustPage(1); }} />
               <span className="cust-count">{filtered.length} customers</span>
               <button className="export-csv-btn" onClick={() => exportToCsv('customers.csv', filtered, [
-                { label: '#', key: (_, i) => i + 1 },
-                { label: 'Name', key: r => [r.firstName, r.lastName].filter(Boolean).join(' ') },
-                { label: 'Email', key: 'email' },
-                { label: 'Phone', key: 'phone' },
-                { label: 'City', key: 'city' },
-                { label: 'State', key: 'state' },
-                { label: 'Orders', key: 'totalOrders' },
-                { label: 'Total Spent', key: r => Number(r.totalSpent || 0).toFixed(2) },
+                { label: '#',                   key: (_, i) => i + 1 },
+                { label: 'Name',               key: r => [r.firstName, r.lastName].filter(Boolean).join(' ') },
+                { label: 'Phone',              key: 'phone' },
+                { label: 'Email',              key: 'email' },
+                { label: 'Total Orders',       key: 'totalOrders' },
+                { label: 'Total Spent (₹)',    key: r => Number(r.totalSpent || 0).toFixed(2) },
+                { label: 'Last Purchase Date', key: r => r.lastPurchaseDate || '' },
               ])}>⬇ Export CSV</button>
             </div>
             <div className="data-table-wrap">
               <table className="data-table">
-                <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>City</th><th>State</th><th>Orders</th><th>Total Spent</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Customer Name</th>
+                    <th>Phone Number</th>
+                    <th style={{textAlign:'center'}}>Total Orders</th>
+                    <th style={{textAlign:'right'}}>Total Purchase (₹)</th>
+                    <th>Last Purchase</th>
+                    <th style={{textAlign:'center'}}>Actions</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {custSlice.map((c, i) => (
-                    <tr key={c.id}>
-                      <td className="td-num">{(safeCustPage-1)*PAGE_ROWS + i + 1}</td>
-                      <td className="td-name">{[c.firstName,c.lastName].filter(Boolean).join(' ') || '—'}</td>
-                      <td className="td-email">{c.email || '—'}</td>
-                      <td>{c.phone || '—'}</td>
-                      <td>{c.city || '—'}</td>
-                      <td>{c.state || '—'}</td>
-                      <td className="td-center">{c.totalOrders}</td>
-                      <td className="td-amt">₹{Number(c.totalSpent||0).toFixed(2)}</td>
-                    </tr>
-                  ))}
+                  {custSlice.length === 0 ? (
+                    <tr><td colSpan={7} style={{textAlign:'center',padding:'32px',color:'#9ca3af'}}>
+                      {customers.length === 0
+                        ? 'No customers yet. Customer records are saved automatically when a phone number is provided during billing.'
+                        : 'No customers match the search.'}
+                    </td></tr>
+                  ) : custSlice.map((c, i) => {
+                    const fullName = [c.firstName, c.lastName].filter(Boolean).join(' ') || '—';
+                    const isExpanded = custViewId === c.id;
+                    return (
+                      <React.Fragment key={c.id}>
+                        <tr style={{cursor:'pointer'}} onClick={() => isExpanded ? setCustViewId(null) : openView(c.id)}>
+                          <td className="td-num">{(safeCustPage-1)*PAGE_ROWS + i + 1}</td>
+                          <td className="td-name" style={{fontWeight:600}}>{fullName}</td>
+                          <td>{c.phone || '—'}</td>
+                          <td style={{textAlign:'center'}}>{c.totalOrders || 0}</td>
+                          <td style={{textAlign:'right',fontWeight:600,color:'#059669'}}>
+                            ₹{Number(c.totalSpent||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                          </td>
+                          <td style={{color:'#6b7280',fontSize:12}}>
+                            {c.lastPurchaseDate
+                              ? new Date(c.lastPurchaseDate + 'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
+                              : '—'}
+                          </td>
+                          <td style={{textAlign:'center',whiteSpace:'nowrap'}} onClick={e => e.stopPropagation()}>
+                            <button className="btn-secondary" style={{fontSize:11,padding:'3px 8px',marginRight:4}}
+                              onClick={() => isExpanded ? setCustViewId(null) : openView(c.id)}>
+                              {isExpanded ? '▲ Hide' : '▼ View'}
+                            </button>
+                            <button className="btn-secondary" style={{fontSize:11,padding:'3px 8px',marginRight:4}}
+                              onClick={() => { setCustEditModal({id:c.id,firstName:c.firstName||'',lastName:c.lastName||'',phone:c.phone||''}); setCustEditError(''); }}>
+                              Edit
+                            </button>
+                            <button style={{fontSize:11,padding:'3px 8px',background:'#fef2f2',color:'#dc2626',border:'1.5px solid #fecaca',borderRadius:6,cursor:'pointer',fontWeight:600}}
+                              onClick={() => deleteCust(c)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={7} style={{padding:0,background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
+                              <div style={{padding:'16px 20px'}}>
+                                {custViewLoading ? (
+                                  <div style={{color:'#6b7280',fontSize:13,padding:'8px 0'}}>Loading…</div>
+                                ) : custViewData ? (
+                                  <>
+                                    <div style={{display:'flex',gap:24,flexWrap:'wrap',marginBottom:12,fontSize:13,color:'#374151'}}>
+                                      <div><span style={{color:'#9ca3af'}}>Name:</span> <strong>{[custViewData.firstName,custViewData.lastName].filter(Boolean).join(' ')||'—'}</strong></div>
+                                      <div><span style={{color:'#9ca3af'}}>Phone:</span> <strong>{custViewData.phone||'—'}</strong></div>
+                                      {custViewData.email && <div><span style={{color:'#9ca3af'}}>Email:</span> {custViewData.email}</div>}
+                                      <div><span style={{color:'#9ca3af'}}>Total Orders:</span> <strong>{custViewData.totalOrders||0}</strong></div>
+                                      <div><span style={{color:'#9ca3af'}}>Total Spent:</span> <strong style={{color:'#059669'}}>₹{Number(custViewData.totalSpent||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>
+                                    </div>
+                                    {custViewData.bills && custViewData.bills.length > 0 ? (
+                                      <>
+                                        <div style={{fontWeight:600,fontSize:12,color:'#1f2937',marginBottom:6}}>POS Bill History ({custViewData.bills.length})</div>
+                                        <table className="admin-table" style={{fontSize:12}}>
+                                          <thead><tr><th>Bill No</th><th>Date</th><th>Items</th><th style={{textAlign:'right'}}>Amount (₹)</th><th>Payment</th></tr></thead>
+                                          <tbody>
+                                            {custViewData.bills.map(b => (
+                                              <tr key={b.id}>
+                                                <td style={{fontFamily:'monospace',fontSize:11}}>{b.billNo}</td>
+                                                <td style={{whiteSpace:'nowrap'}}>{b.date ? new Date(b.date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                                                <td style={{textAlign:'center'}}>{b.itemCount}</td>
+                                                <td style={{textAlign:'right',fontWeight:600}}>₹{Number(b.total||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                                                <td>{b.paymentMode||'—'}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </>
+                                    ) : (
+                                      <div style={{fontSize:12,color:'#9ca3af'}}>No POS bill history found for this phone number.</div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div style={{color:'#dc2626',fontSize:13}}>Failed to load customer details.</div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -4133,6 +4274,42 @@ function App() {
                 <button className="tbl-pg-btn" onClick={() => setCustPage(p=>Math.max(1,p-1))} disabled={safeCustPage===1}>‹ Prev</button>
                 <span className="tbl-pg-info">Page {safeCustPage} of {totalCustPages}</span>
                 <button className="tbl-pg-btn" onClick={() => setCustPage(p=>Math.min(totalCustPages,p+1))} disabled={safeCustPage===totalCustPages}>Next ›</button>
+              </div>
+            )}
+
+            {/* Edit customer modal */}
+            {custEditModal && (
+              <div className="modal-overlay" onClick={() => setCustEditModal(null)}>
+                <div className="modal-box" style={{maxWidth:420}} onClick={e => e.stopPropagation()}>
+                  <h3 style={{margin:'0 0 16px',fontSize:16}}>Edit Customer</h3>
+                  <div style={{display:'grid',gap:12}}>
+                    <div>
+                      <label className="modal-label">First Name</label>
+                      <input value={custEditModal.firstName}
+                        onChange={e => setCustEditModal(m => ({...m, firstName: e.target.value}))}
+                        placeholder="First name" style={{marginTop:4}} />
+                    </div>
+                    <div>
+                      <label className="modal-label">Last Name</label>
+                      <input value={custEditModal.lastName}
+                        onChange={e => setCustEditModal(m => ({...m, lastName: e.target.value}))}
+                        placeholder="Last name" style={{marginTop:4}} />
+                    </div>
+                    <div>
+                      <label className="modal-label">Phone Number</label>
+                      <input value={custEditModal.phone}
+                        onChange={e => setCustEditModal(m => ({...m, phone: e.target.value}))}
+                        placeholder="Phone number" style={{marginTop:4}} />
+                    </div>
+                  </div>
+                  {custEditError && <div style={{fontSize:13,color:'#dc2626',marginTop:10}}>{custEditError}</div>}
+                  <div style={{marginTop:16,display:'flex',gap:10,justifyContent:'flex-end'}}>
+                    <button className="btn-secondary" onClick={() => setCustEditModal(null)}>Cancel</button>
+                    <button className="btn-primary" disabled={custEditLoading} onClick={saveCustomerEdit}>
+                      {custEditLoading ? 'Saving…' : 'Save Changes'}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

@@ -37,6 +37,9 @@ public class CustomerDetail {
     private BigDecimal totalSpent;
     private Integer totalOrders;
 
+    @Column(name = "last_purchase_date")
+    private java.time.LocalDate lastPurchaseDate;
+
     @OneToMany(mappedBy = "customer", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @com.fasterxml.jackson.annotation.JsonIgnore
     private List<OrderDetail> orders;
