@@ -1833,7 +1833,7 @@ function App() {
   useEffect(() => {
     if (isLoggedIn && activePage === 'reports') { loadBills(); if (!rptStats) loadReports('', ''); }
     if (isLoggedIn && activePage === 'customers')
-      axios.get(`${API}/admin/customers`).then(r => setCustomers(r.data)).catch(() => {});
+      axios.get(`${API}/admin/customers`).then(r => setCustomers(r.data)).catch(e => console.error('Failed to load customers:', e));
     if (isLoggedIn && activePage === 'orders' && orders.length === 0)
       axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'rental')
@@ -4101,11 +4101,14 @@ function App() {
           const custSlice = filtered.slice((safeCustPage-1)*PAGE_ROWS, safeCustPage*PAGE_ROWS);
 
           const openView = async (id) => {
-            setCustViewId(id); setCustViewData(null); setCustViewLoading(true);
+            setCustViewId(id); setCustViewLoading(true);
+            // Pre-populate with list data so basic info shows even if detail API fails
+            const listData = customers.find(c => c.id === id) || null;
+            setCustViewData(listData);
             try {
               const r = await axios.get(`${API}/admin/customers/${id}`);
               setCustViewData(r.data);
-            } catch(e) { setCustViewData(null); }
+            } catch(e) { /* keep list data as fallback */ }
             finally { setCustViewLoading(false); }
           };
 
