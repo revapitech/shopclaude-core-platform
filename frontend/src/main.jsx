@@ -39,7 +39,8 @@ axios.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401) {
-      const isFileUpload   = err.config?.headers?.['Content-Type']?.includes('multipart/form-data');
+      const url            = err.config?.url || '';
+      const isFileUpload   = url.includes('/upload') || url.includes('/logo') || url.includes('/banner') || (err.config?.data instanceof FormData);
       const isAuthEndpoint = (err.config?.url || '').includes('/auth/');
       const hadAuthHeader  = !!err.config?.headers?.['Authorization'];
       if (!isFileUpload && !isAuthEndpoint && hadAuthHeader) {
@@ -1224,7 +1225,7 @@ function PdfStorePage({ tenantInfo }) {
       fd.append('price', uploadForm.price);
       fd.append('password', uploadForm.password);
       fd.append('coverEmoji', uploadForm.coverEmoji);
-      await axios.post(`${API}/digital-products/upload`, fd, { headers: { ...headers, 'Content-Type': 'multipart/form-data' } });
+      await axios.post(`${API}/digital-products/upload`, fd);
       setShowUpload(false);
       setUploadForm({ title:'', description:'', price:'', password:'', coverEmoji:'📄' });
       setUploadFile(null);
@@ -1627,13 +1628,13 @@ function App() {
       if (shopLogoFile) {
         const fd = new FormData();
         fd.append('file', shopLogoFile);
-        const res = await axios.post(`${API}/tenant/logo`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const res = await axios.post(`${API}/tenant/logo`, fd);
         setTenantInfo(res.data);
       }
       if (shopBannerFile) {
         const fd = new FormData();
         fd.append('file', shopBannerFile);
-        const res = await axios.post(`${API}/tenant/banner`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const res = await axios.post(`${API}/tenant/banner`, fd);
         setTenantInfo(res.data);
       }
       const infoUpdate = {};
@@ -2081,7 +2082,7 @@ function App() {
     if (!slot?.file) return null;
     const fd = new FormData();
     fd.append('file', slot.file);
-    const res = await axios.post(`${API}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    const res = await axios.post(`${API}/upload`, fd);
     return res.data.url;
   };
 
@@ -2104,7 +2105,7 @@ function App() {
     if (!slot.file) return slot.serverUrl || null; // keep the existing photo if it wasn't changed
     const fd = new FormData();
     fd.append('file', slot.file);
-    const res = await axios.post(`${API}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    const res = await axios.post(`${API}/upload`, fd);
     return res.data.url;
   };
 
@@ -2114,7 +2115,7 @@ function App() {
       if (slot.file) {
         const fd = new FormData();
         fd.append('file', slot.file);
-        const res = await axios.post(`${API}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const res = await axios.post(`${API}/upload`, fd);
         urls.push(res.data.url);
       }
     }
@@ -2365,7 +2366,7 @@ function App() {
       if (slot.file) {
         const fd = new FormData();
         fd.append('file', slot.file);
-        const r = await axios.post(`${API}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const r = await axios.post(`${API}/upload`, fd);
         savedUrls.push(r.data.url);
       } else if (slot.serverUrl) {
         savedUrls.push(slot.serverUrl);
