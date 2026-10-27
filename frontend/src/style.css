@@ -1610,3 +1610,149 @@ img { width: 140px; height: 44px; object-fit: contain; }
   .catalog-name { font-size: 12px; }
   .catalog-price { font-size: 13px; }
 }
+
+/* ═══════════════════════════════════════════════════
+   REDESIGN v2 — missing classes, typography, layout
+   ═══════════════════════════════════════════════════ */
+
+/* ── Typography: modern system-font stack ── */
+body {
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+}
+
+/* ── Shared button variants (used in JSX but previously unstyled) ── */
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 9px 18px; background: var(--c-blue); color: #fff;
+  border: none; border-radius: 8px; font-size: 13.5px; font-weight: 600;
+  cursor: pointer; transition: background .15s, box-shadow .15s;
+  line-height: 1.2; white-space: nowrap; margin: 0;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--c-blue-d);
+  box-shadow: 0 3px 14px rgba(37,99,235,.28);
+}
+.btn-primary:disabled { background: #94A3B8 !important; cursor: not-allowed; box-shadow: none; }
+
+.btn-secondary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 9px 18px; background: var(--card-bg); color: var(--text);
+  border: 1.5px solid var(--border); border-radius: 8px; font-size: 13.5px; font-weight: 600;
+  cursor: pointer; transition: background .15s, border-color .15s, color .15s;
+  line-height: 1.2; white-space: nowrap; margin: 0;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--c-blue-l); border-color: var(--c-blue); color: var(--c-blue);
+}
+.btn-secondary:disabled { opacity: .5; cursor: not-allowed; }
+
+.btn-danger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 9px 18px; background: var(--c-red); color: #fff;
+  border: none; border-radius: 8px; font-size: 13.5px; font-weight: 600;
+  cursor: pointer; transition: background .15s;
+  line-height: 1.2; white-space: nowrap; margin: 0;
+}
+.btn-danger:hover:not(:disabled) { background: var(--c-red-d); }
+.btn-danger:disabled { background: #94A3B8 !important; cursor: not-allowed; }
+
+/* ── GST breakdown in POS billing ── */
+.gst-breakdown {
+  background: var(--c-blue-l); border: 1px solid #DBEAFE;
+  border-radius: 10px; padding: 6px 12px; margin: 4px 0;
+}
+.gst-row {
+  display: flex; justify-content: space-between;
+  padding: 3px 0; font-size: 13px; color: var(--text-muted);
+}
+.gst-total-row {
+  font-weight: 700; color: var(--c-blue) !important;
+  border-top: 1px solid #BFDBFE; padding-top: 5px; margin-top: 2px;
+}
+
+/* ── POS two-column layout (catalogue left, billing right) ── */
+.pos-layout {
+  display: grid;
+  grid-template-columns: 1fr 390px;
+  gap: 20px;
+  align-items: start;
+}
+.pos-billing {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 74px; /* 58px header + 16px */
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #CBD5E1 transparent;
+}
+.pos-billing h2 {
+  font-size: 15px;
+  font-weight: 700;
+  padding-bottom: 10px;
+  border-bottom: 1.5px solid var(--border);
+  margin-bottom: 12px;
+}
+.pos-left {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+/* Remove the catalogue's top-separator inline styles via the layout context */
+.pos-left > section:first-of-type {
+  margin-top: 0 !important;
+  padding-top: 20px !important;
+  border-top: none !important;
+}
+
+/* ── Sidebar: slightly crisper nav items ── */
+.nav-item {
+  font-size: 13.5px;
+  letter-spacing: 0.1px;
+  border-left: 3px solid transparent;
+}
+.nav-active {
+  background: rgba(37,99,235,0.18) !important;
+  color: #93C5FD !important;
+  font-weight: 600;
+  border-left: 3px solid var(--c-blue) !important;
+}
+
+/* ── Better page section default ── */
+section {
+  border: 1px solid var(--border);
+}
+
+/* ── Billing: generate bill button full-width at bottom ── */
+.pos-billing > button:not(.qty-btn):not(.remove-btn):not(.print-again-btn):not(.regenerate-bill-btn) {
+  width: 100%;
+}
+
+/* ── Top header: slightly more refined ── */
+.top-header {
+  border-bottom: 1.5px solid var(--border);
+}
+.page-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}
+
+/* ── Form labels (used via className="modal-label" and others) ── */
+.form-label {
+  display: block; font-size: 12px; font-weight: 700;
+  color: var(--text-muted); margin-bottom: 4px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+
+/* ── Responsive: stack on tablets/mobile ── */
+@media (max-width: 1100px) {
+  .pos-layout  { grid-template-columns: 1fr; gap: 16px; }
+  .pos-billing { grid-column: 1; grid-row: 2; position: static; max-height: none; }
+  .pos-left    { grid-column: 1; grid-row: 1; }
+  .pos-left > section:first-of-type { border-top: 1.5px solid var(--border) !important; padding-top: 20px !important; margin-top: 0 !important; }
+}

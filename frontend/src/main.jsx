@@ -2755,7 +2755,8 @@ function App() {
 
         {/* ── HOME PAGE ── */}
         {activePage === 'home' && <div className="page-content">
-        <section>
+        <div className="pos-layout">
+        <section className="pos-billing">
           <h2>Offline Billing</h2>
           <div className="barcode-row">
             <input
@@ -2907,7 +2908,7 @@ function App() {
             </div>
           )}
         </section>
-
+        <div className="pos-left">
         {/* ── Quick Billing – Products catalogue ── */}
         {(() => {
           // Helpers (scoped to avoid polluting outer scope)
@@ -3440,6 +3441,8 @@ function App() {
               </div>
             </section>
           )}
+        </div>{/* end pos-left */}
+        </div>{/* end pos-layout */}
         </div>}{/* end home page */}
 
         {/* ── REPORTS PAGE ── */}
