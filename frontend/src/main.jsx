@@ -3049,30 +3049,6 @@ function App() {
           );
         })()}
 
-        {/* ── Expense Quick Widget ── */}
-        <section style={{marginTop:24,paddingTop:20,borderTop:'1.5px solid #e5e7eb'}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:10}}>
-            <h2 style={{margin:0,fontSize:16,fontWeight:700}}>💸 Expenses</h2>
-            <button className="btn-primary" style={{fontSize:13}} onClick={() => { setActivePage('expenses'); setSidebarOpen(false); }}>
-              + Add Expense
-            </button>
-          </div>
-          {expenseSummary && (
-            <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-              {[
-                { label:'Today',      value: expenseSummary.totalToday,  color:'#dc2626' },
-                { label:'This Week',  value: expenseSummary.totalWeek,   color:'#d97706' },
-                { label:'This Month', value: expenseSummary.totalMonth,  color:'#7c3aed' },
-              ].map(c => (
-                <div key={c.label} className="rpt-card" style={{flex:'1 1 140px',minWidth:0,borderTop:`3px solid ${c.color}`}}>
-                  <div className="rpt-card-label">{c.label}</div>
-                  <div className="rpt-card-value" style={{color:c.color}}>₹{fmt(c.value)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
         {/* ── Add Product modal ── */}
         {showAddForm && (
           <div className="modal-overlay" onClick={() => setShowAddForm(false)}>
