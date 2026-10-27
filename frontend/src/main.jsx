@@ -1515,6 +1515,12 @@ function App() {
   const [damageSubmitError, setDamageSubmitError] = useState('');
   const [damageSubmitLoading, setDamageSubmitLoading] = useState(false);
 
+  // ── Quick Billing Catalogue ─────────────────────────────────────────────────
+  const [catalogSearch, setCatalogSearch]             = useState('');
+  const [catalogCategoryFilter, setCatalogCategoryFilter] = useState('');
+  const [catalogInStockOnly, setCatalogInStockOnly]   = useState(false);
+  const [catalogVariantModal, setCatalogVariantModal] = useState(null); // product whose siblings are being picked
+
   // ── Expenses state ──────────────────────────────────────────────────────────
   const [expenses, setExpenses] = useState([]);
   const [expenseLoading, setExpenseLoading] = useState(false);
@@ -2900,6 +2906,147 @@ function App() {
             </div>
           )}
         </section>
+
+        {/* ── Quick Billing – Products catalogue ── */}
+        {(() => {
+          // Helpers (scoped to avoid polluting outer scope)
+          const firstImgUrl = (p) => (p.imageUrl || '').split(',').filter(Boolean)[0] || null;
+          const catalogCategories = [...new Set(products.filter(p => p.productType !== 'RENTAL' && p.sellingPrice).map(p => p.category).filter(Boolean))].sort();
+          const q = catalogSearch.trim().toLowerCase();
+          const catalogProducts = products.filter(p => {
+            if (p.productType === 'RENTAL') return false;
+            if (!p.sellingPrice) return false;
+            if (catalogInStockOnly && (p.stockQty ?? 0) <= 0) return false;
+            if (catalogCategoryFilter && p.category !== catalogCategoryFilter) return false;
+            if (q && !p.name?.toLowerCase().includes(q) && !p.sku?.toLowerCase().includes(q) && !p.barcode?.toLowerCase().includes(q) && !variantLabel(p).toLowerCase().includes(q)) return false;
+            return true;
+          });
+          // Detect color siblings for a product (same base SKU + category, different colors)
+          const getColorSiblings = (p) => {
+            if (!p.color) return [];
+            const base = baseSkuOf(p.sku);
+            return products.filter(x => x.id !== p.id && x.category === p.category && x.color && baseSkuOf(x.sku) === base);
+          };
+          // When a product card is clicked, either add directly or open variant picker for grouped colors
+          const handleCatalogAdd = (p) => {
+            const siblings = getColorSiblings(p);
+            if (siblings.length > 0) {
+              // Show all color variants including current product
+              const allVariants = [p, ...siblings].sort((a, b) => (a.color || '').localeCompare(b.color || ''));
+              setCatalogVariantModal({ canonical: p, variants: allVariants });
+            } else {
+              addProductToCart(p);
+            }
+          };
+          return (
+          <section style={{marginTop:24,paddingTop:20,borderTop:'1.5px solid #e5e7eb'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:8}}>
+              <h2 style={{margin:0,fontSize:16,fontWeight:700}}>🛍 Quick Billing – Products</h2>
+              <span style={{fontSize:12,color:'#6b7280'}}>{catalogProducts.length} product{catalogProducts.length !== 1 ? 's' : ''}</span>
+            </div>
+            {/* Filters */}
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14,alignItems:'center'}}>
+              <input
+                className="cust-search"
+                style={{flex:'1 1 180px',minWidth:0}}
+                placeholder="🔍 Search by name, SKU, barcode…"
+                value={catalogSearch}
+                onChange={e => setCatalogSearch(e.target.value)}
+              />
+              {catalogCategories.length > 0 && (
+                <select
+                  style={{padding:'7px 10px',borderRadius:8,border:'1.5px solid #e5e7eb',fontSize:13,background:'#fff',color:'#374151',cursor:'pointer'}}
+                  value={catalogCategoryFilter}
+                  onChange={e => setCatalogCategoryFilter(e.target.value)}
+                >
+                  <option value="">All Categories</option>
+                  {catalogCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
+              <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13,color:'#374151',cursor:'pointer',userSelect:'none'}}>
+                <input type="checkbox" checked={catalogInStockOnly} onChange={e => setCatalogInStockOnly(e.target.checked)} style={{accentColor:'#2563eb',width:14,height:14}} />
+                In stock only
+              </label>
+            </div>
+            {/* Product grid */}
+            {catalogProducts.length === 0 ? (
+              <div style={{padding:'32px 0',textAlign:'center',color:'#9ca3af',fontSize:14}}>
+                {products.filter(p => p.productType !== 'RENTAL' && p.sellingPrice).length === 0
+                  ? 'No products yet. Add products in the Inventory section to use Quick Billing.'
+                  : 'No products match the current filters.'}
+              </div>
+            ) : (
+              <div className="catalog-grid">
+                {catalogProducts.map(p => {
+                  const imgUrl = firstImgUrl(p);
+                  const outOfStock = (p.stockQty ?? 0) <= 0;
+                  const vLabel = variantLabel(p);
+                  const hasSiblings = getColorSiblings(p).length > 0;
+                  return (
+                    <div key={p.id} className={`catalog-card${outOfStock ? ' catalog-card-oos' : ''}`} onClick={() => !outOfStock && handleCatalogAdd(p)} title={outOfStock ? `${p.name} — out of stock` : `Add ${p.name} to cart`}>
+                      <div className="catalog-img-wrap">
+                        {imgUrl
+                          ? <img src={`${BACKEND}${imgUrl}`} alt={p.name} className="catalog-img" onError={e => { e.currentTarget.onerror = null; e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }} />
+                          : null}
+                        <div className="catalog-img-placeholder" style={{display: imgUrl ? 'none' : 'flex'}}>📦</div>
+                        {outOfStock && <div className="catalog-oos-badge">OUT OF STOCK</div>}
+                        {!outOfStock && (p.stockQty ?? 0) <= 5 && <div className="catalog-low-badge">{p.stockQty} left</div>}
+                      </div>
+                      <div className="catalog-info">
+                        <div className="catalog-name" title={p.name}>{p.name}</div>
+                        {vLabel && <div className="catalog-variant">{vLabel}{hasSiblings ? ' ▾' : ''}</div>}
+                        <div className="catalog-price">₹{Number(p.sellingPrice).toLocaleString('en-IN')}</div>
+                      </div>
+                      <button
+                        className={`catalog-add-btn${outOfStock ? ' catalog-add-btn-disabled' : ''}`}
+                        disabled={outOfStock}
+                        onClick={e => { e.stopPropagation(); if (!outOfStock) handleCatalogAdd(p); }}
+                      >
+                        {hasSiblings ? 'Choose Variant' : '+ Add'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* Variant picker modal */}
+            {catalogVariantModal && (
+              <div className="modal-overlay" onClick={() => setCatalogVariantModal(null)}>
+                <div className="modal-box" style={{maxWidth:400}} onClick={e => e.stopPropagation()}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+                    <h3 style={{margin:0,fontSize:15,fontWeight:700}}>Choose Colour Variant</h3>
+                    <button onClick={() => setCatalogVariantModal(null)} style={{background:'none',border:'none',fontSize:18,cursor:'pointer',color:'#6b7280'}}>×</button>
+                  </div>
+                  <div style={{fontSize:14,color:'#374151',marginBottom:12,fontWeight:600}}>{catalogVariantModal.canonical.name}</div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:10}}>
+                    {catalogVariantModal.variants.map(v => {
+                      const vImgUrl = firstImgUrl(v);
+                      const vOos = (v.stockQty ?? 0) <= 0;
+                      return (
+                        <button
+                          key={v.id}
+                          disabled={vOos}
+                          onClick={() => { addProductToCart(v); setCatalogVariantModal(null); }}
+                          style={{padding:0,border:`2px solid ${vOos ? '#e5e7eb' : '#2563eb'}`,borderRadius:10,background:vOos?'#f9fafb':'#eff6ff',cursor:vOos?'not-allowed':'pointer',opacity:vOos?0.55:1,overflow:'hidden',display:'flex',flexDirection:'column',alignItems:'stretch'}}
+                          title={vOos ? `${v.color} — out of stock` : v.color}
+                        >
+                          {vImgUrl
+                            ? <img src={`${BACKEND}${vImgUrl}`} alt={v.color} style={{width:'100%',height:70,objectFit:'cover'}} onError={e=>{e.currentTarget.style.display='none';}} />
+                            : <div style={{height:70,display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,background:'#f3f4f6'}}>📦</div>}
+                          <div style={{padding:'6px 4px',textAlign:'center'}}>
+                            <div style={{fontSize:12,fontWeight:600,color:'#1f2937'}}>{v.color}</div>
+                            <div style={{fontSize:11,color:vOos?'#ef4444':'#059669',marginTop:2}}>{vOos ? 'Out of stock' : `${v.stockQty} in stock`}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+          );
+        })()}
 
         {/* ── Expense Quick Widget ── */}
         <section style={{marginTop:24,paddingTop:20,borderTop:'1.5px solid #e5e7eb'}}>
