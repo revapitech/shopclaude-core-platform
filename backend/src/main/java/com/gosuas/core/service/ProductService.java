@@ -88,6 +88,7 @@ public class ProductService {
                 // Choosing "Rental" as the product type always makes it rental-eligible,
                 // independent of the separate legacy rentalAvailable flag some tenants still use.
                 .rentalAvailable(isRental ? Boolean.TRUE : (request.rentalAvailable() != null ? request.rentalAvailable() : Boolean.FALSE))
+                .trackStock(request.trackStock() != null ? request.trackStock() : Boolean.TRUE)
                 .build();
         return productRepository.save(product);
     }
@@ -190,6 +191,7 @@ public class ProductService {
         boolean isRental = "RENTAL".equalsIgnoreCase(product.getProductType());
         if (isRental) product.setRentalAvailable(true);
         else if (request.rentalAvailable() != null) product.setRentalAvailable(request.rentalAvailable());
+        if (request.trackStock() != null) product.setTrackStock(request.trackStock());
         return productRepository.save(product);
     }
 }

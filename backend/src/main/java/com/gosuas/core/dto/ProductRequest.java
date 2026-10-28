@@ -27,5 +27,6 @@ public record ProductRequest(
         BigDecimal rentAmount,
         String colorPhotoUrl,
         String hsnCode,
-        BigDecimal gstRate
+        BigDecimal gstRate,
+        Boolean trackStock
 ) {}

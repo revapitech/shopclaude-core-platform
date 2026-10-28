@@ -57,9 +57,15 @@ public class BillService {
             Product product = productRepository.findByBarcodeAndTenantId(itemRequest.barcode(), tenantId)
                     .orElseThrow(() -> new RuntimeException("Product not found: " + itemRequest.barcode()));
 
-            int updated = productRepository.decrementStock(product.getId(), tenantId, itemRequest.quantity());
-            if (updated == 0) {
-                throw new RuntimeException("Insufficient stock for: " + product.getName());
+            // trackStock=null treated as true for backward compat with pre-existing products
+            if (!Boolean.FALSE.equals(product.getTrackStock())) {
+                int updated = productRepository.decrementStock(product.getId(), tenantId, itemRequest.quantity());
+                if (updated == 0) {
+                    throw new RuntimeException("Insufficient stock for: " + product.getName());
+                }
+            } else {
+                // Not stock-tracked: only record the sale count, never touch stockQty
+                productRepository.incrementSoldCount(product.getId(), tenantId, itemRequest.quantity());
             }
 
             BigDecimal lineTotal = product.getSellingPrice().multiply(BigDecimal.valueOf(itemRequest.quantity()));
