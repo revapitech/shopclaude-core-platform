@@ -2723,7 +2723,7 @@ function App() {
           </button>
           <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock', expenses:'Expenses' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
-            <a href={`https://${getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
+            <a href={`https://${tenantInfo?.subdomain ?? getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
               title="Visit your store"
               style={{display:'flex',alignItems:'center',justifyContent:'center',width:36,height:36,borderRadius:10,background:'#EFF6FF',border:'1.5px solid #BFDBFE',textDecoration:'none',fontSize:18,flexShrink:0}}>
               🏪
