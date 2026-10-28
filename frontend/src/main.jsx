@@ -2641,41 +2641,41 @@ function App() {
         </div>
 
         <div className="sidebar-nav">
-          <button className={`nav-item ${activePage==='home'?'nav-active':''}`} onClick={() => { setActivePage('home'); setSidebarOpen(false); }}>
-            🏠 Home
+          <button className={`nav-item ${activePage==='home'?'nav-active':''}`} onClick={() => { setActivePage('home'); setSidebarOpen(false); }} data-label="Home" title="Home">
+            <span className="nav-icon">🏠</span><span className="nav-label"> Home</span>
           </button>
-          <button className={`nav-item ${activePage==='reports'?'nav-active':''}`} onClick={() => { setActivePage('reports'); setSidebarOpen(false); }}>
-            📊 Reports
+          <button className={`nav-item ${activePage==='reports'?'nav-active':''}`} onClick={() => { setActivePage('reports'); setSidebarOpen(false); }} data-label="Reports" title="Reports">
+            <span className="nav-icon">📊</span><span className="nav-label"> Reports</span>
           </button>
-          <button className={`nav-item ${activePage==='orders'?'nav-active':''}`} onClick={() => { setActivePage('orders'); setSidebarOpen(false); }}>
-            🛒 Orders
+          <button className={`nav-item ${activePage==='orders'?'nav-active':''}`} onClick={() => { setActivePage('orders'); setSidebarOpen(false); }} data-label="Orders" title="Orders">
+            <span className="nav-icon">🛒</span><span className="nav-label"> Orders</span>
           </button>
-          <button className={`nav-item ${activePage==='customers'?'nav-active':''}`} onClick={() => { setActivePage('customers'); setSidebarOpen(false); }}>
-            👥 Customer Data
+          <button className={`nav-item ${activePage==='customers'?'nav-active':''}`} onClick={() => { setActivePage('customers'); setSidebarOpen(false); }} data-label="Customer Data" title="Customer Data">
+            <span className="nav-icon">👥</span><span className="nav-label"> Customer Data</span>
           </button>
           {tenantInfo?.subdomain === 'gosuas' && (
-            <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }}>
-              🔑 Rental
+            <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }} data-label="Rental" title="Rental">
+              <span className="nav-icon">🔑</span><span className="nav-label"> Rental</span>
             </button>
           )}
-          <button className={`nav-item ${activePage==='alerts'?'nav-active':''}`} onClick={() => { setActivePage('alerts'); setSidebarOpen(false); }}>
-            ⚠ Stock Alerts
-            {lowStockItems.length > 0 && <span className="alert-count-badge" style={{marginLeft:6}}>{lowStockItems.length}</span>}
+          <button className={`nav-item ${activePage==='alerts'?'nav-active':''}`} onClick={() => { setActivePage('alerts'); setSidebarOpen(false); }} data-label="Stock Alerts" title="Stock Alerts">
+            <span className="nav-icon">⚠</span><span className="nav-label"> Stock Alerts</span>
+            {lowStockItems.length > 0 && <span className="alert-count-badge nav-badge" style={{marginLeft:6}}>{lowStockItems.length}</span>}
           </button>
-          <button className={`nav-item ${activePage==='plan'?'nav-active':''}`} onClick={() => { setActivePage('plan'); setSidebarOpen(false); }}>
-            💎 My Plan
+          <button className={`nav-item ${activePage==='plan'?'nav-active':''}`} onClick={() => { setActivePage('plan'); setSidebarOpen(false); }} data-label="My Plan" title="My Plan">
+            <span className="nav-icon">💎</span><span className="nav-label"> My Plan</span>
           </button>
-          <button className={`nav-item ${activePage==='returns'?'nav-active':''}`} onClick={() => { setActivePage('returns'); setSidebarOpen(false); }}>
-            🔄 Sales Returns
+          <button className={`nav-item ${activePage==='returns'?'nav-active':''}`} onClick={() => { setActivePage('returns'); setSidebarOpen(false); }} data-label="Sales Returns" title="Sales Returns">
+            <span className="nav-icon">🔄</span><span className="nav-label"> Sales Returns</span>
           </button>
-          <button className={`nav-item ${activePage==='damage'?'nav-active':''}`} onClick={() => { setActivePage('damage'); setSidebarOpen(false); }}>
-            🗑 Damage Stock
+          <button className={`nav-item ${activePage==='damage'?'nav-active':''}`} onClick={() => { setActivePage('damage'); setSidebarOpen(false); }} data-label="Damage Stock" title="Damage Stock">
+            <span className="nav-icon">🗑</span><span className="nav-label"> Damage Stock</span>
           </button>
-          <button className={`nav-item ${activePage==='expenses'?'nav-active':''}`} onClick={() => { setActivePage('expenses'); setSidebarOpen(false); }}>
-            💸 Expenses
+          <button className={`nav-item ${activePage==='expenses'?'nav-active':''}`} onClick={() => { setActivePage('expenses'); setSidebarOpen(false); }} data-label="Expenses" title="Expenses">
+            <span className="nav-icon">💸</span><span className="nav-label"> Expenses</span>
           </button>
-          <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }}>
-            🏷 Print Labels
+          <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }} data-label="Print Labels" title="Print Labels">
+            <span className="nav-icon">🏷</span><span className="nav-label"> Print Labels</span>
           </button>
         </div>
 
@@ -2698,7 +2698,7 @@ function App() {
           </div>
         )}
 
-        <button className="sidebar-logout" onClick={() => { handleLogout(); setSidebarOpen(false); }}>⏻ Logout</button>
+        <button className="sidebar-logout" onClick={() => { handleLogout(); setSidebarOpen(false); }} title="Logout"><span className="nav-icon">⏻</span><span className="nav-label"> Logout</span></button>
       </nav>
 
       {/* ── Main area ── */}
@@ -2708,6 +2708,9 @@ function App() {
         <div className="top-header">
           <button className="hamburger-btn" onClick={e => { e.stopPropagation(); setSidebarOpen(o => !o); }}>
             {sidebarOpen ? '✕' : '☰'}
+          </button>
+          <button className="sidebar-toggle-btn" onClick={toggleSidebarCollapse} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            {sidebarCollapsed ? '▶' : '◀'}
           </button>
           <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock', expenses:'Expenses' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
