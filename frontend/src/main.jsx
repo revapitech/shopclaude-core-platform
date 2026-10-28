@@ -3857,14 +3857,12 @@ function App() {
                     <h3 style={{margin:0,fontSize:'1.1rem',fontWeight:700,color:'var(--text)'}}>Expense Summary</h3>
                   </div>
 
-                  {expenseCount === 0 ? (
-                    <div className="rpt-card" style={{textAlign:'center',padding:'2rem',color:'var(--text-muted)'}}>
-                      <div style={{fontSize:'2rem',marginBottom:'0.5rem'}}>✔</div>
-                      <div style={{fontWeight:600}}>No expenses recorded in this period</div>
-                      <div style={{fontSize:'0.85rem',marginTop:'0.25rem'}}>Add expenses from the Expenses page.</div>
-                    </div>
-                  ) : (
-                    <>
+                  <>
+                      {expenseCount === 0 && (
+                        <div style={{marginBottom:'0.75rem',padding:'8px 14px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,fontSize:12.5,color:'#166534',display:'flex',alignItems:'center',gap:6}}>
+                          <span>✔</span> No expenses in this period — <span style={{fontWeight:600,cursor:'pointer',textDecoration:'underline'}} onClick={()=>setActivePage('expenses')}>add from Expenses page</span>
+                        </div>
+                      )}
                       {/* Summary cards — fixed periods + selected period */}
                       <div className="rpt-row" style={{marginBottom:'1rem'}}>
                         {[
@@ -4000,8 +3998,7 @@ function App() {
                           </div>
                         </div>
                       )}
-                    </>
-                  )}
+                  </>
                 </div>
               );
             })()}
