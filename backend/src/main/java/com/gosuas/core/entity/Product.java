@@ -70,6 +70,11 @@ public class Product {
     @Column(name = "gst_rate", precision = 5, scale = 2)
     private java.math.BigDecimal gstRate;
 
+    // When false: product can be billed regardless of stockQty; stock is not decremented.
+    // Null treated as true for backward compat with pre-existing products.
+    @Column(name = "track_stock")
+    private Boolean trackStock;
+
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
@@ -81,5 +86,6 @@ public class Product {
         if (this.festiveOffer == null) this.festiveOffer = false;
         if (this.rentalAvailable == null) this.rentalAvailable = false;
         if (this.productType == null) this.productType = "OTHER";
+        if (this.trackStock == null) this.trackStock = true;
     }
 }

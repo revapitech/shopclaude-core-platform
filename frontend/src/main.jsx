@@ -1398,7 +1398,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sc_sidebar') === '1');
   const toggleSidebarCollapse = () => setSidebarCollapsed(v => { const n = !v; localStorage.setItem('sc_sidebar', n ? '1' : '0'); return n; });
   const [products, setProducts] = useState([]);
-  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '', hsnCode: '', gstRate: '' };
+  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, trackStock: true, description: '', hsnCode: '', gstRate: '' };
   const [form, setForm] = useState(EMPTY_FORM);
   const makeEmptyImageSlots = (n) => Array.from({length:n}, () => ({file:null,preview:null}));
   const [imageSlots, setImageSlots] = useState(makeEmptyImageSlots(2));
@@ -2143,6 +2143,7 @@ function App() {
         purchasePrice: Number(form.purchasePrice), ...pricing, stockQty: Number(form.stockQty),
         lowStockAlertQty: null, imageUrl, active: form.showToWebsite, festiveOffer: form.festiveOffer,
         hsnCode: form.hsnCode || null, gstRate: form.gstRate !== '' ? Number(form.gstRate) : null,
+        trackStock: form.trackStock !== false,
         rentalAvailable: form.rentalAvailable, productType: form.productType,
         description: form.description || null,
       };
@@ -2321,6 +2322,7 @@ function App() {
       imageSlots: Array.from({length: slotCount}, (_, i) => makeSlot(existingUrls[i])),
       hsnCode: p.hsnCode || '',
       gstRate: p.gstRate != null ? String(p.gstRate) : '',
+      trackStock: p.trackStock !== false,
     });
   };
 
@@ -2389,6 +2391,7 @@ function App() {
       active: editModal.showToWebsite,
       hsnCode: editModal.hsnCode || null,
       gstRate: editModal.gstRate !== '' && editModal.gstRate != null ? Number(editModal.gstRate) : null,
+      trackStock: editModal.trackStock !== false,
     };
       if (editAttrs.length > 0) {
         const color = attrVals[editAttrs[0]?.name] || null;
@@ -2564,7 +2567,7 @@ function App() {
   })();
 
   // ── Stock alerts ──
-  const lowStockItems  = products.filter(p => (p.stockQty ?? 0) < 5);
+  const lowStockItems  = products.filter(p => p.trackStock !== false && (p.stockQty ?? 0) < 5);
   const criticalItems  = lowStockItems.filter(p => p.stockQty === 0);
   const warningItems   = lowStockItems.filter(p => p.stockQty > 0);
 
@@ -2927,7 +2930,7 @@ function App() {
           const catalogProducts = products.filter(p => {
             if (p.productType === 'RENTAL') return false;
             if (!p.sellingPrice) return false;
-            if (catalogInStockOnly && (p.stockQty ?? 0) <= 0) return false;
+            if (catalogInStockOnly && p.trackStock !== false && (p.stockQty ?? 0) <= 0) return false;
             if (catalogCategoryFilter && p.category !== catalogCategoryFilter) return false;
             if (q && !p.name?.toLowerCase().includes(q) && !p.sku?.toLowerCase().includes(q) && !p.barcode?.toLowerCase().includes(q) && !variantLabel(p).toLowerCase().includes(q)) return false;
             return true;
@@ -2990,7 +2993,7 @@ function App() {
               <div className="catalog-grid">
                 {catalogProducts.map(p => {
                   const imgUrl = firstImgUrl(p);
-                  const outOfStock = (p.stockQty ?? 0) <= 0;
+                  const outOfStock = p.trackStock !== false && (p.stockQty ?? 0) <= 0;
                   const vLabel = variantLabel(p);
                   const hasSiblings = getColorSiblings(p).length > 0;
                   return (
@@ -3282,8 +3285,8 @@ function App() {
               required
             />
             {(form.productType === 'RENTAL'
-              ? ['purchasePrice','depositAmount','rentAmount','stockQty']
-              : ['purchasePrice','sellingPrice','mrp','stockQty']
+              ? ['purchasePrice','depositAmount','rentAmount']
+              : ['purchasePrice','sellingPrice','mrp']
             ).map(k => (
               <input
                 key={k}
@@ -3294,6 +3297,19 @@ function App() {
                 min="0"
               />
             ))}
+            <input
+              type="number"
+              placeholder="Stock Quantity"
+              value={form.stockQty}
+              onChange={e => setForm({...form, stockQty: e.target.value})}
+              min="0"
+              disabled={!form.trackStock}
+              style={!form.trackStock ? {opacity:0.4, pointerEvents:'none'} : {}}
+            />
+            <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'#64748B',cursor:'pointer',userSelect:'none',marginTop:-4}}>
+              <input type="checkbox" checked={!form.trackStock} onChange={e => setForm({...form, trackStock: !e.target.checked, stockQty: e.target.checked ? '' : form.stockQty})} style={{width:15,height:15,cursor:'pointer'}} />
+              Don't Track Stock
+            </label>
             {tenantInfo?.gstRegistered && (
               <div style={{display:'flex',gap:8,marginTop:4}}>
                 <input
@@ -6223,7 +6239,7 @@ function App() {
               </div>
             )}
 
-            <div className="edit-restock-banner" style={{marginTop:'10px'}}>
+            <div className="edit-restock-banner" style={{marginTop:'10px', opacity: editModal.trackStock === false ? 0.4 : 1, pointerEvents: editModal.trackStock === false ? 'none' : 'auto'}}>
               <span className="edit-restock-label">Stock Quantity</span>
               <div className="edit-restock-controls">
                 <button type="button" className="qty-btn" onClick={() => setEditModal(m => ({...m, stockQty: Math.max(0, Number(m.stockQty) - 1)}))}>−</button>
@@ -6232,6 +6248,10 @@ function App() {
                 <button type="button" className="qty-btn" onClick={() => setEditModal(m => ({...m, stockQty: Number(m.stockQty) + 1}))}>+</button>
               </div>
             </div>
+            <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'#64748B',cursor:'pointer',userSelect:'none',marginTop:4}}>
+              <input type="checkbox" checked={editModal.trackStock === false} onChange={e => setEditModal(m => ({...m, trackStock: !e.target.checked}))} style={{width:15,height:15,cursor:'pointer'}} />
+              Don't Track Stock
+            </label>
 
             {/* Variant attributes — single-select per attribute */}
             {editAttrs.length > 0 && (
