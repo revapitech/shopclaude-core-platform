@@ -1395,6 +1395,8 @@ function PdfStorePage({ tenantInfo }) {
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sc_sidebar') === '1');
+  const toggleSidebarCollapse = () => setSidebarCollapsed(v => { const n = !v; localStorage.setItem('sc_sidebar', n ? '1' : '0'); return n; });
   const [products, setProducts] = useState([]);
   const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '', hsnCode: '', gstRate: '' };
   const [form, setForm] = useState(EMPTY_FORM);
@@ -2607,7 +2609,7 @@ function App() {
   const avgBill       = totalBills > 0 ? totalRevenue / totalBills : 0;
 
   return (
-    <div className={`app-layout${sidebarOpen ? ' sidebar-open' : ''}`} onClick={() => { showNotif && setShowNotif(false); }}>
+    <div className={`app-layout${sidebarOpen ? ' sidebar-open' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`} onClick={() => { showNotif && setShowNotif(false); }}>
 
       {/* Mobile sidebar overlay */}
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
