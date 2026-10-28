@@ -7,15 +7,7 @@ import LandingPage from './pages/LandingPage';
 const API     = import.meta.env.VITE_API_URL     ?? 'http://localhost:8080/gosuas-core/api';
 const BACKEND = import.meta.env.VITE_BACKEND_URL ?? API.replace(/\/api$/, '');
 
-function getSubdomain() {
-  const host = window.location.hostname;
-  if (host === 'localhost' || host === '127.0.0.1') return 'gosuas';
-  // Any *.gosuas.com or gosuas.com domain → always gosuas tenant (backward compat)
-  if (host === 'gosuas.com' || host.endsWith('.gosuas.com')) return 'gosuas';
-  const parts = host.split('.');
-  if (parts.length >= 3) return parts[0]; // e.g. "gosuas" from "gosuas.theshopclaude.com"
-  return 'www'; // theshopclaude.com or www.theshopclaude.com → landing page
-}
+import { getSubdomain } from './utils/getSubdomain.js';
 
 function maxPhotosForPlan(plan) {
   return plan === 'PRO' ? 6 : 2; // STARTER (₹999) → 2, PRO (₹1,699) → 6, FREE defaults to 2
