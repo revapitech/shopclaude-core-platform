@@ -28,5 +28,6 @@ public record ProductRequest(
         String colorPhotoUrl,
         String hsnCode,
         BigDecimal gstRate,
-        Boolean trackStock
+        Boolean trackStock,
+        String variantImages
 ) {}

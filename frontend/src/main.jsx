@@ -2121,13 +2121,35 @@ function App() {
   };
 
   // Ad-hoc variant rows (Colour, Size, or any custom type) for categories with no predefined attributes.
-  const addVariantRow = (presetName = '') => setForm(f => ({...f, variants: [...f.variants, { name: presetName, value: '' }]}));
+  const addVariantRow = (presetName = '') => setForm(f => ({...f, variants: [...f.variants, { name: presetName, value: '', imageSlot: null }]}));
   const updateVariantRow = (idx, patch) => setForm(f => ({...f, variants: f.variants.map((v, i) => i === idx ? {...v, ...patch} : v)}));
   const removeVariantRow = (idx) => setForm(f => ({...f, variants: f.variants.filter((_, i) => i !== idx)}));
 
-  const addEditVariantRow = (presetName = '') => setEditModal(m => ({...m, variants: [...(m.variants||[]), { name: presetName, value: '' }]}));
+  const addEditVariantRow = (presetName = '') => setEditModal(m => ({...m, variants: [...(m.variants||[]), { name: presetName, value: '', imageSlot: null }]}));
   const updateEditVariantRow = (idx, patch) => setEditModal(m => ({...m, variants: m.variants.map((v, i) => i === idx ? {...v, ...patch} : v)}));
   const removeEditVariantRow = (idx) => setEditModal(m => ({...m, variants: m.variants.filter((_, i) => i !== idx)}));
+  const setVariantImage = (idx, file) => setForm(f => ({...f, variants: f.variants.map((v, i) => i === idx ? {...v, imageSlot: {file, preview: URL.createObjectURL(file), serverUrl: null}} : v)}));
+  const removeVariantImage = (idx) => setForm(f => ({...f, variants: f.variants.map((v, i) => i === idx ? {...v, imageSlot: null} : v)}));
+  const setEditVariantImage = (idx, file) => setEditModal(m => ({...m, variants: m.variants.map((v, i) => i === idx ? {...v, imageSlot: {file, preview: URL.createObjectURL(file), serverUrl: null}} : v)}));
+  const removeEditVariantImage = (idx) => setEditModal(m => ({...m, variants: m.variants.map((v, i) => i === idx ? {...v, imageSlot: null} : v)}));
+  const uploadVariantImages = async (variants) => {
+    const result = {};
+    for (const v of (variants || [])) {
+      const name = (v.name || '').trim();
+      const value = (v.value || '').trim();
+      if (!name || !value || !v.imageSlot) continue;
+      const key = `${name}|${value}`;
+      if (v.imageSlot.file) {
+        const fd = new FormData();
+        fd.append('file', v.imageSlot.file);
+        const res = await axios.post(`${API}/upload`, fd);
+        result[key] = res.data.url;
+      } else if (v.imageSlot.serverUrl) {
+        result[key] = v.imageSlot.serverUrl;
+      }
+    }
+    return Object.keys(result).length ? JSON.stringify(result) : null;
+  };
 
   const createProduct = async (e) => {
     e.preventDefault();
@@ -2146,6 +2168,7 @@ function App() {
         trackStock: form.trackStock !== false,
         rentalAvailable: form.rentalAvailable, productType: form.productType,
         description: form.description || null,
+        variantImages: variantImagesJson,
       };
       if (activeAttrs.length > 0) {
         const combos = cartesian(activeAttrs.map(a => form.selectedAttrs[a.name]));
@@ -2260,9 +2283,14 @@ function App() {
     // editable name+value rows, not limited to Colour/Size. Colour is pulled out into its
     // own multi-select + per-colour-photo picker, same as Add Product.
     const colourEntry = Object.entries(editAttrValues).find(([name]) => ['colour','color'].includes(name.trim().toLowerCase()));
+    let variantImagesMap = {};
+    if (p.variantImages) { try { variantImagesMap = JSON.parse(p.variantImages); } catch {} }
     const variants = Object.entries(editAttrValues)
       .filter(([name]) => !['colour','color'].includes(name.trim().toLowerCase()))
-      .map(([name, value]) => ({ name, value }));
+      .map(([name, value]) => {
+        const imgUrl = variantImagesMap[`${name}|${value}`] || null;
+        return { name, value, imageSlot: imgUrl ? { file: null, preview: `${BACKEND}${imgUrl}`, serverUrl: imgUrl } : null };
+      });
     const makeSlot = (url) => ({
       file: null,
       preview: url ? `${BACKEND}${url}` : null,
@@ -2369,6 +2397,7 @@ function App() {
       }
     }
     const imageUrl = savedUrls.join(',') || null;
+    const editVariantImagesJson = await uploadVariantImages(editModal.variants || []);
     const editCatDef = tenantCategories.find(c => c.name === editModal.category);
     const editAttrs = editCatDef?.attributes || [];
     const attrVals = editModal.editAttrValues || {};
@@ -2392,6 +2421,7 @@ function App() {
       hsnCode: editModal.hsnCode || null,
       gstRate: editModal.gstRate !== '' && editModal.gstRate != null ? Number(editModal.gstRate) : null,
       trackStock: editModal.trackStock !== false,
+      variantImages: editVariantImagesJson,
     };
       if (editAttrs.length > 0) {
         const color = attrVals[editAttrs[0]?.name] || null;
@@ -3265,6 +3295,22 @@ function App() {
                         value={v.value} onChange={val => updateVariantRow(idx, { value: val })} />
                     ) : (
                       <input placeholder="Value" value={v.value} onChange={e => updateVariantRow(idx, { value: e.target.value })} />
+                    )}
+                    {v.name.trim().toLowerCase() !== 'size' && (
+                      <div className="variant-img-row">
+                        {v.imageSlot?.preview ? (
+                          <div className="variant-img-preview">
+                            <img src={v.imageSlot.preview} alt="variant" />
+                            <button type="button" className="variant-img-remove" onClick={() => removeVariantImage(idx)}>✕</button>
+                          </div>
+                        ) : (
+                          <label className="variant-img-upload">
+                            <span>＋ Variant Image</span>
+                            <input type="file" accept="image/*" style={{display:'none'}}
+                              onChange={e => { const f = e.target.files?.[0]; if (f) setVariantImage(idx, f); }} />
+                          </label>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}
@@ -6359,6 +6405,22 @@ function App() {
                         value={v.value} onChange={val => updateEditVariantRow(idx, { value: val })} />
                     ) : (
                       <input placeholder="Value" value={v.value} onChange={e => updateEditVariantRow(idx, { value: e.target.value })} />
+                    )}
+                    {v.name.trim().toLowerCase() !== 'size' && (
+                      <div className="variant-img-row">
+                        {v.imageSlot?.preview ? (
+                          <div className="variant-img-preview">
+                            <img src={v.imageSlot.preview} alt="variant" />
+                            <button type="button" className="variant-img-remove" onClick={() => removeEditVariantImage(idx)}>✕</button>
+                          </div>
+                        ) : (
+                          <label className="variant-img-upload">
+                            <span>＋ Variant Image</span>
+                            <input type="file" accept="image/*" style={{display:'none'}}
+                              onChange={e => { const f = e.target.files?.[0]; if (f) setEditVariantImage(idx, f); }} />
+                          </label>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}

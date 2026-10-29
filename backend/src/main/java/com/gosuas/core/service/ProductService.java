@@ -89,6 +89,7 @@ public class ProductService {
                 // independent of the separate legacy rentalAvailable flag some tenants still use.
                 .rentalAvailable(isRental ? Boolean.TRUE : (request.rentalAvailable() != null ? request.rentalAvailable() : Boolean.FALSE))
                 .trackStock(request.trackStock() != null ? request.trackStock() : Boolean.TRUE)
+                .variantImages(request.variantImages())
                 .build();
         return productRepository.save(product);
     }
@@ -192,6 +193,8 @@ public class ProductService {
         if (isRental) product.setRentalAvailable(true);
         else if (request.rentalAvailable() != null) product.setRentalAvailable(request.rentalAvailable());
         if (request.trackStock() != null) product.setTrackStock(request.trackStock());
+        // variantImages is always set (null to clear, string to update); nullable is intentional
+        product.setVariantImages(request.variantImages());
         return productRepository.save(product);
     }
 }
