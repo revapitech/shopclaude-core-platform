@@ -75,6 +75,11 @@ public class Product {
     @Column(name = "track_stock")
     private Boolean trackStock;
 
+    // Per-variant image URLs: JSON map keyed by "variantName|variantValue".
+    // Null for products with no custom variant images (existing products unaffected).
+    @Column(name = "variant_images", columnDefinition = "TEXT")
+    private String variantImages;
+
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
