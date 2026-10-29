@@ -45,7 +45,7 @@ axios.interceptors.response.use(
 );
 
 // Shop admin pages that can be opened directly via the URL hash (/#returns etc.)
-const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'expenses', 'print-labels', 'pdf-store'];
+const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'expenses', 'print-labels', 'pdf-store', 'offers'];
 
 const FIELD_LABELS = {
   name: 'Product Name',
@@ -1533,6 +1533,27 @@ function App() {
   const [expenseEditId, setExpenseEditId] = useState(null);
   const [expenseSummary, setExpenseSummary] = useState(null);
 
+  // ── Offers & Combos ────────────────────────────────────────────────────────
+  const [offers, setOffers] = useState([]);
+  const [offersLoading, setOffersLoading] = useState(false);
+  const [offerSearch, setOfferSearch] = useState('');
+  const [offerStatusFilter, setOfferStatusFilter] = useState('ALL');
+  const [offerFormOpen, setOfferFormOpen] = useState(false);
+  const [offerEditId, setOfferEditId] = useState(null);
+  const OFFER_FORM_EMPTY = {
+    name: '', description: '', offerType: 'CUSTOMER_SELECT', requiredQty: 1,
+    comboPrice: '', startDateTime: '', endDateTime: '',
+    active: true, showOnHome: true, allowRepeat: false, posterUrl: '',
+    eligibleProducts: [],
+  };
+  const [offerForm, setOfferForm] = useState(OFFER_FORM_EMPTY);
+  const [offerFormError, setOfferFormError] = useState('');
+  const [offerFormLoading, setOfferFormLoading] = useState(false);
+  const [offerProductSearch, setOfferProductSearch] = useState('');
+  const [offerPosterPreview, setOfferPosterPreview] = useState(null);
+  const [offerPosterUploading, setOfferPosterUploading] = useState(false);
+  const [offerDeleteConfirm, setOfferDeleteConfirm] = useState(null);
+
   // ── Sales Returns ──────────────────────────────────────────────────────────
   const [salesReturns, setSalesReturns] = useState([]);
   const [returnSearch, setReturnSearch] = useState('');
@@ -1842,6 +1863,10 @@ function App() {
     if (isLoggedIn && activePage === 'returns') loadSalesReturns();
     if (isLoggedIn && activePage === 'damage') loadDamages();
   if (isLoggedIn && activePage === 'expenses') loadExpenses();
+  if (isLoggedIn && activePage === 'offers') {
+    setOffersLoading(true);
+    axios.get(`${API}/offers`).then(r => setOffers(r.data)).catch(() => {}).finally(() => setOffersLoading(false));
+  }
   }, [activePage, isLoggedIn]);
 
   useEffect(() => {
@@ -2701,6 +2726,9 @@ function App() {
           <button className={`nav-item ${activePage==='expenses'?'nav-active':''}`} onClick={() => { setActivePage('expenses'); setSidebarOpen(false); }} data-label="Expenses" title="Expenses">
             <span className="nav-icon">💸</span><span className="nav-label"> Expenses</span>
           </button>
+          <button className={`nav-item ${activePage==='offers'?'nav-active':''}`} onClick={() => { setActivePage('offers'); setSidebarOpen(false); }} data-label="Offers &amp; Combos" title="Offers & Combos">
+            <span className="nav-icon">🎁</span><span className="nav-label"> Offers &amp; Combos</span>
+          </button>
           <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }} data-label="Print Labels" title="Print Labels">
             <span className="nav-icon">🏷</span><span className="nav-label"> Print Labels</span>
           </button>
@@ -2751,7 +2779,7 @@ function App() {
               </svg>
             )}
           </button>
-          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock', expenses:'Expenses' }[activePage] || 'Home'}</h2>
+          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock', expenses:'Expenses', offers:'Offers & Combos' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
             <a href={`https://${tenantInfo?.subdomain ?? getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
               title="Visit your store"
@@ -6022,6 +6050,438 @@ function App() {
           );
         })()}
 
+        {/* ── Offers & Combos page ── */}
+        {activePage === 'offers' && (() => {
+          const STATUS_BADGE_STYLES = {
+            ACTIVE:    { bg:'#dcfce7', color:'#15803d', label:'Active' },
+            INACTIVE:  { bg:'#f3f4f6', color:'#6b7280', label:'Inactive' },
+            SCHEDULED: { bg:'#dbeafe', color:'#1d4ed8', label:'Scheduled' },
+            EXPIRED:   { bg:'#fee2e2', color:'#dc2626', label:'Expired' },
+            DRAFT:     { bg:'#fef9c3', color:'#a16207', label:'Draft' },
+          };
+
+          const filteredOffers = offers.filter(o => {
+            const s = offerSearch.toLowerCase();
+            const matchSearch = !s || o.name.toLowerCase().includes(s);
+            const matchStatus = offerStatusFilter === 'ALL' || o.status === offerStatusFilter;
+            return matchSearch && matchStatus;
+          });
+
+          const openCreateForm = () => {
+            setOfferForm(OFFER_FORM_EMPTY);
+            setOfferEditId(null);
+            setOfferFormError('');
+            setOfferPosterPreview(null);
+            setOfferProductSearch('');
+            setOfferFormOpen(true);
+          };
+
+          const openEditForm = (o) => {
+            setOfferForm({
+              name: o.name || '',
+              description: o.description || '',
+              offerType: o.offerType || 'CUSTOMER_SELECT',
+              requiredQty: o.requiredQty || 1,
+              comboPrice: o.comboPrice != null ? String(o.comboPrice) : '',
+              startDateTime: o.startDateTime ? o.startDateTime.slice(0,16) : '',
+              endDateTime: o.endDateTime ? o.endDateTime.slice(0,16) : '',
+              active: o.active !== false,
+              showOnHome: o.showOnHome !== false,
+              allowRepeat: !!o.allowRepeat,
+              posterUrl: o.posterUrl || '',
+              eligibleProducts: (o.eligibleProducts || []).map(ep => ({...ep})),
+            });
+            setOfferEditId(o.id);
+            setOfferFormError('');
+            setOfferPosterPreview(o.posterUrl ? `${BACKEND}${o.posterUrl}` : null);
+            setOfferProductSearch('');
+            setOfferFormOpen(true);
+          };
+
+          const handleDeleteOffer = async (id) => {
+            try {
+              await axios.delete(`${API}/offers/${id}`);
+              setOffers(prev => prev.filter(o => o.id !== id));
+              setOfferDeleteConfirm(null);
+            } catch { alert('Failed to delete offer.'); }
+          };
+
+          const toggleOfferActive = async (o) => {
+            try {
+              const res = await axios.patch(`${API}/offers/${o.id}/toggle-active`);
+              setOffers(prev => prev.map(x => x.id === o.id ? res.data : x));
+            } catch { alert('Failed to update offer.'); }
+          };
+
+          const handlePosterUpload = async (file) => {
+            setOfferPosterUploading(true);
+            try {
+              const fd = new FormData(); fd.append('file', file);
+              const res = await axios.post(`${API}/upload`, fd);
+              const url = res.data.url;
+              setOfferForm(f => ({...f, posterUrl: url}));
+              setOfferPosterPreview(`${BACKEND}${url}`);
+            } catch { alert('Poster upload failed.'); }
+            finally { setOfferPosterUploading(false); }
+          };
+
+          const isProductSelected = (productId) =>
+            offerForm.eligibleProducts.some(ep => ep.productId === productId);
+
+          const toggleProductSelection = (p) => {
+            if (isProductSelected(p.id)) {
+              setOfferForm(f => ({...f, eligibleProducts: f.eligibleProducts.filter(ep => ep.productId !== p.id)}));
+            } else {
+              setOfferForm(f => ({...f, eligibleProducts: [...f.eligibleProducts, {
+                productId: p.id, productName: p.name, barcode: p.barcode, sku: p.sku,
+                imageUrl: p.imageUrl, sellingPrice: p.sellingPrice, stockQty: p.stockQty,
+                trackStock: p.trackStock, quantity: 1,
+              }]}));
+            }
+          };
+
+          const updateFixedQty = (productId, qty) => {
+            setOfferForm(f => ({...f, eligibleProducts: f.eligibleProducts.map(ep =>
+              ep.productId === productId ? {...ep, quantity: Math.max(1, parseInt(qty)||1)} : ep
+            )}));
+          };
+
+          const saveOffer = async () => {
+            setOfferFormError('');
+            if (!offerForm.name.trim()) { setOfferFormError('Offer name is required.'); return; }
+            if (!offerForm.comboPrice || isNaN(Number(offerForm.comboPrice)) || Number(offerForm.comboPrice) < 0) {
+              setOfferFormError('Enter a valid combo price.'); return;
+            }
+            if (offerForm.offerType === 'CUSTOMER_SELECT' && (!offerForm.requiredQty || offerForm.requiredQty < 1)) {
+              setOfferFormError('Required quantity must be at least 1.'); return;
+            }
+            if (offerForm.startDateTime && offerForm.endDateTime && offerForm.endDateTime < offerForm.startDateTime) {
+              setOfferFormError('End date must be after start date.'); return;
+            }
+            const payload = {
+              name: offerForm.name.trim(),
+              description: offerForm.description,
+              offerType: offerForm.offerType,
+              requiredQty: offerForm.offerType === 'CUSTOMER_SELECT' ? parseInt(offerForm.requiredQty) : null,
+              comboPrice: parseFloat(offerForm.comboPrice),
+              startDateTime: offerForm.startDateTime || null,
+              endDateTime: offerForm.endDateTime || null,
+              active: offerForm.active,
+              showOnHome: offerForm.showOnHome,
+              allowRepeat: offerForm.allowRepeat,
+              posterUrl: offerForm.posterUrl || null,
+              eligibleProducts: offerForm.eligibleProducts.map(ep => ({
+                productId: ep.productId, productName: ep.productName, barcode: ep.barcode,
+                sku: ep.sku, imageUrl: ep.imageUrl, sellingPrice: ep.sellingPrice,
+                stockQty: ep.stockQty, trackStock: ep.trackStock,
+                quantity: offerForm.offerType === 'FIXED_COMBO' ? (ep.quantity || 1) : null,
+              })),
+            };
+            setOfferFormLoading(true);
+            try {
+              let res;
+              if (offerEditId) {
+                res = await axios.put(`${API}/offers/${offerEditId}`, payload);
+                setOffers(prev => prev.map(o => o.id === offerEditId ? res.data : o));
+              } else {
+                res = await axios.post(`${API}/offers`, payload);
+                setOffers(prev => [res.data, ...prev]);
+              }
+              setOfferFormOpen(false);
+            } catch (e) {
+              setOfferFormError(e.response?.data?.message || e.response?.data || 'Failed to save offer.');
+            } finally { setOfferFormLoading(false); }
+          };
+
+          const eligiblePoolForSearch = products.filter(p => Boolean(p.active));
+          const offerSearchedProducts = eligiblePoolForSearch.filter(p => {
+            const s = offerProductSearch.toLowerCase();
+            return !s || p.name.toLowerCase().includes(s) || (p.sku||'').toLowerCase().includes(s) || (p.barcode||'').toLowerCase().includes(s);
+          });
+
+          // Regular price total estimate for CUSTOMER_SELECT (if ≥ requiredQty products selected)
+          const regTotalEstimate = (() => {
+            if (offerForm.offerType !== 'CUSTOMER_SELECT' || !offerForm.requiredQty) return null;
+            const sorted = [...offerForm.eligibleProducts]
+              .sort((a,b) => Number(a.sellingPrice||0) - Number(b.sellingPrice||0))
+              .slice(0, parseInt(offerForm.requiredQty));
+            if (sorted.length < parseInt(offerForm.requiredQty)) return null;
+            return sorted.reduce((s,p) => s + Number(p.sellingPrice||0), 0);
+          })();
+          const savings = regTotalEstimate != null && offerForm.comboPrice
+            ? regTotalEstimate - Number(offerForm.comboPrice) : null;
+
+          return (
+          <div className="page-content">
+            {/* Header bar */}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:20}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <input placeholder="Search offers…" value={offerSearch}
+                  onChange={e => setOfferSearch(e.target.value)}
+                  style={{padding:'8px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,width:220,outline:'none'}} />
+                <select value={offerStatusFilter} onChange={e => setOfferStatusFilter(e.target.value)}
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                  <option value="ALL">All Statuses</option>
+                  {['ACTIVE','INACTIVE','SCHEDULED','EXPIRED','DRAFT'].map(s =>
+                    <option key={s} value={s}>{s.charAt(0)+s.slice(1).toLowerCase()}</option>)}
+                </select>
+              </div>
+              <button className="btn-primary" onClick={openCreateForm}>+ Create Offer / Combo</button>
+            </div>
+
+            {/* Offers list */}
+            {offersLoading ? (
+              <div style={{textAlign:'center',padding:40,color:'#9ca3af'}}>Loading offers…</div>
+            ) : filteredOffers.length === 0 ? (
+              <div style={{textAlign:'center',padding:48,color:'#9ca3af'}}>
+                {offers.length === 0 ? 'No offers yet. Click "Create Offer / Combo" to get started.' : 'No offers match your search.'}
+              </div>
+            ) : (
+              <div className="offer-list">
+                {filteredOffers.map(o => {
+                  const st = STATUS_BADGE_STYLES[o.status] || STATUS_BADGE_STYLES.INACTIVE;
+                  const posterSrc = o.posterUrl ? `${BACKEND}${o.posterUrl}` : null;
+                  const eligCount = (o.eligibleProducts||[]).length;
+                  return (
+                    <div key={o.id} className="offer-card">
+                      {/* Poster thumbnail */}
+                      <div className="offer-card-poster">
+                        {posterSrc
+                          ? <img src={posterSrc} alt={o.name} />
+                          : <div className="offer-card-poster-ph">🎁</div>}
+                      </div>
+                      <div className="offer-card-body">
+                        <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:4}}>
+                          <span className="offer-card-name">{o.name}</span>
+                          <span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:99,background:st.bg,color:st.color}}>{st.label}</span>
+                          {o.showOnHome && <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#eff6ff',color:'#2563eb',fontWeight:600}}>🌐 On Website</span>}
+                        </div>
+                        {o.description && <div style={{fontSize:12,color:'#6b7280',marginBottom:6,lineHeight:1.4}}>{o.description}</div>}
+                        <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12,color:'#374151',marginBottom:4}}>
+                          <span><strong>Type:</strong> {o.offerType === 'CUSTOMER_SELECT' ? 'Customer Select' : 'Fixed Combo'}</span>
+                          {o.offerType === 'CUSTOMER_SELECT' && <span><strong>Pick:</strong> {o.requiredQty} items</span>}
+                          <span><strong>Price:</strong> ₹{Number(o.comboPrice).toFixed(2)}</span>
+                          <span><strong>Eligible products:</strong> {eligCount}</span>
+                        </div>
+                        {(o.startDateTime || o.endDateTime) && (
+                          <div style={{fontSize:11,color:'#9ca3af'}}>
+                            {o.startDateTime && `From ${new Date(o.startDateTime).toLocaleString('en-IN')}`}
+                            {o.startDateTime && o.endDateTime && ' · '}
+                            {o.endDateTime && `Until ${new Date(o.endDateTime).toLocaleString('en-IN')}`}
+                          </div>
+                        )}
+                      </div>
+                      <div className="offer-card-actions">
+                        <button className="btn-secondary" style={{fontSize:12,padding:'5px 12px'}} onClick={() => openEditForm(o)}>Edit</button>
+                        <button className="btn-secondary" style={{fontSize:12,padding:'5px 12px',background: o.active?'#fef9c3':undefined,color: o.active?'#a16207':undefined}}
+                          onClick={() => toggleOfferActive(o)}>{o.active ? 'Deactivate' : 'Activate'}</button>
+                        <button className="btn-danger" style={{fontSize:12,padding:'5px 12px'}} onClick={() => setOfferDeleteConfirm(o.id)}>Delete</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Delete confirm */}
+            {offerDeleteConfirm && (
+              <div className="modal-overlay" onClick={() => setOfferDeleteConfirm(null)}>
+                <div className="modal-box" style={{maxWidth:400}} onClick={e => e.stopPropagation()}>
+                  <h3>Delete Offer?</h3>
+                  <p style={{color:'#6b7280',fontSize:13,margin:'8px 0 20px'}}>This will permanently delete the offer and remove it from the storefront.</p>
+                  <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+                    <button className="btn-secondary" onClick={() => setOfferDeleteConfirm(null)}>Cancel</button>
+                    <button className="btn-danger" onClick={() => handleDeleteOffer(offerDeleteConfirm)}>Delete</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Create / Edit offer form */}
+            {offerFormOpen && (
+              <div className="modal-overlay" onClick={() => setOfferFormOpen(false)}>
+                <div className="modal-box offer-form-box" onClick={e => e.stopPropagation()}>
+                  <h3 style={{marginBottom:18}}>{offerEditId ? 'Edit Offer' : 'Create Offer / Combo'}</h3>
+
+                  {/* ── A. Basic Information ── */}
+                  <div className="offer-section-title">A. Basic Information</div>
+
+                  <label className="modal-label">Offer Name *</label>
+                  <input value={offerForm.name} onChange={e => setOfferForm(f => ({...f, name: e.target.value}))}
+                    placeholder="e.g. Any 6 for ₹250" style={{marginTop:4}} />
+
+                  <label className="modal-label" style={{marginTop:12}}>Description</label>
+                  <textarea value={offerForm.description} onChange={e => setOfferForm(f => ({...f, description: e.target.value}))}
+                    rows={2} placeholder="Brief description shown on the website"
+                    style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,fontFamily:'inherit',resize:'vertical',boxSizing:'border-box',outline:'none'}} />
+
+                  <div className="offer-form-row" style={{marginTop:12}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">Offer Type *</label>
+                      <select value={offerForm.offerType} onChange={e => setOfferForm(f => ({...f, offerType: e.target.value}))}
+                        style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                        <option value="CUSTOMER_SELECT">Customer Select Combo (Build Your Own)</option>
+                        <option value="FIXED_COMBO">Fixed Combo (Pre-selected Products)</option>
+                      </select>
+                    </div>
+                    {offerForm.offerType === 'CUSTOMER_SELECT' && (
+                      <div style={{width:130}}>
+                        <label className="modal-label">Required Items *</label>
+                        <input type="number" min={1} value={offerForm.requiredQty}
+                          onChange={e => setOfferForm(f => ({...f, requiredQty: parseInt(e.target.value)||1}))}
+                          style={{marginTop:4}} />
+                      </div>
+                    )}
+                    <div style={{width:150}}>
+                      <label className="modal-label">Combo Price (₹) *</label>
+                      <input type="number" min={0} step="0.01" value={offerForm.comboPrice}
+                        onChange={e => setOfferForm(f => ({...f, comboPrice: e.target.value}))}
+                        placeholder="0.00" style={{marginTop:4}} />
+                    </div>
+                  </div>
+
+                  {/* Price preview */}
+                  {regTotalEstimate != null && (
+                    <div style={{marginTop:8,padding:'8px 12px',borderRadius:8,background: savings>0?'#f0fdf4':'#fff7ed',border:`1.5px solid ${savings>0?'#bbf7d0':'#fed7aa'}`,fontSize:12}}>
+                      <span style={{color:'#374151'}}>Estimated regular total (cheapest {offerForm.requiredQty}): </span>
+                      <strong>₹{regTotalEstimate.toFixed(2)}</strong>
+                      {savings > 0 && <span style={{color:'#15803d',marginLeft:8,fontWeight:700}}>→ Customer saves ₹{savings.toFixed(2)}</span>}
+                      {savings !== null && savings <= 0 && <span style={{color:'#ea580c',marginLeft:8}}>⚠ Combo price is not lower than regular price</span>}
+                    </div>
+                  )}
+
+                  <div className="offer-form-row" style={{marginTop:12}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">Start Date & Time</label>
+                      <input type="datetime-local" value={offerForm.startDateTime}
+                        onChange={e => setOfferForm(f => ({...f, startDateTime: e.target.value}))}
+                        style={{marginTop:4}} />
+                    </div>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">End Date & Time</label>
+                      <input type="datetime-local" value={offerForm.endDateTime}
+                        onChange={e => setOfferForm(f => ({...f, endDateTime: e.target.value}))}
+                        style={{marginTop:4}} />
+                    </div>
+                  </div>
+
+                  <div style={{display:'flex',gap:24,marginTop:14,flexWrap:'wrap'}}>
+                    <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13}}>
+                      <input type="checkbox" checked={offerForm.active} onChange={e => setOfferForm(f => ({...f, active: e.target.checked}))} />
+                      <strong>Active</strong>
+                    </label>
+                    <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13}}>
+                      <input type="checkbox" checked={offerForm.showOnHome} onChange={e => setOfferForm(f => ({...f, showOnHome: e.target.checked}))} />
+                      <strong>Show on Website Home Page</strong>
+                    </label>
+                    {offerForm.offerType === 'CUSTOMER_SELECT' && (
+                      <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13}}>
+                        <input type="checkbox" checked={offerForm.allowRepeat} onChange={e => setOfferForm(f => ({...f, allowRepeat: e.target.checked}))} />
+                        <strong>Allow same product multiple times</strong>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* ── B. Eligible Products ── */}
+                  <div className="offer-section-title" style={{marginTop:20}}>
+                    B. Eligible Products
+                    {offerForm.eligibleProducts.length > 0 && (
+                      <span style={{marginLeft:8,fontSize:12,fontWeight:400,color:'#2563eb'}}>
+                        {offerForm.eligibleProducts.length} selected
+                      </span>
+                    )}
+                  </div>
+                  <input placeholder="Search products by name, SKU, or barcode…"
+                    value={offerProductSearch} onChange={e => setOfferProductSearch(e.target.value)}
+                    style={{marginBottom:10,padding:'8px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,width:'100%',boxSizing:'border-box',outline:'none'}} />
+
+                  <div className="offer-product-grid">
+                    {offerSearchedProducts.map(p => {
+                      const sel = isProductSelected(p.id);
+                      const imgSrc0 = p.imageUrl ? `${BACKEND}${p.imageUrl.split(',')[0]}` : null;
+                      const ep = offerForm.eligibleProducts.find(x => x.productId === p.id);
+                      return (
+                        <div key={p.id} className={`offer-product-tile ${sel?'offer-product-selected':''}`}
+                          onClick={() => toggleProductSelection(p)}>
+                          <div className="offer-product-img">
+                            {imgSrc0 ? <img src={imgSrc0} alt={p.name} /> : <span style={{fontSize:18}}>💎</span>}
+                            {sel && <div className="offer-product-check">✓</div>}
+                          </div>
+                          <div className="offer-product-info">
+                            <div className="offer-product-name">{p.name}</div>
+                            <div style={{fontSize:10,color:'#9ca3af'}}>{p.sku}</div>
+                            <div style={{fontSize:12,fontWeight:700,color:'#374151'}}>₹{Number(p.sellingPrice||0).toFixed(0)}</div>
+                            {p.trackStock !== false && <div style={{fontSize:10,color: p.stockQty>0?'#15803d':'#dc2626'}}>{p.stockQty>0?`${p.stockQty} in stock`:'Out of stock'}</div>}
+                          </div>
+                          {sel && offerForm.offerType === 'FIXED_COMBO' && (
+                            <div onClick={e => e.stopPropagation()} style={{marginTop:4}}>
+                              <input type="number" min={1} value={ep?.quantity||1}
+                                onChange={e => updateFixedQty(p.id, e.target.value)}
+                                style={{width:60,padding:'3px 6px',border:'1.5px solid #93c5fd',borderRadius:6,fontSize:12,textAlign:'center'}} />
+                              <div style={{fontSize:10,color:'#6b7280',textAlign:'center'}}>qty</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {offerSearchedProducts.length === 0 && (
+                      <div style={{gridColumn:'1/-1',textAlign:'center',padding:20,color:'#9ca3af',fontSize:13}}>
+                        {products.filter(p=>p.active).length === 0 ? 'No active products found.' : 'No products match your search.'}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── C. Poster ── */}
+                  <div className="offer-section-title" style={{marginTop:20}}>C. Offer Poster / Banner</div>
+                  <p style={{fontSize:12,color:'#6b7280',margin:'4px 0 12px'}}>Recommended: 1200 × 600 px. Shown on the website home page alongside your offer.</p>
+
+                  <div style={{display:'flex',gap:16,flexWrap:'wrap',alignItems:'flex-start'}}>
+                    {/* Upload option */}
+                    <div style={{flex:1,minWidth:200}}>
+                      <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'#374151'}}>Upload Poster</div>
+                      {offerPosterPreview ? (
+                        <div style={{position:'relative',display:'inline-block'}}>
+                          <img src={offerPosterPreview} alt="poster preview"
+                            style={{width:'100%',maxWidth:300,borderRadius:8,border:'1.5px solid #e5e7eb',display:'block'}} />
+                          <button type="button" onClick={() => { setOfferPosterPreview(null); setOfferForm(f => ({...f, posterUrl:''})); }}
+                            style={{position:'absolute',top:6,right:6,background:'#dc2626',color:'#fff',border:'none',borderRadius:'50%',width:24,height:24,cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+                        </div>
+                      ) : (
+                        <label style={{display:'flex',alignItems:'center',justifyContent:'center',height:100,border:'2px dashed #93c5fd',borderRadius:8,cursor:'pointer',fontSize:13,color:'#2563eb',background:'#eff6ff'}}>
+                          {offerPosterUploading ? '⏳ Uploading…' : '📁 Choose poster image'}
+                          <input type="file" accept="image/jpeg,image/png,image/webp" style={{display:'none'}}
+                            onChange={e => { const f=e.target.files?.[0]; if(f) handlePosterUpload(f); }} />
+                        </label>
+                      )}
+                    </div>
+
+                    {/* AI generation option */}
+                    <div style={{flex:1,minWidth:200}}>
+                      <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'#374151'}}>Create Poster with AI</div>
+                      <div style={{padding:'12px 14px',background:'#f8faff',border:'1.5px solid #dbeafe',borderRadius:8,fontSize:12,color:'#374151'}}>
+                        <div style={{fontWeight:600,color:'#1d4ed8',marginBottom:6}}>⚙ Integration Required</div>
+                        <p style={{margin:'0 0 8px',lineHeight:1.5}}>AI poster generation is not currently configured. To enable it, add an image-generation API key to your backend environment:</p>
+                        <code style={{display:'block',background:'#e0f2fe',padding:'6px 8px',borderRadius:4,fontSize:11,color:'#0c4a6e',marginBottom:8}}>IMAGE_GEN_API_KEY=your_key_here</code>
+                        <p style={{margin:0,color:'#6b7280',lineHeight:1.4}}>Supported providers: OpenAI DALL·E 3 or Stability AI. Once configured, a "Generate Poster" button with prompt and style options will appear here.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {offerFormError && <p style={{color:'#dc2626',fontSize:13,marginTop:12,background:'#fef2f2',padding:'8px 12px',borderRadius:8}}>{offerFormError}</p>}
+
+                  <div style={{display:'flex',gap:10,justifyContent:'flex-end',marginTop:20}}>
+                    <button className="btn-secondary" onClick={() => setOfferFormOpen(false)}>Cancel</button>
+                    <button className="btn-primary" onClick={saveOffer} disabled={offerFormLoading}>
+                      {offerFormLoading ? 'Saving…' : offerEditId ? 'Save Changes' : 'Create Offer'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          );
+        })()}
+
       </div>{/* end main-area */}
 
       {/* ── Shop Settings Modal ── */}
@@ -6823,11 +7283,17 @@ function ShopApp() {
   const shopLogoSrc = shopInfo.logoUrl ? `${BACKEND}${shopInfo.logoUrl}` : '/logo.png';
   const shopName = shopInfo.name || getSubdomain().replace(/[-_]/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
 
+  // ── Offers & Combos (storefront) ──
+  const [publicOffers, setPublicOffers] = useState([]);
+  const [comboModal, setComboModal]     = useState(null); // full OfferResponse being viewed
+  const [comboSelection, setComboSelection] = useState([]); // selected barcodes for CUSTOMER_SELECT
+
   useEffect(() => {
     const sub = getSubdomain();
     axios.get(`${API}/public/products?subdomain=${sub}`).then(r => setProducts(r.data)).catch(() => {});
     axios.get(`${API}/public/shop-info?subdomain=${sub}`).then(r => setShopInfo(r.data)).catch(() => {});
     axios.get(`${API}/public/digital/products?subdomain=${sub}`).then(r => setDigitalProducts(r.data)).catch(() => {});
+    axios.get(`${API}/public/offers?subdomain=${sub}`).then(r => setPublicOffers(r.data)).catch(() => {});
   }, []);
 
   const addToCart = (p, selectedColor, selectedSize) => {
@@ -6850,6 +7316,24 @@ function ShopApp() {
 
   const cartTotal = cart.reduce((s, i) => s + Number(i.price) * i.qty, 0);
   const cartCount = cart.length;
+
+  const addComboToCart = (offer, selectedBarcodes) => {
+    const key = `combo-${offer.id}-${Date.now()}`;
+    const selectedProducts = selectedBarcodes.map(bc => {
+      const p = products.find(x => x.barcode === bc);
+      return p ? { barcode: bc, name: p.name } : { barcode: bc, name: bc };
+    });
+    setCart(prev => [...prev, {
+      key, isCombo: true, offerId: offer.id, offerName: offer.name,
+      price: offer.comboPrice, qty: 1,
+      selectedBarcodes, selectedProducts,
+      barcode: offer.id, name: `Combo: ${offer.name}`,
+      imageUrl: offer.posterUrl,
+      selectedColor: '', selectedSize: '',
+    }]);
+    setComboModal(null);
+    setComboSelection([]);
+  };
 
   const placeOrder = async (e) => {
     e.preventDefault();
@@ -6886,7 +7370,12 @@ function ShopApp() {
         pincode: orderForm.pincode,
         state: orderForm.state,
         country: orderForm.country,
-        items: cart.map(i => ({ barcode: i.barcode, quantity: i.qty, selectedColor: i.selectedColor||null, selectedSize: i.selectedSize||null })),
+        items: cart.filter(i => !i.isCombo).map(i => ({ barcode: i.barcode, quantity: i.qty, selectedColor: i.selectedColor||null, selectedSize: i.selectedSize||null })),
+        comboItems: cart.filter(i => i.isCombo).map(i => ({
+          offerId: i.offerId,
+          selectedBarcodes: i.selectedBarcodes,
+          quantity: i.qty,
+        })),
       };
 
       new window.Razorpay({
@@ -7169,13 +7658,20 @@ function ShopApp() {
               : <>
                   <div className="s2-cart-items">
                     {cart.map(i => (
-                      <div key={i.key} className="s2-cart-row">
-                        {i.imageUrl
-                          ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
-                          : <div className="s2-cart-thumb-ph">💎</div>}
+                      <div key={i.key} className={`s2-cart-row ${i.isCombo?'s2-cart-combo-row':''}`}>
+                        {i.isCombo
+                          ? <div className="s2-cart-thumb-ph" style={{background:'#eff6ff',fontSize:20}}>🎁</div>
+                          : i.imageUrl
+                            ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
+                            : <div className="s2-cart-thumb-ph">💎</div>}
                         <div className="s2-cart-info">
                           <div className="s2-cart-name">{i.name}</div>
-                          {(i.selectedColor || i.selectedSize) && (
+                          {i.isCombo && i.selectedProducts && (
+                            <div style={{fontSize:11,color:'#6b7280',lineHeight:1.4,marginTop:2}}>
+                              {i.selectedProducts.map(sp => sp.name).join(', ')}
+                            </div>
+                          )}
+                          {!i.isCombo && (i.selectedColor || i.selectedSize) && (
                             <div className="s2-cart-variant">
                               {i.selectedColor && (
                                 <span className="s2-cart-color-dot"
@@ -7414,6 +7910,50 @@ function ShopApp() {
           );
         })()}
 
+        {/* ── Offers & Combos section ── */}
+        {publicOffers.length > 0 && (
+          <section className="s2-offers-section">
+            <div className="s2-section-hdr" style={{padding:'0 0 8px'}}>
+              <h2 className="s2-section-title" style={{margin:0}}>🎁 Offers &amp; Combos</h2>
+            </div>
+            <div className="s2-offers-grid">
+              {publicOffers.map(offer => {
+                const posterSrc = offer.posterUrl ? `${BACKEND}${offer.posterUrl}` : null;
+                const eligCount = (offer.eligibleProducts||[]).length;
+                const openCombo = () => {
+                  setComboModal(offer);
+                  setComboSelection(offer.offerType === 'FIXED_COMBO'
+                    ? (offer.eligibleProducts||[]).flatMap(ep => Array(ep.quantity||1).fill(ep.barcode))
+                    : []);
+                };
+                return (
+                  <div key={offer.id} className="s2-offer-card" onClick={openCombo}>
+                    {posterSrc
+                      ? <img src={posterSrc} alt={offer.name} className="s2-offer-poster" />
+                      : <div className="s2-offer-poster-ph">🎁</div>}
+                    <div className="s2-offer-body">
+                      <div className="s2-offer-title">{offer.name}</div>
+                      {offer.description && <div className="s2-offer-desc">{offer.description}</div>}
+                      <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
+                        <span className="s2-offer-price">₹{Number(offer.comboPrice).toFixed(0)}</span>
+                        {offer.offerType === 'CUSTOMER_SELECT' && (
+                          <span style={{fontSize:12,color:'#6b7280'}}>Choose {offer.requiredQty} from {eligCount} products</span>
+                        )}
+                        {offer.offerType === 'FIXED_COMBO' && (
+                          <span style={{fontSize:12,color:'#6b7280'}}>{eligCount} item combo</span>
+                        )}
+                      </div>
+                      <button className="s2-offer-btn">
+                        {offer.offerType === 'FIXED_COMBO' ? 'Add Combo to Cart' : 'Build Your Combo →'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {/* ── Products section ── */}
         <main className="s2-main">
           <div className="s2-section-hdr">
@@ -7531,13 +8071,20 @@ function ShopApp() {
               : <>
                   <div className="s2-cart-items">
                     {cart.map(i => (
-                      <div key={i.key} className="s2-cart-row">
-                        {i.imageUrl
-                          ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
-                          : <div className="s2-cart-thumb-ph">💎</div>}
+                      <div key={i.key} className={`s2-cart-row ${i.isCombo?'s2-cart-combo-row':''}`}>
+                        {i.isCombo
+                          ? <div className="s2-cart-thumb-ph" style={{background:'#eff6ff',fontSize:20}}>🎁</div>
+                          : i.imageUrl
+                            ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
+                            : <div className="s2-cart-thumb-ph">💎</div>}
                         <div className="s2-cart-info">
                           <div className="s2-cart-name">{i.name}</div>
-                          {(i.selectedColor || i.selectedSize) && (
+                          {i.isCombo && i.selectedProducts && (
+                            <div style={{fontSize:11,color:'#6b7280',lineHeight:1.4,marginTop:2}}>
+                              {i.selectedProducts.map(sp => sp.name).join(', ')}
+                            </div>
+                          )}
+                          {!i.isCombo && (i.selectedColor || i.selectedSize) && (
                             <div className="s2-cart-variant">
                               {i.selectedColor && (
                                 <span className="s2-cart-color-dot"
@@ -7806,6 +8353,110 @@ function ShopApp() {
         </div>
         <div className="s2-footer-bottom">© {new Date().getFullYear()} {shopName} · All rights reserved</div>
       </footer>
+
+      {/* ── Combo Selection Modal ── */}
+      {comboModal && (() => {
+        const offer = comboModal;
+        const isFixed = offer.offerType === 'FIXED_COMBO';
+        const required = offer.requiredQty || 0;
+        const selected = comboSelection.length;
+        const canAdd = isFixed || selected === required;
+        const eligibleProducts = offer.eligibleProducts || [];
+
+        const toggleItem = (barcode) => {
+          if (isFixed) return; // fixed combo — no selection
+          setComboSelection(prev => {
+            const idx = prev.indexOf(barcode);
+            if (idx >= 0) {
+              return prev.filter((_, i) => i !== idx);
+            }
+            if (!offer.allowRepeat && prev.includes(barcode)) return prev;
+            if (selected >= required) return prev; // already at max
+            return [...prev, barcode];
+          });
+        };
+
+        return (
+          <div className="s2-overlay s2-center-overlay" onClick={() => { setComboModal(null); setComboSelection([]); }}>
+            <div className="s2-combo-modal" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="s2-combo-header">
+                {offer.posterUrl && <img src={`${BACKEND}${offer.posterUrl}`} alt={offer.name} className="s2-combo-poster" />}
+                <div className="s2-combo-header-info">
+                  <div className="s2-combo-title">{offer.name}</div>
+                  {offer.description && <div className="s2-combo-desc">{offer.description}</div>}
+                  <div className="s2-combo-price-row">
+                    <span className="s2-combo-price">₹{Number(offer.comboPrice).toFixed(2)}</span>
+                    {!isFixed && <span className="s2-combo-pick-hint">Choose {required} item{required>1?'s':''}</span>}
+                  </div>
+                </div>
+                <button className="s2-drawer-close" onClick={() => { setComboModal(null); setComboSelection([]); }}>✕</button>
+              </div>
+
+              {/* Progress bar (CUSTOMER_SELECT) */}
+              {!isFixed && (
+                <div className="s2-combo-progress">
+                  <div className="s2-combo-progress-bar">
+                    <div className="s2-combo-progress-fill" style={{width:`${Math.min(100, (selected/required)*100)}%`}} />
+                  </div>
+                  <span className="s2-combo-progress-text">{selected}/{required} selected</span>
+                </div>
+              )}
+
+              {/* Product list */}
+              <div className="s2-combo-products">
+                {eligibleProducts.map(ep => {
+                  const p = products.find(x => x.id === ep.productId);
+                  if (!p && !ep.productId) return null;
+                  const imgSrc0 = ep.imageUrl ? `${BACKEND}${ep.imageUrl.split(',')[0]}` : null;
+                  const selCount = isFixed ? (ep.quantity||1)
+                    : comboSelection.filter(b => b === ep.barcode).length;
+                  const isSelected = selCount > 0;
+                  const stockOk = ep.trackStock === false || (ep.stockQty || 0) > 0;
+
+                  return (
+                    <div key={ep.productId}
+                      className={`s2-combo-product ${isSelected?'s2-combo-product-selected':''} ${!stockOk&&!isFixed?'s2-combo-product-oos':''}`}
+                      onClick={() => stockOk && toggleItem(ep.barcode)}>
+                      <div className="s2-combo-product-img">
+                        {imgSrc0 ? <img src={imgSrc0} alt={ep.productName} /> : <span>💎</span>}
+                      </div>
+                      <div className="s2-combo-product-info">
+                        <div className="s2-combo-product-name">{ep.productName}</div>
+                        {ep.sku && <div style={{fontSize:11,color:'#9ca3af'}}>{ep.sku}</div>}
+                        <div style={{fontSize:13,fontWeight:700,color:'#374151'}}>₹{Number(ep.sellingPrice||0).toFixed(0)}</div>
+                        {!stockOk && <div style={{fontSize:11,color:'#dc2626'}}>Out of stock</div>}
+                      </div>
+                      {isFixed && <div style={{fontSize:13,color:'#374151',fontWeight:600,marginLeft:'auto'}}>×{ep.quantity||1}</div>}
+                      {!isFixed && isSelected && (
+                        <div className="s2-combo-product-check">{selCount > 1 ? `×${selCount}` : '✓'}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add to cart */}
+              <div className="s2-combo-footer">
+                <div className="s2-combo-total">
+                  <span>Combo Price</span>
+                  <strong>₹{Number(offer.comboPrice).toFixed(2)}</strong>
+                </div>
+                <button className="s2-combo-add-btn" disabled={!canAdd}
+                  onClick={() => {
+                    const barcodes = isFixed
+                      ? eligibleProducts.flatMap(ep => Array(ep.quantity||1).fill(ep.barcode))
+                      : comboSelection;
+                    addComboToCart(offer, barcodes);
+                    setShowCart(true);
+                  }}>
+                  {canAdd ? '🛍️ Add Combo to Cart' : `Select ${required - selected} more item${(required-selected)>1?'s':''}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
