@@ -7285,7 +7285,7 @@ function ShopApp() {
 
   // ── Offers & Combos (storefront) ──
   const [publicOffers, setPublicOffers] = useState([]);
-  const [comboModal, setComboModal]     = useState(null); // full OfferResponse being viewed
+  const [activeOffer, setActiveOffer]   = useState(null); // offer being viewed as bundle page
   const [comboSelection, setComboSelection] = useState([]); // selected barcodes for CUSTOMER_SELECT
 
   useEffect(() => {
@@ -7331,8 +7331,9 @@ function ShopApp() {
       imageUrl: offer.posterUrl,
       selectedColor: '', selectedSize: '',
     }]);
-    setComboModal(null);
+    setActiveOffer(null);
     setComboSelection([]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const placeOrder = async (e) => {
@@ -7486,6 +7487,313 @@ function ShopApp() {
   const pagedProducts  = displaySource.slice((shopPageSafe - 1) * SHOP_PAGE_SIZE, shopPageSafe * SHOP_PAGE_SIZE);
 
   useEffect(() => { setShopPage(1); }, [filterCat, search, shopTab]);
+
+  /* ── Bundle / Offer page ── */
+  if (activeOffer) {
+    const offer = activeOffer;
+    const isFixed   = offer.offerType === 'FIXED_COMBO';
+    const required  = offer.requiredQty || 0;
+    const eligible  = offer.eligibleProducts || [];
+    const selected  = comboSelection.length;
+    const canAdd    = isFixed || selected === required;
+    const remaining = Math.max(0, required - selected);
+
+    // Group eligible products by category (look up in products list)
+    const getCat = (ep) => {
+      const p = products.find(x => x.id === ep.productId);
+      return (p && p.category) ? p.category : 'Other';
+    };
+    const cats = [...new Set(eligible.map(getCat))];
+
+    const getQtySelected = (barcode) => comboSelection.filter(b => b === barcode).length;
+
+    const increment = (barcode) => {
+      if (isFixed) return;
+      if (selected >= required) return;
+      if (!offer.allowRepeat && getQtySelected(barcode) >= 1) return;
+      setComboSelection(prev => [...prev, barcode]);
+    };
+
+    const decrement = (barcode) => {
+      if (isFixed) return;
+      setComboSelection(prev => {
+        const idx = prev.lastIndexOf(barcode);
+        if (idx < 0) return prev;
+        return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+      });
+    };
+
+    const handleAddToCart = () => {
+      const barcodes = isFixed
+        ? eligible.flatMap(ep => Array(ep.quantity || 1).fill(ep.barcode))
+        : comboSelection;
+      addComboToCart(offer, barcodes);
+      setShowCart(true);
+    };
+
+    const posterSrc = offer.posterUrl ? `${BACKEND}${offer.posterUrl}` : null;
+
+    return (
+      <>
+        <div className="s2-bundle-page">
+          {/* Header */}
+          <header className="s2-header" style={{position:'sticky',top:0,zIndex:100}}>
+            <div className="s2-header-inner">
+              <img src={shopLogoSrc} className="s2-logo" alt={shopName}
+                onClick={() => { setActiveOffer(null); setComboSelection([]); window.scrollTo(0,0); }}
+                style={{cursor:'pointer'}}
+                onError={e=>{e.currentTarget.onerror=null;e.currentTarget.src='/logo.png';}} />
+              <button className="s2-back-btn" onClick={() => { setActiveOffer(null); setComboSelection([]); window.scrollTo({top:0,behavior:'smooth'}); }}>← Back</button>
+              <button className="s2-cart-icon" onClick={() => setShowCart(true)}>
+                🛍️ {cartCount > 0 && <span className="s2-cart-badge">{cartCount}</span>}
+              </button>
+            </div>
+          </header>
+
+          {/* Promotional banner */}
+          <div className={`s2-bundle-banner${posterSrc ? ' s2-bundle-banner-has-poster' : ''}`}>
+            {posterSrc && <img src={posterSrc} alt={offer.name} className="s2-bundle-banner-poster" />}
+            <div className="s2-bundle-banner-info">
+              <div className="s2-bundle-banner-tag">🎁 Special Offer</div>
+              <h1 className="s2-bundle-banner-title">{offer.name}</h1>
+              {offer.description && <p className="s2-bundle-banner-desc">{offer.description}</p>}
+              <div className="s2-bundle-banner-meta">
+                <span className="s2-bundle-banner-price">₹{Number(offer.comboPrice).toFixed(0)}</span>
+                {!isFixed && <span className="s2-bundle-banner-choose">Choose any {required} product{required>1?'s':''}</span>}
+                {isFixed  && <span className="s2-bundle-banner-choose">{eligible.length}-product combo</span>}
+              </div>
+              {(offer.endDateTime) && (
+                <div className="s2-bundle-banner-validity">
+                  Valid until {new Date(offer.endDateTime).toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'})}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Body: products + summary */}
+          <div className="s2-bundle-body">
+            {/* ── Product list ── */}
+            <div className="s2-bundle-products">
+              {!isFixed && (
+                <div className="s2-bundle-progress-row">
+                  <div className="s2-bundle-progress-track">
+                    <div className="s2-bundle-progress-fill" style={{width:`${Math.min(100,(selected/required)*100)}%`}} />
+                  </div>
+                  <span className="s2-bundle-progress-label">
+                    {selected === required ? '✓ Selection complete' : `${selected} of ${required} selected — ${remaining} more to go`}
+                  </span>
+                </div>
+              )}
+
+              {cats.map(cat => {
+                const catProds = eligible.filter(ep => getCat(ep) === cat);
+                return (
+                  <div key={cat} className="s2-bundle-cat-group">
+                    {cats.length > 1 && <div className="s2-bundle-cat-title">{cat}</div>}
+                    <div className="s2-bundle-product-grid">
+                      {catProds.map(ep => {
+                        const imgSrc0 = ep.imageUrl ? `${BACKEND}${ep.imageUrl.split(',')[0]}` : null;
+                        const qty = getQtySelected(ep.barcode);
+                        const stockOk = ep.trackStock === false || (ep.stockQty || 0) > 0;
+                        const canInc = !isFixed && selected < required && (offer.allowRepeat || qty === 0) && stockOk;
+                        const canDec = !isFixed && qty > 0;
+                        const isSelected = isFixed ? true : qty > 0;
+                        const fixedQty = isFixed ? (ep.quantity || 1) : null;
+
+                        return (
+                          <div key={ep.productId}
+                            className={`s2-bundle-product-card${isSelected && !isFixed ? ' s2-bundle-product-selected' : ''}${!stockOk ? ' s2-bundle-product-oos' : ''}`}>
+                            <div className="s2-bundle-product-img">
+                              {imgSrc0
+                                ? <img src={imgSrc0} alt={ep.productName} />
+                                : <span className="s2-bundle-product-img-ph">💎</span>}
+                              {!stockOk && <div className="s2-bundle-oos-badge">Out of stock</div>}
+                            </div>
+                            <div className="s2-bundle-product-info">
+                              <div className="s2-bundle-product-name">{ep.productName}</div>
+                              {ep.sku && <div className="s2-bundle-product-sku">{ep.sku}</div>}
+                              <div className="s2-bundle-product-price">₹{Number(ep.sellingPrice||0).toFixed(0)}</div>
+                            </div>
+                            {isFixed ? (
+                              <div className="s2-bundle-fixed-qty">×{fixedQty}</div>
+                            ) : (
+                              <div className="s2-bundle-qty-row">
+                                <button className="s2-bundle-qty-btn" disabled={!canDec} onClick={() => decrement(ep.barcode)}>−</button>
+                                <span className="s2-bundle-qty-count">{qty}</span>
+                                <button className="s2-bundle-qty-btn" disabled={!canInc} onClick={() => increment(ep.barcode)}>+</button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── Sticky summary panel ── */}
+            <div className="s2-bundle-summary">
+              <div className="s2-bundle-summary-title">Your Combo</div>
+
+              {!isFixed && (
+                <div className="s2-bundle-summary-progress">
+                  <div className="s2-bundle-summary-counts">
+                    <span className="s2-bundle-summary-sel">{selected}</span>
+                    <span className="s2-bundle-summary-sep"> / </span>
+                    <span className="s2-bundle-summary-req">{required}</span>
+                    <span className="s2-bundle-summary-lbl"> selected</span>
+                  </div>
+                  <div className="s2-bundle-sum-track">
+                    <div className="s2-bundle-sum-fill" style={{width:`${Math.min(100,(selected/required)*100)}%`}} />
+                  </div>
+                  {remaining > 0 && <div className="s2-bundle-summary-hint">Pick {remaining} more item{remaining>1?'s':''}</div>}
+                  {remaining === 0 && <div className="s2-bundle-summary-ready">✓ Ready to add!</div>}
+                </div>
+              )}
+
+              {/* Selected items */}
+              <div className="s2-bundle-summary-items">
+                {(() => {
+                  const items = isFixed
+                    ? eligible.map(ep => ({ barcode: ep.barcode, name: ep.productName, qty: ep.quantity || 1 }))
+                    : Object.entries(
+                        comboSelection.reduce((acc, bc) => { acc[bc] = (acc[bc]||0)+1; return acc; }, {})
+                      ).map(([bc, q]) => {
+                        const ep = eligible.find(x => x.barcode === bc);
+                        return { barcode: bc, name: ep ? ep.productName : bc, qty: q };
+                      });
+                  if (items.length === 0) return <div className="s2-bundle-summary-empty">No items selected yet</div>;
+                  return items.map(item => (
+                    <div key={item.barcode} className="s2-bundle-summary-item">
+                      <span className="s2-bundle-summary-item-name">{item.name}</span>
+                      <span className="s2-bundle-summary-item-qty">×{item.qty}</span>
+                    </div>
+                  ));
+                })()}
+              </div>
+
+              <div className="s2-bundle-summary-price">
+                <span>Combo Price</span>
+                <strong>₹{Number(offer.comboPrice).toFixed(0)}</strong>
+              </div>
+
+              <button className="s2-bundle-add-btn" disabled={!canAdd} onClick={handleAddToCart}>
+                {canAdd ? '🛍️ Add Combo to Cart' : `Select ${remaining} more item${remaining>1?'s':''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Cart Drawer */}
+        {showCart && (
+          <div className="s2-overlay" onClick={() => setShowCart(false)}>
+            <div className="s2-drawer" onClick={e => e.stopPropagation()}>
+              <div className="s2-drawer-hdr">
+                <h3>Your Cart ({cartCount})</h3>
+                <button className="s2-drawer-close" onClick={() => setShowCart(false)}>✕</button>
+              </div>
+              {cart.length === 0
+                ? <div className="s2-cart-empty">Your cart is empty<br/><small>Add some items to get started!</small></div>
+                : <>
+                    <div className="s2-cart-items">
+                      {cart.map(i => (
+                        <div key={i.key} className={`s2-cart-row ${i.isCombo?'s2-cart-combo-row':''}`}>
+                          {i.isCombo
+                            ? <div className="s2-cart-thumb-ph" style={{background:'#eff6ff',fontSize:20}}>🎁</div>
+                            : i.imageUrl
+                              ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
+                              : <div className="s2-cart-thumb-ph">💎</div>}
+                          <div className="s2-cart-info">
+                            <div className="s2-cart-name">{i.name}</div>
+                            {i.isCombo && i.selectedProducts && (
+                              <div style={{fontSize:11,color:'#6b7280',lineHeight:1.4,marginTop:2}}>
+                                {i.selectedProducts.map(sp => sp.name).join(', ')}
+                              </div>
+                            )}
+                            {!i.isCombo && (i.selectedColor || i.selectedSize) && (
+                              <div className="s2-cart-variant">
+                                {i.selectedColor && (
+                                  <span className="s2-cart-color-dot"
+                                    style={{background: COLOR_CSS[i.selectedColor] || '#ccc',
+                                      border: i.selectedColor==='White'?'1px solid #ddd':'none'}} />
+                                )}
+                                {[i.selectedColor, i.selectedSize].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
+                            <div className="s2-cart-price-each">₹{Number(i.price).toFixed(2)}</div>
+                          </div>
+                          <div className="s2-qty-wrap">
+                            <button className="s2-qty-btn" onClick={() => updateCartQty(i.key, -1)}>−</button>
+                            <span className="s2-qty-num">{i.qty}</span>
+                            <button className="s2-qty-btn" onClick={() => updateCartQty(i.key, 1)}>+</button>
+                          </div>
+                          <div className="s2-cart-line">₹{(Number(i.price) * i.qty).toFixed(2)}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="s2-cart-footer">
+                      <div className="s2-cart-subtotal"><span>Subtotal</span><strong>₹{cartTotal.toFixed(2)}</strong></div>
+                      <button className="s2-checkout-btn" onClick={() => { setShowCart(false); setCheckout(true); }}>
+                        Proceed to Checkout →
+                      </button>
+                    </div>
+                  </>
+              }
+            </div>
+          </div>
+        )}
+
+        {/* Checkout Modal */}
+        {checkout && (
+          <div className="s2-overlay s2-center-overlay" onClick={() => setCheckout(false)}>
+            <div className="s2-checkout-modal" onClick={e => e.stopPropagation()}>
+              <div className="s2-drawer-hdr">
+                <h3>Checkout</h3>
+                <button className="s2-drawer-close" onClick={() => setCheckout(false)}>✕</button>
+              </div>
+              <form onSubmit={placeOrder} className="s2-checkout-form">
+                <div className="s2-form-group">
+                  <label>Full Name *</label>
+                  <input placeholder="Your full name" value={orderForm.name} onChange={e => setOrderForm({...orderForm, name: e.target.value})} />
+                </div>
+                <div className="s2-form-group">
+                  <label>Phone Number *</label>
+                  <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile number"
+                    value={orderForm.phone}
+                    onChange={e => setOrderForm({...orderForm, phone: e.target.value.replace(/\D/g, '').slice(0, 10)})} />
+                </div>
+                <div className="s2-addr-section">
+                  <div className="s2-addr-title">Delivery Address *</div>
+                  <input placeholder="House / Flat / Building No. *" value={orderForm.houseNo} onChange={e => setOrderForm({...orderForm, houseNo: e.target.value})} required />
+                  <input placeholder="Street / Area / Locality *" value={orderForm.street} onChange={e => setOrderForm({...orderForm, street: e.target.value})} required />
+                  <div className="s2-form-row">
+                    <input placeholder="City *" value={orderForm.city} onChange={e => setOrderForm({...orderForm, city: e.target.value})} required />
+                    <input placeholder="PIN Code *" value={orderForm.pincode} onChange={e => setOrderForm({...orderForm, pincode: e.target.value})} required />
+                  </div>
+                  <select value={orderForm.state} onChange={e => setOrderForm({...orderForm, state: e.target.value})} required>
+                    <option value="">Select State *</option>
+                    {INDIA_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="s2-order-summary">
+                  <div className="s2-summary-title">Order Summary</div>
+                  {cart.map(i => (
+                    <div key={i.barcode} className="s2-summary-row">
+                      <span>{i.name} × {i.qty}</span><span>₹{(Number(i.price)*i.qty).toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <div className="s2-summary-total"><span>Total</span><strong>₹{cartTotal.toFixed(2)}</strong></div>
+                </div>
+                {orderError && <p className="s2-form-error">{orderError}</p>}
+                <button type="submit" className="s2-place-btn">Place Order</button>
+              </form>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   /* ── Product detail screen ── */
   if (detailProduct) {
@@ -7921,10 +8229,11 @@ function ShopApp() {
                 const posterSrc = offer.posterUrl ? `${BACKEND}${offer.posterUrl}` : null;
                 const eligCount = (offer.eligibleProducts||[]).length;
                 const openCombo = () => {
-                  setComboModal(offer);
+                  setActiveOffer(offer);
                   setComboSelection(offer.offerType === 'FIXED_COMBO'
                     ? (offer.eligibleProducts||[]).flatMap(ep => Array(ep.quantity||1).fill(ep.barcode))
                     : []);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
                 };
                 return (
                   <div key={offer.id} className="s2-offer-card" onClick={openCombo}>
@@ -8354,109 +8663,6 @@ function ShopApp() {
         <div className="s2-footer-bottom">© {new Date().getFullYear()} {shopName} · All rights reserved</div>
       </footer>
 
-      {/* ── Combo Selection Modal ── */}
-      {comboModal && (() => {
-        const offer = comboModal;
-        const isFixed = offer.offerType === 'FIXED_COMBO';
-        const required = offer.requiredQty || 0;
-        const selected = comboSelection.length;
-        const canAdd = isFixed || selected === required;
-        const eligibleProducts = offer.eligibleProducts || [];
-
-        const toggleItem = (barcode) => {
-          if (isFixed) return; // fixed combo — no selection
-          setComboSelection(prev => {
-            const idx = prev.indexOf(barcode);
-            if (idx >= 0) {
-              return prev.filter((_, i) => i !== idx);
-            }
-            if (!offer.allowRepeat && prev.includes(barcode)) return prev;
-            if (selected >= required) return prev; // already at max
-            return [...prev, barcode];
-          });
-        };
-
-        return (
-          <div className="s2-overlay s2-center-overlay" onClick={() => { setComboModal(null); setComboSelection([]); }}>
-            <div className="s2-combo-modal" onClick={e => e.stopPropagation()}>
-              {/* Header */}
-              <div className="s2-combo-header">
-                {offer.posterUrl && <img src={`${BACKEND}${offer.posterUrl}`} alt={offer.name} className="s2-combo-poster" />}
-                <div className="s2-combo-header-info">
-                  <div className="s2-combo-title">{offer.name}</div>
-                  {offer.description && <div className="s2-combo-desc">{offer.description}</div>}
-                  <div className="s2-combo-price-row">
-                    <span className="s2-combo-price">₹{Number(offer.comboPrice).toFixed(2)}</span>
-                    {!isFixed && <span className="s2-combo-pick-hint">Choose {required} item{required>1?'s':''}</span>}
-                  </div>
-                </div>
-                <button className="s2-drawer-close" onClick={() => { setComboModal(null); setComboSelection([]); }}>✕</button>
-              </div>
-
-              {/* Progress bar (CUSTOMER_SELECT) */}
-              {!isFixed && (
-                <div className="s2-combo-progress">
-                  <div className="s2-combo-progress-bar">
-                    <div className="s2-combo-progress-fill" style={{width:`${Math.min(100, (selected/required)*100)}%`}} />
-                  </div>
-                  <span className="s2-combo-progress-text">{selected}/{required} selected</span>
-                </div>
-              )}
-
-              {/* Product list */}
-              <div className="s2-combo-products">
-                {eligibleProducts.map(ep => {
-                  const p = products.find(x => x.id === ep.productId);
-                  if (!p && !ep.productId) return null;
-                  const imgSrc0 = ep.imageUrl ? `${BACKEND}${ep.imageUrl.split(',')[0]}` : null;
-                  const selCount = isFixed ? (ep.quantity||1)
-                    : comboSelection.filter(b => b === ep.barcode).length;
-                  const isSelected = selCount > 0;
-                  const stockOk = ep.trackStock === false || (ep.stockQty || 0) > 0;
-
-                  return (
-                    <div key={ep.productId}
-                      className={`s2-combo-product ${isSelected?'s2-combo-product-selected':''} ${!stockOk&&!isFixed?'s2-combo-product-oos':''}`}
-                      onClick={() => stockOk && toggleItem(ep.barcode)}>
-                      <div className="s2-combo-product-img">
-                        {imgSrc0 ? <img src={imgSrc0} alt={ep.productName} /> : <span>💎</span>}
-                      </div>
-                      <div className="s2-combo-product-info">
-                        <div className="s2-combo-product-name">{ep.productName}</div>
-                        {ep.sku && <div style={{fontSize:11,color:'#9ca3af'}}>{ep.sku}</div>}
-                        <div style={{fontSize:13,fontWeight:700,color:'#374151'}}>₹{Number(ep.sellingPrice||0).toFixed(0)}</div>
-                        {!stockOk && <div style={{fontSize:11,color:'#dc2626'}}>Out of stock</div>}
-                      </div>
-                      {isFixed && <div style={{fontSize:13,color:'#374151',fontWeight:600,marginLeft:'auto'}}>×{ep.quantity||1}</div>}
-                      {!isFixed && isSelected && (
-                        <div className="s2-combo-product-check">{selCount > 1 ? `×${selCount}` : '✓'}</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Add to cart */}
-              <div className="s2-combo-footer">
-                <div className="s2-combo-total">
-                  <span>Combo Price</span>
-                  <strong>₹{Number(offer.comboPrice).toFixed(2)}</strong>
-                </div>
-                <button className="s2-combo-add-btn" disabled={!canAdd}
-                  onClick={() => {
-                    const barcodes = isFixed
-                      ? eligibleProducts.flatMap(ep => Array(ep.quantity||1).fill(ep.barcode))
-                      : comboSelection;
-                    addComboToCart(offer, barcodes);
-                    setShowCart(true);
-                  }}>
-                  {canAdd ? '🛍️ Add Combo to Cart' : `Select ${required - selected} more item${(required-selected)>1?'s':''}`}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
