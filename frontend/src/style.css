@@ -2136,13 +2136,14 @@ section {
   animation: festive-bg-shift 16s ease infinite;
 }
 
-/* Section title & header on dark background */
+/* Section title — strong contrast on light background */
 .s2-offers-festive-wrap .s2-section-title {
-  color: #fef3c7;
-  text-shadow: 0 1px 8px rgba(0,0,0,.4);
+  color: #8B1E3F;
+  font-weight: 700;
+  font-size: 30px;
 }
 .s2-offers-festive-wrap .s2-section-hdr {
-  border-color: rgba(255,215,0,.15);
+  border-color: rgba(139, 30, 63, 0.2);
 }
 
 /* Offer cards in festive context */
