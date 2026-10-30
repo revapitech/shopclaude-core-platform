@@ -1466,6 +1466,7 @@ function App() {
   const [orderSourceFilter, setOrderSourceFilter] = useState('ALL');
   const [custPage, setCustPage] = useState(1);
   const [orderPage, setOrderPage] = useState(1);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const PAGE_ROWS = 25;
   const [tenantInfo, setTenantInfo] = useState(null);
   const [upgradingPlan, setUpgradingPlan] = useState(false);
@@ -1856,8 +1857,10 @@ function App() {
     if (isLoggedIn && activePage === 'reports') { loadBills(); if (!rptStats) loadReports('', ''); }
     if (isLoggedIn && activePage === 'customers')
       axios.get(`${API}/admin/customers`).then(r => setCustomers(r.data)).catch(e => console.error('Failed to load customers:', e));
-    if (isLoggedIn && activePage === 'orders' && orders.length === 0)
-      axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {});
+    if (isLoggedIn && activePage === 'orders') {
+      setOrdersLoading(true);
+      axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {}).finally(() => setOrdersLoading(false));
+    }
     if (isLoggedIn && activePage === 'rental')
       axios.get(`${API}/rentals`).then(r => setRentals(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'returns') loadSalesReturns();
@@ -1899,6 +1902,11 @@ function App() {
         }
       }
     });
+  };
+
+  const refreshOrders = () => {
+    setOrdersLoading(true);
+    axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {}).finally(() => setOrdersLoading(false));
   };
 
   // ── Rental register handlers ──
@@ -4550,22 +4558,76 @@ function App() {
           const safeOrdPage = Math.min(orderPage, totalOrdPages);
           const ordSlice = filtered.slice((safeOrdPage-1)*PAGE_ROWS, safeOrdPage*PAGE_ROWS);
           const sourceCounts = { ALL: orders.length, SHOPIFY: orders.filter(o=>o.source==='SHOPIFY').length, POS: orders.filter(o=>o.source==='POS').length, ONLINE: orders.filter(o=>o.source==='ONLINE').length };
+
+          // Online order stats
+          const onlineOrders = orders.filter(o => o.source === 'ONLINE');
+          const onlineCounts = { pending: 0, confirmed: 0, shipped: 0, delivered: 0, cancelled: 0 };
+          let onlineRevenue = 0;
+          onlineOrders.forEach(o => {
+            const s = (o.fulfillmentStatus||'pending').toLowerCase();
+            if (onlineCounts[s] !== undefined) onlineCounts[s]++;
+            onlineRevenue += Number(o.total||0);
+          });
+
+          const statusSelectClass = (st) => {
+            const s = (st||'pending').toLowerCase();
+            return `ord-status-select st-${['pending','confirmed','shipped','delivered','cancelled'].includes(s) ? s : 'pending'}`;
+          };
+
           return (
           <div className="page-content">
+            {/* Online order stats cards */}
+            {(orderSourceFilter === 'ALL' || orderSourceFilter === 'ONLINE') && onlineOrders.length > 0 && (
+              <div className="ord-stats-row">
+                <div className="ord-stat-card ord-stat-pending">
+                  <div className="osc-label">Pending</div>
+                  <div className="osc-val">{onlineCounts.pending}</div>
+                  <div className="osc-sub">awaiting confirmation</div>
+                </div>
+                <div className="ord-stat-card ord-stat-confirmed">
+                  <div className="osc-label">Confirmed</div>
+                  <div className="osc-val">{onlineCounts.confirmed}</div>
+                  <div className="osc-sub">being prepared</div>
+                </div>
+                <div className="ord-stat-card ord-stat-shipped">
+                  <div className="osc-label">Shipped</div>
+                  <div className="osc-val">{onlineCounts.shipped}</div>
+                  <div className="osc-sub">in transit</div>
+                </div>
+                <div className="ord-stat-card ord-stat-delivered">
+                  <div className="osc-label">Delivered</div>
+                  <div className="osc-val">{onlineCounts.delivered}</div>
+                  <div className="osc-sub">completed</div>
+                </div>
+                <div className="ord-stat-card">
+                  <div className="osc-label">Online Revenue</div>
+                  <div className="osc-val" style={{fontSize:18}}>₹{onlineRevenue.toLocaleString('en-IN',{maximumFractionDigits:0})}</div>
+                  <div className="osc-sub">{onlineOrders.length} web orders</div>
+                </div>
+              </div>
+            )}
+
             <div className="cust-toolbar">
-              <input className="cust-search" placeholder="🔍 Search order #, customer, city…"
+              <input className="cust-search" placeholder="Search order #, customer, city..."
                 value={orderSearch} onChange={e => { setOrderSearch(e.target.value); setOrderPage(1); }} />
               <div className="order-src-filters">
                 {['ALL','SHOPIFY','POS','ONLINE'].map(src => (
                   <button key={src} className={`src-filter-btn ${orderSourceFilter===src?'src-active':''}`}
                     onClick={() => { setOrderSourceFilter(src); setOrderPage(1); }}>
-                    {src==='ALL'?'All':src==='SHOPIFY'?'Shopify':src==='POS'?'Offline Billing':'Online Shop'}
+                    {src==='ALL'?'All':src==='SHOPIFY'?'Shopify':src==='POS'?'Offline':'Online Shop'}
                     <span className="src-count">{sourceCounts[src]}</span>
                   </button>
                 ))}
               </div>
               <span className="cust-count">{filtered.length} orders</span>
+              <button onClick={refreshOrders} className="export-csv-btn" disabled={ordersLoading} style={{marginLeft:'auto'}}>
+                {ordersLoading ? '...' : '↻ Refresh'}
+              </button>
             </div>
+
+            {ordersLoading ? (
+              <div style={{textAlign:'center',padding:'56px 0',color:'var(--text-muted)',fontSize:15}}>Loading orders…</div>
+            ) : (
             <div className="data-table-wrap">
               <table className="data-table">
                 <thead><tr><th>Source</th><th>Order #</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th></th><th></th></tr></thead>
@@ -4577,18 +4639,31 @@ function App() {
                         style={{cursor:'pointer'}}>
                         <td><span className={`src-badge src-${o.source}`}>{o.source==='SHOPIFY'?'Shopify':o.source==='POS'?'POS':'Online'}</span></td>
                         <td className="td-ordnum">{o.orderNumber}</td>
-                        <td className="td-name">{o.source === 'POS' ? 'Walk-in Customer' : (o.customerName || o.customerContact || '—')}</td>
+                        <td className="td-name">{o.source==='POS' ? 'Walk-in' : (o.customerName || o.customerContact || '—')}</td>
                         <td className="td-date">{o.orderedAt ? o.orderedAt.slice(0,10) : '—'}</td>
                         <td className="td-center">{o.items?.length || 0}</td>
-                        <td className="td-amt">₹{Number(o.total||0).toFixed(2)}</td>
+                        <td className="td-amt">₹{Number(o.total||0).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
                         <td><span className="pay-badge">{o.paymentMethod || '—'}</span></td>
-                        <td>
-                          <span className={`status-badge status-${o.financialStatus}`}>{o.financialStatus}</span>
-                          {o.fulfillmentStatus && <span className={`status-badge status-${o.fulfillmentStatus}`} style={{marginLeft:4}}>{o.fulfillmentStatus}</span>}
+                        <td onClick={e => e.stopPropagation()}>
+                          {o.source === 'ONLINE' ? (
+                            <select
+                              value={(o.fulfillmentStatus||'pending').toUpperCase()}
+                              onChange={e => updateOrderStatus(o.id, e.target.value)}
+                              className={statusSelectClass(o.fulfillmentStatus)}>
+                              {['PENDING','CONFIRMED','SHIPPED','DELIVERED','CANCELLED'].map(s => (
+                                <option key={s} value={s}>{s.charAt(0)+s.slice(1).toLowerCase()}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <>
+                              <span className={`status-badge status-${(o.financialStatus||'').toLowerCase()}`}>{o.financialStatus}</span>
+                              {o.fulfillmentStatus && <span className={`status-badge status-${(o.fulfillmentStatus||'').toLowerCase()}`} style={{marginLeft:4}}>{o.fulfillmentStatus}</span>}
+                            </>
+                          )}
                         </td>
                         <td className="td-expand">{expandedOrder===o.id?'▲':'▼'}</td>
                         <td>
-                          <button className="delete-btn" onClick={e => { e.stopPropagation(); deleteOrder(o); }}>🗑</button>
+                          <button className="delete-btn" onClick={e => { e.stopPropagation(); deleteOrder(o); }}>Delete</button>
                         </td>
                       </tr>
                       {expandedOrder===o.id && (
@@ -4605,7 +4680,7 @@ function App() {
                                 return (
                                   <div style={{ display:'flex', gap:24, flexWrap:'wrap', marginBottom:10, padding:'12px 16px', background:'#F0F6FF', borderRadius:8, border:'1px solid #A8C4E0' }}>
                                     <div style={{ minWidth:220 }}>
-                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>📦 DELIVERY ADDRESS</div>
+                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>DELIVERY ADDRESS</div>
                                       {o.source === 'ONLINE' ? (
                                         <div style={{ fontSize:13, color:'#1f2937', lineHeight:2 }}>
                                           {o.houseNo && <div><span style={{color:'#6B7280',fontSize:11}}>House/Flat:</span> {o.houseNo}</div>}
@@ -4623,34 +4698,22 @@ function App() {
                                       )}
                                     </div>
                                     <div>
-                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>📞 CONTACT</div>
+                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>CONTACT</div>
                                       <div style={{ fontSize:13, color:'#1f2937' }}>
                                         {o.phone || o.customerContact || <span style={{color:'#9CA3AF'}}>—</span>}
                                       </div>
                                     </div>
                                     {o.customerName && (
                                       <div>
-                                        <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>👤 CUSTOMER</div>
+                                        <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>CUSTOMER</div>
                                         <div style={{ fontSize:13, color:'#1f2937' }}>{o.customerName}</div>
                                       </div>
                                     )}
-                                    <div style={{marginLeft:'auto',alignSelf:'flex-start',display:'flex',flexDirection:'column',alignItems:'flex-end',gap:8}}>
-                                      {o.source === 'ONLINE' && (
-                                        <div style={{display:'flex',alignItems:'center',gap:6}} onClick={e => e.stopPropagation()}>
-                                          <span style={{fontSize:11,fontWeight:700,color:'#1E3A5F',letterSpacing:0.5}}>STATUS:</span>
-                                          <select value={(o.fulfillmentStatus || 'pending').toUpperCase()}
-                                            onChange={e => updateOrderStatus(o.id, e.target.value)}
-                                            style={{fontSize:12,fontWeight:600,padding:'5px 8px',borderRadius:6,border:'1.5px solid #A8C4E0',background:'#fff',cursor:'pointer'}}>
-                                            {['PENDING','CONFIRMED','SHIPPED','DELIVERED','CANCELLED'].map(s => (
-                                              <option key={s} value={s}>{s.charAt(0)+s.slice(1).toLowerCase()}</option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                      )}
+                                    <div style={{marginLeft:'auto',alignSelf:'flex-start'}}>
                                       <button onClick={e => { e.stopPropagation(); printOrderShippingLabel(o, tenantInfo?.name, tenantInfo?.shopAddress); }}
                                         title="Print Shipping Label"
                                         style={{background:'#1E3A5F',color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
-                                        🖨 Print Label
+                                        Print Label
                                       </button>
                                     </div>
                                   </div>
@@ -4659,16 +4722,31 @@ function App() {
                               <table className="order-items-table">
                                 <thead><tr><th>Product</th><th>SKU / Barcode</th><th>Variant</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
                                 <tbody>
-                                  {(o.items||[]).map((item,idx) => (
-                                    <tr key={idx}>
-                                      <td>{item.productName}</td>
-                                      <td className="td-sku">{item.sku||'—'}</td>
-                                      <td className="td-sku">{variantLabel(item)||'—'}</td>
-                                      <td className="td-center">{item.quantity}</td>
-                                      <td className="td-amt">₹{Number(item.price||0).toFixed(2)}</td>
-                                      <td className="td-amt">₹{(Number(item.quantity||0)*Number(item.price||0)).toFixed(2)}</td>
-                                    </tr>
-                                  ))}
+                                  {(o.items||[]).map((item,idx) => {
+                                    let comboDetail = null;
+                                    if (item.comboContents) {
+                                      try {
+                                        const parts = JSON.parse(item.comboContents);
+                                        comboDetail = (
+                                          <ul className="combo-item-list">
+                                            {parts.map((p,pi) => (
+                                              <li key={pi}>{p.productName} ({p.barcode}) x{p.qty}</li>
+                                            ))}
+                                          </ul>
+                                        );
+                                      } catch {}
+                                    }
+                                    return (
+                                      <tr key={idx}>
+                                        <td>{item.productName}{comboDetail}</td>
+                                        <td className="td-sku">{item.sku||'—'}</td>
+                                        <td className="td-sku">{variantLabel(item)||'—'}</td>
+                                        <td className="td-center">{item.quantity}</td>
+                                        <td className="td-amt">₹{Number(item.price||0).toFixed(2)}</td>
+                                        <td className="td-amt">₹{(Number(item.quantity||0)*Number(item.price||0)).toFixed(2)}</td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                               {/* Order-level discount totals — POS bills only */}
@@ -4683,7 +4761,7 @@ function App() {
                                         </div>
                                         <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',color:'#dc2626',fontWeight:600}}>
                                           <span>Discount</span>
-                                          <span>− ₹{Number(o.discountAmount||0).toFixed(2)}</span>
+                                          <span>- ₹{Number(o.discountAmount||0).toFixed(2)}</span>
                                         </div>
                                       </>
                                     )}
@@ -4717,11 +4795,12 @@ function App() {
                 </tbody>
               </table>
             </div>
-            {totalOrdPages > 1 && (
+            )}
+            {totalOrdPages > 1 && !ordersLoading && (
               <div className="tbl-pagination">
-                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.max(1,p-1))} disabled={safeOrdPage===1}>‹ Prev</button>
+                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.max(1,p-1))} disabled={safeOrdPage===1}>Prev</button>
                 <span className="tbl-pg-info">Page {safeOrdPage} of {totalOrdPages}</span>
-                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.min(totalOrdPages,p+1))} disabled={safeOrdPage===totalOrdPages}>Next ›</button>
+                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.min(totalOrdPages,p+1))} disabled={safeOrdPage===totalOrdPages}>Next</button>
               </div>
             )}
           </div>
