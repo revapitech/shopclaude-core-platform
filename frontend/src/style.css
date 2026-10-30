@@ -482,6 +482,27 @@ img { width: 140px; height: 44px; object-fit: contain; }
     0 12px 24px rgba(0,0,0,0.12),
     0 2px 6px rgba(0,0,0,0.06);
 }
+/* ── Product card skeleton placeholder ── */
+.s2-card-skeleton {
+  background: #f3f4f6;
+  border-radius: 18px;
+  aspect-ratio: 3/5;
+  position: relative;
+  overflow: hidden;
+}
+.s2-card-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,.6) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.4s ease infinite;
+}
+@keyframes skeleton-sweep {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 .s2-card-img-wrap {
   position: relative;
   aspect-ratio: 3/4;
@@ -2169,7 +2190,7 @@ section {
   background: linear-gradient(135deg, #5a1228 0%, #7b1b3a 100%);
 }
 
-/* ── Shared decorative background layer ── */
+/* ── Shared decorative background layer (CSS-only, no DOM nodes) ── */
 .s2-festive-bg {
   position: absolute;
   inset: 0;
@@ -2177,8 +2198,29 @@ section {
   z-index: -1;
   overflow: hidden;
 }
+/* Ambient glow via pseudo-elements — zero DOM overhead, GPU-composited only */
+.s2-festive-bg::before {
+  content: '';
+  position: absolute;
+  width: 380px; height: 240px;
+  top: -80px; right: 6%;
+  background: radial-gradient(ellipse, rgba(255,160,55,.08) 0%, transparent 60%);
+  animation: glow-breathe 11s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+.s2-festive-bg::after {
+  content: '';
+  position: absolute;
+  width: 300px; height: 190px;
+  bottom: -60px; left: 8%;
+  background: radial-gradient(ellipse, rgba(190,42,72,.10) 0%, transparent 60%);
+  animation: glow-breathe 13s ease-in-out infinite;
+  animation-delay: 4.5s;
+  will-change: opacity, transform;
+}
 
-/* Mandala */
+/* Mandala and particle DOM elements are no longer rendered —
+   these rules are kept only for the reduced-motion @media block. */
 .s2-festive-mandala { position: absolute; }
 .s2-festive-mandala-svg { width: 100%; height: 100%; }
 

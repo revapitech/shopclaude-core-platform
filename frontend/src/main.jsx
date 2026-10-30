@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import axios from 'axios';
 import './style.css';
-import LandingPage from './pages/LandingPage';
+
+// Lazy-load LandingPage so storefront/admin visitors don't download its code.
+const LandingPage = React.lazy(() => import('./pages/LandingPage'));
 
 const API     = import.meta.env.VITE_API_URL     ?? 'http://localhost:8080/gosuas-core/api';
 const BACKEND = import.meta.env.VITE_BACKEND_URL ?? API.replace(/\/api$/, '');
@@ -7393,11 +7395,18 @@ function ShopApp() {
   const [publicOffers, setPublicOffers] = useState([]);
   const [activeOffer, setActiveOffer]   = useState(null); // offer being viewed as bundle page
   const [comboSelection, setComboSelection] = useState([]); // selected barcodes for CUSTOMER_SELECT
+  const [productsLoading, setProductsLoading] = useState(true);
 
   useEffect(() => {
     const sub = getSubdomain();
-    axios.get(`${API}/public/products?subdomain=${sub}`).then(r => setProducts(r.data)).catch(() => {});
+    // Stage 1: shop branding loads first so the header/hero renders immediately.
     axios.get(`${API}/public/shop-info?subdomain=${sub}`).then(r => setShopInfo(r.data)).catch(() => {});
+    // Stage 2: products, digital products, and offers load in parallel.
+    setProductsLoading(true);
+    axios.get(`${API}/public/products?subdomain=${sub}`)
+      .then(r => setProducts(r.data))
+      .catch(() => {})
+      .finally(() => setProductsLoading(false));
     axios.get(`${API}/public/digital/products?subdomain=${sub}`).then(r => setDigitalProducts(r.data)).catch(() => {});
     axios.get(`${API}/public/offers?subdomain=${sub}`).then(r => setPublicOffers(r.data)).catch(() => {});
   }, []);
@@ -7658,13 +7667,7 @@ function ShopApp() {
 
           {/* Promotional banner */}
           <div className={`s2-bundle-banner s2-bundle-banner-festive${posterSrc ? ' s2-bundle-banner-has-poster' : ''}`}>
-            {/* Animated background layers */}
-            <div className="s2-festive-bg" aria-hidden="true">
-              <div className="s2-festive-mandala s2-festive-mandala-1"><FestiveMandala /></div>
-              <div className="s2-festive-mandala s2-festive-mandala-b2"><FestiveMandala /></div>
-              <div className="s2-festive-glow s2-festive-glow-1"/>
-              <div className="s2-festive-glow s2-festive-glow-2"/>
-            </div>
+            <div className="s2-festive-bg" aria-hidden="true"/>
             {posterSrc && <img src={posterSrc} alt={offer.name} className="s2-bundle-banner-poster" />}
             <div className="s2-bundle-banner-info">
               <div className="s2-bundle-banner-tag">🎁 Special Offer</div>
@@ -8334,16 +8337,7 @@ function ShopApp() {
         {/* ── Offers & Combos section ── */}
         {publicOffers.length > 0 && (
           <div className="s2-offers-festive-wrap">
-            {/* Animated background layers */}
-            <div className="s2-festive-bg" aria-hidden="true">
-              <div className="s2-festive-mandala s2-festive-mandala-1"><FestiveMandala /></div>
-              <div className="s2-festive-mandala s2-festive-mandala-2"><FestiveMandala /></div>
-              <div className="s2-festive-particles">
-                {Array.from({length:10},(_,i)=><span key={i} className="s2-particle"/>)}
-              </div>
-              <div className="s2-festive-glow s2-festive-glow-1"/>
-              <div className="s2-festive-glow s2-festive-glow-2"/>
-            </div>
+            <div className="s2-festive-bg" aria-hidden="true"/>
             <section className="s2-offers-section">
             <div className="s2-section-hdr" style={{padding:'0 0 8px'}}>
               <h2 className="s2-section-title" style={{margin:0}}>🎁 Offers &amp; Combos</h2>
@@ -8362,7 +8356,7 @@ function ShopApp() {
                 return (
                   <div key={offer.id} className="s2-offer-card" onClick={openCombo}>
                     {posterSrc
-                      ? <img src={posterSrc} alt={offer.name} className="s2-offer-poster" />
+                      ? <img src={posterSrc} alt={offer.name} className="s2-offer-poster" loading="lazy" />
                       : <div className="s2-offer-poster-ph">🎁</div>}
                     <div className="s2-offer-body">
                       <div className="s2-offer-title">{offer.name}</div>
@@ -8399,14 +8393,16 @@ function ShopApp() {
             )}
           </div>
 
-          {displaySource.length === 0
+          {productsLoading
+            ? <div className="s2-grid">{Array.from({length:6}).map((_,i) => <div key={i} className="s2-card-skeleton"/>)}</div>
+            : displaySource.length === 0
             ? <div className="s2-empty">
                 No products found.{' '}
                 <button className="s2-empty-link" onClick={() => { setFilterCat(''); setSearch(''); setShopPage(1); }}>Browse all →</button>
               </div>
             : <>
                 <div className="s2-grid">
-                  {pagedProducts.map(p => {
+                  {pagedProducts.map((p, pIdx) => {
                     const urls = imgUrls(p);
                     const isNew = p.createdAt && (now - new Date(p.createdAt).getTime()) < 60 * 24 * 60 * 60 * 1000;
                     return (
@@ -8419,6 +8415,7 @@ function ShopApp() {
                         {p.featured && <div className="s2-fav-badge">❤</div>}
                         {urls.length > 0
                           ? <img src={imgSrc(urls[0])} alt={p.name} className="s2-card-img"
+                              loading={pIdx < 4 ? 'eager' : 'lazy'}
                               onError={e => { e.currentTarget.style.display='none'; e.currentTarget.nextElementSibling.style.display='flex'; }} />
                           : null}
                         <div className="s2-card-placeholder" style={{display: urls.length > 0 ? 'none' : 'flex'}}><span>💎</span></div>
@@ -9380,7 +9377,7 @@ const isShop = window.location.pathname.startsWith('/shop');
 
 let rootElement;
 if (subdomain === 'www') {
-  rootElement = <LandingPage />;
+  rootElement = <Suspense fallback={null}><LandingPage /></Suspense>;
 } else if (subdomain === 'admin') {
   rootElement = <SuperAdminApp />;
 } else if (isShop) {

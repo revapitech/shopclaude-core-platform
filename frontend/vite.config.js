@@ -6,4 +6,20 @@ export default defineConfig({
   server: {
     historyApiFallback: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Separate vendor libs into stable chunks — they change less often than
+        // app code so browsers can cache them independently.
+        manualChunks(id) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/axios')) {
+            return 'vendor-axios';
+          }
+        },
+      },
+    },
+  },
 });
