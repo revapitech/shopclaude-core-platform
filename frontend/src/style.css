@@ -2060,3 +2060,193 @@ section {
 .s2-bundle-add-btn { width: 100%; padding: 13px 0; background: #1E3A5F; color: #fff; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; transition: background .15s, opacity .15s; }
 .s2-bundle-add-btn:hover:not(:disabled) { background: #16304f; }
 .s2-bundle-add-btn:disabled { background: #9ca3af; cursor: not-allowed; opacity: .85; font-size: 13px; }
+
+/* ═══════════════════════════════════════════════════
+   Festive Animated Background — Offers & Bundle page
+   ═══════════════════════════════════════════════════ */
+
+/* ── Keyframe definitions ── */
+@keyframes festive-bg-shift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes mandala-spin-cw  { to { transform: rotate(360deg);  } }
+@keyframes mandala-spin-ccw { to { transform: rotate(-360deg); } }
+@keyframes particle-float {
+  0%,100% { transform: translateY(0)    translateX(0)    scale(1);   }
+  30%     { transform: translateY(-22px) translateX(8px)  scale(1.2); }
+  60%     { transform: translateY(-34px) translateX(-6px) scale(0.8); opacity: .15; }
+  80%     { transform: translateY(-16px) translateX(12px) scale(1.1); }
+}
+@keyframes glow-breathe {
+  0%,100% { opacity: .55; transform: scale(1);    }
+  50%     { opacity: .9;  transform: scale(1.18); }
+}
+@keyframes banner-enter {
+  from { opacity: 0; transform: translateY(-16px); }
+  to   { opacity: 1; transform: translateY(0);     }
+}
+@keyframes price-shimmer {
+  0%,100% { text-shadow: 0 0 18px rgba(255,215,0,.55), 0 0 36px rgba(255,140,0,.25); }
+  50%     { text-shadow: 0 0 28px rgba(255,215,0,.9),  0 0 56px rgba(255,160,0,.5), 0 0 80px rgba(255,100,0,.18); }
+}
+@keyframes card-appear {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* ── Offers section — festive wrapper ── */
+.s2-offers-festive-wrap {
+  position: relative;
+  isolation: isolate;
+  padding: 44px 0 56px;
+  background: linear-gradient(135deg, #2d0a1e 0%, #7b1b3a 38%, #a52842 62%, #4a0e25 100%);
+  background-size: 300% 300%;
+  animation: festive-bg-shift 16s ease infinite;
+}
+
+/* Section title & header on dark background */
+.s2-offers-festive-wrap .s2-section-title {
+  color: #fef3c7;
+  text-shadow: 0 1px 8px rgba(0,0,0,.4);
+}
+.s2-offers-festive-wrap .s2-section-hdr {
+  border-color: rgba(255,215,0,.15);
+}
+
+/* Offer cards in festive context */
+.s2-offers-festive-wrap .s2-offer-card {
+  background: rgba(255,255,255,.97);
+  border-color: rgba(255,215,0,.25);
+  box-shadow: 0 4px 22px rgba(0,0,0,.28);
+  animation: card-appear .5s ease-out both;
+}
+.s2-offers-festive-wrap .s2-offer-card:nth-child(2) { animation-delay: .08s; }
+.s2-offers-festive-wrap .s2-offer-card:nth-child(3) { animation-delay: .16s; }
+.s2-offers-festive-wrap .s2-offer-card:nth-child(4) { animation-delay: .24s; }
+.s2-offers-festive-wrap .s2-offer-card:hover {
+  border-color: rgba(255,215,0,.7);
+  box-shadow: 0 8px 32px rgba(0,0,0,.32), 0 0 22px rgba(255,215,0,.18);
+  transform: translateY(-4px);
+}
+.s2-offers-festive-wrap .s2-offer-price { color: #7b1b3a; }
+.s2-offers-festive-wrap .s2-offer-btn {
+  background: linear-gradient(135deg, #7b1b3a 0%, #a52842 100%);
+}
+.s2-offers-festive-wrap .s2-offer-btn:hover {
+  background: linear-gradient(135deg, #5a1228 0%, #7b1b3a 100%);
+}
+
+/* ── Shared decorative background layer ── */
+.s2-festive-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  overflow: hidden;
+}
+
+/* Mandala */
+.s2-festive-mandala { position: absolute; }
+.s2-festive-mandala-svg { width: 100%; height: 100%; }
+
+.s2-festive-mandala-1 {
+  width: 520px; height: 520px;
+  top: -140px; right: -80px;
+  animation: mandala-spin-cw 70s linear infinite;
+  opacity: .7;
+}
+.s2-festive-mandala-2 {
+  width: 340px; height: 340px;
+  bottom: -90px; left: -50px;
+  animation: mandala-spin-ccw 90s linear infinite;
+  opacity: .55;
+}
+/* Banner-specific second mandala (smaller, top-left) */
+.s2-festive-mandala-b2 {
+  width: 260px; height: 260px;
+  top: -60px; left: 30%;
+  animation: mandala-spin-ccw 80s linear infinite;
+  opacity: .4;
+}
+
+/* Particles */
+.s2-festive-particles { position: absolute; inset: 0; }
+.s2-particle {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255,215,0,.55);
+  will-change: transform, opacity;
+  animation: particle-float 9s ease-in-out infinite;
+}
+.s2-particle:nth-child(1)  { width:5px;  height:5px;  left:7%;  top:22%; animation-duration:7s;   animation-delay:0s;   opacity:.6; }
+.s2-particle:nth-child(2)  { width:3px;  height:3px;  left:19%; top:68%; animation-duration:9.5s; animation-delay:1.2s; opacity:.45; }
+.s2-particle:nth-child(3)  { width:6px;  height:6px;  left:34%; top:16%; animation-duration:8s;   animation-delay:2.1s; opacity:.55; }
+.s2-particle:nth-child(4)  { width:4px;  height:4px;  left:49%; top:78%; animation-duration:11s;  animation-delay:.6s;  opacity:.5; }
+.s2-particle:nth-child(5)  { width:5px;  height:5px;  left:63%; top:32%; animation-duration:10s;  animation-delay:3.3s; opacity:.6; }
+.s2-particle:nth-child(6)  { width:3px;  height:3px;  left:77%; top:57%; animation-duration:7.5s; animation-delay:1.8s; opacity:.4; }
+.s2-particle:nth-child(7)  { width:4px;  height:4px;  left:87%; top:12%; animation-duration:9s;   animation-delay:4.2s; opacity:.55; }
+.s2-particle:nth-child(8)  { width:6px;  height:6px;  left:11%; top:84%; animation-duration:12s;  animation-delay:2.7s; opacity:.38; }
+.s2-particle:nth-child(9)  { width:3px;  height:3px;  left:54%; top:92%; animation-duration:8.5s; animation-delay:.9s;  opacity:.5; }
+.s2-particle:nth-child(10) { width:5px;  height:5px;  left:43%; top:47%; animation-duration:6.5s; animation-delay:3.6s; opacity:.6; }
+
+/* Glow lights */
+.s2-festive-glow { position: absolute; border-radius: 50%; }
+.s2-festive-glow-1 {
+  width: 340px; height: 220px;
+  bottom: -70px; left: 8%;
+  background: radial-gradient(ellipse, rgba(200,48,80,.38) 0%, transparent 68%);
+  animation: glow-breathe 5s ease-in-out infinite;
+}
+.s2-festive-glow-2 {
+  width: 300px; height: 190px;
+  top: -50px; right: 12%;
+  background: radial-gradient(ellipse, rgba(255,185,55,.22) 0%, transparent 68%);
+  animation: glow-breathe 4s ease-in-out infinite;
+  animation-delay: 2.2s;
+}
+
+/* ── Bundle banner — festive theme ── */
+.s2-bundle-banner-festive {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: linear-gradient(135deg, #2d0a1e 0%, #7b1b3a 48%, #4a0e25 100%) !important;
+  background-size: 200% 200% !important;
+  animation: festive-bg-shift 14s ease infinite, banner-enter .5s ease-out both;
+}
+.s2-bundle-banner-festive.s2-bundle-banner-has-poster {
+  background: linear-gradient(135deg, #1a0610 0%, #5a1228 50%, #2d0a1e 100%) !important;
+}
+
+/* Price shimmer glow */
+.s2-bundle-banner-festive .s2-bundle-banner-price {
+  animation: price-shimmer 3.5s ease-in-out infinite;
+}
+
+/* Choose-badge adapts to festive theme */
+.s2-bundle-banner-festive .s2-bundle-banner-choose {
+  background: rgba(255,215,0,.18);
+  border: 1px solid rgba(255,215,0,.3);
+}
+
+/* Bundle page — product selection in festive context */
+.s2-bundle-product-selected {
+  border-color: #9b2335 !important;
+  box-shadow: 0 0 0 3px rgba(155,35,53,.13), 0 0 14px rgba(255,215,0,.22) !important;
+}
+
+/* ── Reduced-motion fallback ── */
+@media (prefers-reduced-motion: reduce) {
+  .s2-offers-festive-wrap,
+  .s2-bundle-banner-festive { animation: none !important; background-position: 50% 50% !important; }
+  .s2-festive-mandala-1,
+  .s2-festive-mandala-2,
+  .s2-festive-mandala-b2 { animation: none; }
+  .s2-particle { animation: none; opacity: .25; }
+  .s2-festive-glow-1,
+  .s2-festive-glow-2 { animation: none; opacity: .5; }
+  .s2-bundle-banner-festive .s2-bundle-banner-price { animation: none; }
+  .s2-offers-festive-wrap .s2-offer-card { animation: none; }
+}
