@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
+@Table(indexes = @Index(name = "idx_product_tenant_id", columnList = "tenant_id"))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Product {
     @Id
