@@ -7579,13 +7579,8 @@ function ShopApp() {
 
           {/* Promotional banner */}
           <div className={`s2-bundle-banner s2-bundle-banner-festive${posterSrc ? ' s2-bundle-banner-has-poster' : ''}`}>
-            {/* Animated background layers */}
-            <div className="s2-festive-bg" aria-hidden="true">
-              <div className="s2-festive-mandala s2-festive-mandala-1"><FestiveMandala /></div>
-              <div className="s2-festive-mandala s2-festive-mandala-b2"><FestiveMandala /></div>
-              <div className="s2-festive-glow s2-festive-glow-1"/>
-              <div className="s2-festive-glow s2-festive-glow-2"/>
-            </div>
+            {/* Ambient glow layer — pure CSS, no DOM decorations */}
+            <div className="s2-festive-bg" aria-hidden="true"/>
             {posterSrc && <img src={posterSrc} alt={offer.name} className="s2-bundle-banner-poster" />}
             <div className="s2-bundle-banner-info">
               <div className="s2-bundle-banner-tag">🎁 Special Offer</div>
@@ -8255,16 +8250,8 @@ function ShopApp() {
         {/* ── Offers & Combos section ── */}
         {publicOffers.length > 0 && (
           <div className="s2-offers-festive-wrap">
-            {/* Animated background layers */}
-            <div className="s2-festive-bg" aria-hidden="true">
-              <div className="s2-festive-mandala s2-festive-mandala-1"><FestiveMandala /></div>
-              <div className="s2-festive-mandala s2-festive-mandala-2"><FestiveMandala /></div>
-              <div className="s2-festive-particles">
-                {Array.from({length:10},(_,i)=><span key={i} className="s2-particle"/>)}
-              </div>
-              <div className="s2-festive-glow s2-festive-glow-1"/>
-              <div className="s2-festive-glow s2-festive-glow-2"/>
-            </div>
+            {/* Ambient glow layer — pure CSS pseudo-elements, no heavy DOM */}
+            <div className="s2-festive-bg" aria-hidden="true"/>
             <section className="s2-offers-section">
             <div className="s2-section-hdr" style={{padding:'0 0 8px'}}>
               <h2 className="s2-section-title" style={{margin:0}}>🎁 Offers &amp; Combos</h2>

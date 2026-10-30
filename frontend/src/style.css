@@ -2250,3 +2250,150 @@ section {
   .s2-bundle-banner-festive .s2-bundle-banner-price { animation: none; }
   .s2-offers-festive-wrap .s2-offer-card { animation: none; }
 }
+
+/* ═══════════════════════════════════════════════════
+   Storefront v2 — Premium UI Refinements
+   Overrides v1 heavy animation, improves hero, cards,
+   offers section, typography. CSS-only, no JS.
+   ═══════════════════════════════════════════════════ */
+
+/* ── 1. Suppress v1 heavy DOM decoration classes ── */
+/* (elements removed from JSX; these are safety fallbacks) */
+.s2-festive-mandala,
+.s2-festive-particles,
+.s2-festive-glow { display: none !important; }
+
+/* ── 2. Refined offers section — slower gradient, no DOM clutter ── */
+.s2-offers-festive-wrap {
+  padding: 52px 0 60px;
+  background: linear-gradient(160deg, #2d0a1e 0%, #7b1b3a 44%, #a0254a 70%, #4a0e25 100%);
+  background-size: 240% 240%;
+  animation: festive-bg-shift 22s ease infinite; /* 22 s — much calmer */
+}
+
+/* Ambient glow from CSS pseudo-elements only (no DOM children) */
+.s2-festive-bg { position: absolute; inset: 0; pointer-events: none; z-index: -1; overflow: hidden; }
+.s2-festive-bg::before {
+  content: '';
+  position: absolute;
+  width: 480px; height: 300px;
+  top: -90px; right: 8%;
+  background: radial-gradient(ellipse, rgba(255,160,55,.09) 0%, transparent 60%);
+  animation: glow-breathe 11s ease-in-out infinite;
+}
+.s2-festive-bg::after {
+  content: '';
+  position: absolute;
+  width: 420px; height: 250px;
+  bottom: -55px; left: 6%;
+  background: radial-gradient(ellipse, rgba(190,42,72,.13) 0%, transparent 60%);
+  animation: glow-breathe 8s ease-in-out infinite;
+  animation-delay: 4.5s;
+}
+
+/* ── 3. Offer cards — cleaner, more premium ── */
+.s2-offer-card {
+  border-radius: 16px;
+  border-width: 1px;
+  transition: transform .22s cubic-bezier(.34,1.56,.64,1), box-shadow .22s ease, border-color .18s ease;
+}
+.s2-offer-card:hover {
+  transform: translateY(-6px) scale(1.01);
+  box-shadow: 0 14px 40px rgba(0,0,0,.18), 0 0 0 1.5px rgba(255,215,0,.3) !important;
+}
+.s2-offers-festive-wrap .s2-offer-card {
+  box-shadow: 0 4px 18px rgba(0,0,0,.28), 0 1px 4px rgba(0,0,0,.12);
+}
+.s2-offer-poster { height: 180px; } /* slightly taller poster area */
+.s2-offer-poster-ph { height: 140px; }
+
+/* Section title readable on dark bg */
+.s2-offers-festive-wrap .s2-section-title {
+  font-size: 24px;
+  letter-spacing: 1.5px;
+  text-shadow: 0 1px 10px rgba(0,0,0,.45);
+}
+
+/* ── 4. Hero section — subtle gradient animation + content entrance ── */
+.s2-hero {
+  height: 520px;
+  background: linear-gradient(135deg, #080f1e 0%, #1a2d50 28%, #0f1f3d 60%, #080f1e 100%);
+  background-size: 200% 200%;
+  animation: hero-bg-drift 20s ease infinite;
+}
+@keyframes hero-bg-drift {
+  0%,100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+.s2-hero::before {
+  background:
+    radial-gradient(ellipse at 68% 42%, rgba(245,151,30,.17) 0%, transparent 55%),
+    radial-gradient(ellipse at 18% 72%, rgba(245,151,30,.08) 0%, transparent 48%);
+}
+/* Entrance animation for hero content */
+.s2-hero-overlay { animation: s2-hero-enter .9s ease-out both; }
+@keyframes s2-hero-enter {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* Hero button — slight elevation on hover */
+.s2-hero-btn:hover {
+  background: #fff;
+  color: #1a1a1a;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(255,255,255,.2);
+}
+/* Subtext entrance delay */
+.s2-hero-sub  { animation: s2-hero-enter .9s .1s ease-out both; }
+.s2-hero-tag  { animation: s2-hero-enter .9s .2s ease-out both; }
+.s2-hero-btn  { animation: s2-hero-enter .9s .35s ease-out both; }
+
+/* ── 5. Product cards — staggered entrance ── */
+.s2-grid .s2-card { animation: card-appear .45s ease-out both; }
+.s2-grid .s2-card:nth-child(1)  { animation-delay: .04s; }
+.s2-grid .s2-card:nth-child(2)  { animation-delay: .09s; }
+.s2-grid .s2-card:nth-child(3)  { animation-delay: .14s; }
+.s2-grid .s2-card:nth-child(4)  { animation-delay: .19s; }
+.s2-grid .s2-card:nth-child(5)  { animation-delay: .24s; }
+.s2-grid .s2-card:nth-child(6)  { animation-delay: .29s; }
+.s2-grid .s2-card:nth-child(7)  { animation-delay: .34s; }
+.s2-grid .s2-card:nth-child(8)  { animation-delay: .39s; }
+.s2-grid .s2-card:nth-child(n+9) { animation-delay: .44s; }
+
+/* ── 6. Bundle banner — calmer gradient shift ── */
+.s2-bundle-banner-festive {
+  animation: festive-bg-shift 20s ease infinite, banner-enter .5s ease-out both !important;
+}
+
+/* ── 7. Announcement bar — slightly more premium ── */
+.s2-announce {
+  background: #111;
+  letter-spacing: 1px;
+  padding: 8px 16px;
+  font-size: 11.5px;
+}
+
+/* ── 8. Section header accent line ── */
+.s2-section-hdr {
+  border-bottom-width: 1.5px;
+}
+
+/* ── 9. Footer — subtle section separator ── */
+.s2-footer { margin-top: 80px; }
+
+/* ── 10. Reduced-motion v2 ── */
+@media (prefers-reduced-motion: reduce) {
+  .s2-hero, .s2-hero-overlay,
+  .s2-hero-sub, .s2-hero-tag, .s2-hero-btn { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .s2-grid .s2-card { animation: none !important; }
+  .s2-festive-bg::before,
+  .s2-festive-bg::after { animation: none !important; }
+}
+
+/* ── Mobile refinements ── */
+@media (max-width: 640px) {
+  .s2-hero { height: 380px; }
+  .s2-hero-overlay { padding: 0 16px; }
+  .s2-offers-festive-wrap { padding: 36px 0 44px; }
+  .s2-offer-poster { height: 150px; }
+}
