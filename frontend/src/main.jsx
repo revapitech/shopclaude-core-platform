@@ -7247,6 +7247,33 @@ const STATUS_STEPS = ['PENDING','CONFIRMED','SHIPPED','DELIVERED'];
 const STATUS_LABELS = { PENDING:'Order Placed', CONFIRMED:'Confirmed', SHIPPED:'Shipped', DELIVERED:'Delivered', CANCELLED:'Cancelled' };
 const STATUS_ICONS  = { PENDING:'🕐', CONFIRMED:'✅', SHIPPED:'🚚', DELIVERED:'🎉', CANCELLED:'❌' };
 
+/* ── Festive mandala SVG (purely decorative) ── */
+function FestiveMandala() {
+  return (
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" className="s2-festive-mandala-svg" aria-hidden="true">
+      <g transform="translate(50 50)" fill="none">
+        <circle r="44" stroke="rgba(255,215,0,0.1)" strokeWidth="0.7" />
+        <circle r="34" stroke="rgba(255,215,0,0.14)" strokeWidth="0.7" />
+        <circle r="22" stroke="rgba(255,215,0,0.18)" strokeWidth="0.8" />
+        <circle r="10" stroke="rgba(255,215,0,0.22)" strokeWidth="0.8" />
+        <circle r="4"  fill="rgba(255,215,0,0.28)" />
+        {[0,45,90,135,180,225,270,315].map(a => (
+          <ellipse key={a} cx="0" cy="-30" rx="4" ry="13"
+            transform={`rotate(${a} 0 0)`} fill="rgba(255,215,0,0.18)" />
+        ))}
+        {[22.5,67.5,112.5,157.5,202.5,247.5,292.5,337.5].map(a => (
+          <ellipse key={a} cx="0" cy="-20" rx="2.5" ry="9"
+            transform={`rotate(${a} 0 0)`} fill="rgba(255,215,0,0.11)" />
+        ))}
+        {[0,45,90,135,180,225,270,315].map(a => (
+          <ellipse key={`d${a}`} cx="0" cy="-43" rx="2" ry="5"
+            transform={`rotate(${a} 0 0)`} fill="rgba(255,215,0,0.12)" />
+        ))}
+      </g>
+    </svg>
+  );
+}
+
 function ShopApp() {
   const [products, setProducts]   = useState([]);
   const [cart, setCart]           = useState([]);
@@ -7551,7 +7578,14 @@ function ShopApp() {
           </header>
 
           {/* Promotional banner */}
-          <div className={`s2-bundle-banner${posterSrc ? ' s2-bundle-banner-has-poster' : ''}`}>
+          <div className={`s2-bundle-banner s2-bundle-banner-festive${posterSrc ? ' s2-bundle-banner-has-poster' : ''}`}>
+            {/* Animated background layers */}
+            <div className="s2-festive-bg" aria-hidden="true">
+              <div className="s2-festive-mandala s2-festive-mandala-1"><FestiveMandala /></div>
+              <div className="s2-festive-mandala s2-festive-mandala-b2"><FestiveMandala /></div>
+              <div className="s2-festive-glow s2-festive-glow-1"/>
+              <div className="s2-festive-glow s2-festive-glow-2"/>
+            </div>
             {posterSrc && <img src={posterSrc} alt={offer.name} className="s2-bundle-banner-poster" />}
             <div className="s2-bundle-banner-info">
               <div className="s2-bundle-banner-tag">🎁 Special Offer</div>
@@ -8220,7 +8254,18 @@ function ShopApp() {
 
         {/* ── Offers & Combos section ── */}
         {publicOffers.length > 0 && (
-          <section className="s2-offers-section">
+          <div className="s2-offers-festive-wrap">
+            {/* Animated background layers */}
+            <div className="s2-festive-bg" aria-hidden="true">
+              <div className="s2-festive-mandala s2-festive-mandala-1"><FestiveMandala /></div>
+              <div className="s2-festive-mandala s2-festive-mandala-2"><FestiveMandala /></div>
+              <div className="s2-festive-particles">
+                {Array.from({length:10},(_,i)=><span key={i} className="s2-particle"/>)}
+              </div>
+              <div className="s2-festive-glow s2-festive-glow-1"/>
+              <div className="s2-festive-glow s2-festive-glow-2"/>
+            </div>
+            <section className="s2-offers-section">
             <div className="s2-section-hdr" style={{padding:'0 0 8px'}}>
               <h2 className="s2-section-title" style={{margin:0}}>🎁 Offers &amp; Combos</h2>
             </div>
@@ -8260,7 +8305,8 @@ function ShopApp() {
                 );
               })}
             </div>
-          </section>
+            </section>
+          </div>
         )}
 
         {/* ── Products section ── */}
