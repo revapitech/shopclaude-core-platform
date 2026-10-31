@@ -47,7 +47,7 @@ axios.interceptors.response.use(
 );
 
 // Shop admin pages that can be opened directly via the URL hash (/#returns etc.)
-const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'expenses', 'print-labels', 'pdf-store', 'offers', 'printer-settings'];
+const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'expenses', 'print-labels', 'pdf-store', 'offers'];
 
 const FIELD_LABELS = {
   name: 'Product Name',
@@ -152,44 +152,6 @@ const STICKER_TYPES = [
 ];
 
 // CATEGORY_STICKER removed — sticker type defaults to 'two-row'
-
-/* ── Printer calibration config ── */
-const PRINTER_CONFIG_KEY = 'sc_printer_config';
-const DEFAULT_PRINTER_CONFIG = {
-  receipt: {
-    paperWidth:   80,   // mm — 58 or 80
-    marginTop:     4,   // mm
-    marginRight:   4,
-    marginBottom:  8,
-    marginLeft:    4,
-    fontSize:     13,   // px
-  },
-  label: {
-    // marginTop/marginLeft: fine-tuning offsets applied to .labels-wrap padding
-    // barcodeH: height of the barcode <img> in mm
-    'butterfly':   { marginTop: 0, marginLeft: 0, barcodeH: 5   },
-    'two-row':     { marginTop: 0, marginLeft: 0, barcodeH: 8   },
-    'three-row':   { marginTop: 0, marginLeft: 7, barcodeH: 8   },
-    'four-row':    { marginTop: 0, marginLeft: 0, barcodeH: 3.5 },
-    'single-row':  { marginTop: 0, marginLeft: 0, barcodeH: 12  },
-  },
-};
-function loadPrinterConfig() {
-  try {
-    const s = localStorage.getItem(PRINTER_CONFIG_KEY);
-    if (!s) return JSON.parse(JSON.stringify(DEFAULT_PRINTER_CONFIG));
-    const p = JSON.parse(s);
-    return {
-      receipt: { ...DEFAULT_PRINTER_CONFIG.receipt, ...(p.receipt || {}) },
-      label: Object.fromEntries(
-        Object.entries(DEFAULT_PRINTER_CONFIG.label).map(([k, v]) => [k, { ...v, ...(p.label?.[k] || {}) }])
-      ),
-    };
-  } catch { return JSON.parse(JSON.stringify(DEFAULT_PRINTER_CONFIG)); }
-}
-function savePrinterConfig(cfg) {
-  localStorage.setItem(PRINTER_CONFIG_KEY, JSON.stringify(cfg));
-}
 
 function ChipGroup({ label, options, selected, onToggle, onSelectAll, onClear }) {
   const [customVal, setCustomVal] = useState('');
@@ -585,13 +547,7 @@ function exportToCsv(filename, rows, columns) {
   URL.revokeObjectURL(url);
 }
 
-function printBillReceipt(bill, shopName = 'GOSUAS', shopInfo = {}) {
-  const rcfg = loadPrinterConfig().receipt;
-  const pw = rcfg.paperWidth;
-  const mt = rcfg.marginTop, mr = rcfg.marginRight, mb = rcfg.marginBottom, ml = rcfg.marginLeft;
-  const contentW = pw - ml - mr;
-  const fs = rcfg.fontSize;
-
+function printBillReceipt(bill, shopName = 'GOSUAS') {
   // Use hidden iframe (same origin) so Chrome remembers the last printer selection
   let iframe = document.getElementById('__receipt_print_frame__');
   if (!iframe) {
@@ -622,9 +578,9 @@ function printBillReceipt(bill, shopName = 'GOSUAS', shopInfo = {}) {
   <meta charset="UTF-8">
   <title>Receipt - ${bill.billNo || 'N/A'}</title>
   <style>
-    @page { size: ${pw}mm auto; margin: ${mt}mm ${mr}mm ${mb}mm ${ml}mm; }
+    @page { size: 80mm auto; margin: 4mm 4mm 8mm 4mm; }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Courier New', monospace; font-size: ${fs}px; font-weight: bold; width: ${contentW}mm; color: #000; }
+    body { font-family: 'Courier New', monospace; font-size: 13px; font-weight: bold; width: 72mm; color: #000; }
     h2 { text-align:center; font-size:22px; letter-spacing:3px; font-weight:900; margin-bottom:1mm; }
     .shop-phone { text-align:center; font-size:14px; font-weight:bold; margin:1mm 0 0.5mm; }
     .shop-addr  { text-align:center; font-size:12px; font-weight:bold; margin-bottom:2mm; }
@@ -647,8 +603,8 @@ function printBillReceipt(bill, shopName = 'GOSUAS', shopInfo = {}) {
 </head>
 <body>
   <h2>${shopName}</h2>
-  ${shopInfo.phone ? `<p class="shop-phone">\u260E ${shopInfo.phone}</p>` : ''}
-  ${shopInfo.address ? `<p class="shop-addr">${shopInfo.address.replace(/\n/g,'<br>')}</p>` : ''}
+  <p class="shop-phone">📞 8078583062</p>
+  <p class="shop-addr">OPP CET Sreekaryam</p>
   <p class="sub">Tax Invoice / Receipt</p>
   <div class="dash"></div>
   <div class="info-row"><span>Bill No:</span><span>${bill.billNo || 'N/A'}</span></div>
@@ -689,12 +645,6 @@ function printBillReceipt(bill, shopName = 'GOSUAS', shopInfo = {}) {
 }
 
 function printRentalReceipt(rental, shopName = 'GOSUAS') {
-  const rcfg = loadPrinterConfig().receipt;
-  const pw = rcfg.paperWidth;
-  const mt = rcfg.marginTop, mr = rcfg.marginRight, mb = rcfg.marginBottom, ml = rcfg.marginLeft;
-  const contentW = pw - ml - mr;
-  const fs = rcfg.fontSize;
-
   let iframe = document.getElementById('__rental_receipt_print_frame__');
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -723,9 +673,9 @@ function printRentalReceipt(rental, shopName = 'GOSUAS') {
   <meta charset="UTF-8">
   <title>Rental Receipt - ${rental.rentalNo || 'N/A'}</title>
   <style>
-    @page { size: ${pw}mm auto; margin: ${mt}mm ${mr}mm ${mb}mm ${ml}mm; }
+    @page { size: 80mm auto; margin: 4mm 4mm 8mm 4mm; }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Courier New', monospace; font-size: ${fs}px; font-weight: bold; width: ${contentW}mm; color: #000; }
+    body { font-family: 'Courier New', monospace; font-size: 13px; font-weight: bold; width: 72mm; color: #000; }
     h2 { text-align:center; font-size:22px; letter-spacing:3px; font-weight:900; margin-bottom:1mm; }
     .sub { text-align:center; font-size:12px; font-weight:bold; margin-bottom:2mm; }
     .dash { border:none; border-top:1px dashed #000; margin:2mm 0; }
@@ -766,12 +716,6 @@ function printRentalReceipt(rental, shopName = 'GOSUAS') {
 }
 
 function printRentalReturnReceipt(rental, shopName = 'GOSUAS') {
-  const rcfg = loadPrinterConfig().receipt;
-  const pw = rcfg.paperWidth;
-  const mt = rcfg.marginTop, mr = rcfg.marginRight, mb = rcfg.marginBottom, ml = rcfg.marginLeft;
-  const contentW = pw - ml - mr;
-  const fs = rcfg.fontSize;
-
   let iframe = document.getElementById('__rental_return_print_frame__');
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -795,9 +739,9 @@ function printRentalReturnReceipt(rental, shopName = 'GOSUAS') {
   <meta charset="UTF-8">
   <title>Return Receipt - ${rental.rentalNo || 'N/A'}</title>
   <style>
-    @page { size: ${pw}mm auto; margin: ${mt}mm ${mr}mm ${mb}mm ${ml}mm; }
+    @page { size: 80mm auto; margin: 4mm 4mm 8mm 4mm; }
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family: 'Courier New', monospace; font-size: ${fs}px; font-weight: bold; width: ${contentW}mm; color: #000; }
+    body { font-family: 'Courier New', monospace; font-size: 13px; font-weight: bold; width: 72mm; color: #000; }
     h2 { text-align:center; font-size:22px; letter-spacing:3px; font-weight:900; margin-bottom:1mm; }
     .sub { text-align:center; font-size:12px; font-weight:bold; margin-bottom:2mm; }
     .dash { border:none; border-top:1px dashed #000; margin:2mm 0; }
@@ -849,7 +793,7 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
     <div style="width:100%;height:100%;padding:0.8mm 1mm;display:flex;flex-direction:column;gap:0.3mm;justify-content:flex-start;border-right:0.3mm solid #ddd;box-sizing:border-box;overflow:hidden;">
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">${shopName}</div>
       <div style="${F}font-size:4.5pt;line-height:1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
-      <img class="barcode-img" src="${barUrl}" style="width:18mm;height:3.5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:18mm;height:3.5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
     </div>`;
@@ -858,7 +802,7 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
     return `
     <div style="width:27mm;height:20mm;padding:1mm;display:flex;flex-direction:column;gap:0.3mm;justify-content:flex-start;box-sizing:border-box;overflow:hidden;">
       <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${shopName}</div>
-      <img class="barcode-img" src="${barUrl}" style="width:25mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:25mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:5pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:5.5pt;line-height:1.1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
       <div style="${F}font-size:8pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
@@ -868,7 +812,7 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
     return `
     <div style="width:38mm;height:25mm;padding:1.5mm 2mm;display:flex;flex-direction:column;gap:0.5mm;justify-content:flex-start;border-right:0.3mm solid #ddd;box-sizing:border-box;overflow:hidden;">
       <div style="${F}font-size:7pt;line-height:1;flex-shrink:0;">${shopName}</div>
-      <img class="barcode-img" src="${barUrl}" style="width:34mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:34mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:6pt;line-height:1.1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
       <div style="${F}font-size:9pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
@@ -894,7 +838,7 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
       <div style="width:22mm;height:24mm;padding:1.5mm 1mm 0.8mm;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden;">
         <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${shopName}</div>
         <div style="height:0.5mm;flex-shrink:0;"></div>
-        <img class="barcode-img" src="${barUrl}" style="width:20mm;height:5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+        <img src="${barUrl}" style="width:20mm;height:5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
         <div style="height:0.5mm;flex-shrink:0;"></div>
         <div style="${F}font-size:5pt;line-height:1;flex-shrink:0;">${sku}</div>
         <div style="height:2mm;flex-shrink:0;"></div>
@@ -913,7 +857,7 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
   // single-row
   return `
       <div class="label" style="width:50mm;height:15mm;padding:1mm 1.5mm;display:flex;align-items:center;gap:2mm;border:0.3mm solid #bbb;box-sizing:border-box;overflow:hidden;">
-        <img class="barcode-img" src="${barUrl}" style="width:28mm;height:12mm;object-fit:contain;object-position:left;flex-shrink:0;display:block;">
+        <img src="${barUrl}" style="width:28mm;height:12mm;object-fit:contain;object-position:left;flex-shrink:0;display:block;">
         <div style="display:flex;flex-direction:column;gap:0.4mm;overflow:hidden;">
           <span style="${F}font-size:5pt;line-height:1;white-space:nowrap;overflow:hidden;">${shopName}</span>
           <span style="${F}font-size:5pt;line-height:1;white-space:nowrap;overflow:hidden;">${sku}</span>
@@ -954,13 +898,13 @@ function buildGridRowsHTML(cellsHTML, stickerType) {
   if (stickerType === 'four-row') return buildGrid(cellsHTML, 4, '20mm', '15mm', true);
   if (stickerType === 'two-row')  return buildGrid(cellsHTML, 2, '38mm', '25mm');
   if (stickerType === 'three-row') {
-    // Sheet width: 3×27mm cells + 2×1mm gaps = 83mm content; left offset applied via .labels-wrap padding-left
-    const TR_COLS = 3, TR_CELL = '27mm', TR_H = '20mm', TR_GAP = '1mm';
+    // 7mm left sheet margin + 3×27mm cells + 2×1mm gaps = 90mm sheet width
+    const TR_COLS = 3, TR_CELL = '27mm', TR_H = '20mm', TR_GAP = '1mm', TR_OFF = '7mm';
     let html = '';
     const rows = Math.ceil(cellsHTML.length / TR_COLS);
     for (let r = 0; r < rows; r++) {
       const pb = r < rows - 1 ? 'always' : 'auto';
-      html += `<div class="label" style="font-size:0;white-space:nowrap;height:${TR_H};overflow:hidden;page-break-after:${pb};break-after:${pb === 'always' ? 'page' : 'auto'};">`;
+      html += `<div class="label" style="margin-left:${TR_OFF};font-size:0;white-space:nowrap;height:${TR_H};overflow:hidden;page-break-after:${pb};break-after:${pb === 'always' ? 'page' : 'auto'};">`;
       for (let c = 0; c < TR_COLS; c++) {
         if (c > 0) html += `<div style="display:inline-block;vertical-align:top;width:${TR_GAP};height:${TR_H};"></div>`;
         const idx = r * TR_COLS + c;
@@ -1004,7 +948,7 @@ function buildProductLabels(product, stickerType, qty, shopName = 'GOSUAS') {
   };
 }
 
-function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty, labelCfg) {
+function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty) {
   const isButterfly  = pageW === '75mm';
   const isTwoRow     = pageW === '76mm';   // 2 × 38mm grid
   const isThreeRow   = pageW === '90mm';   // 3 × 30mm grid
@@ -1043,9 +987,6 @@ function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty, l
   }
   const labelDoc = iframe.contentDocument || iframe.contentWindow.document;
   labelDoc.open();
-  const lMarginTop  = labelCfg?.marginTop  ?? 0;
-  const lMarginLeft = labelCfg?.marginLeft ?? 0;
-  const lBarcodeH   = labelCfg?.barcodeH;
   labelDoc.write(`<!DOCTYPE html>
 <html><head>
   <meta charset="UTF-8">
@@ -1055,8 +996,7 @@ function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty, l
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: Arial, sans-serif; background: #fff; margin: 0; }
     .label { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .labels-wrap { padding: 0; gap: 0; display: block; padding-top: ${lMarginTop}mm; padding-left: ${lMarginLeft}mm; }
-    ${lBarcodeH != null ? `.barcode-img { height: ${lBarcodeH}mm !important; }` : ''}
+    .labels-wrap { padding: 0; gap: 0; display: block; }
   </style>
 </head>
 <body>
@@ -1081,18 +1021,16 @@ function confirmFourRowStock() {
 }
 
 function printLabels(product, stickerType, qty, shopName) {
-  const labelCfg = loadPrinterConfig().label[stickerType];
   const { labelsHTML, pageW, pageH, isFourRow, sticker } = buildProductLabels(product, stickerType, qty, shopName);
   if (!sticker) return;
   openPrintWindow(labelsHTML, pageW, pageH, isFourRow,
-    `Preview — ${qty} label${qty !== 1 ? 's' : ''} (${sticker.label} ${sticker.size})`, qty, labelCfg);
+    `Preview — ${qty} label${qty !== 1 ? 's' : ''} (${sticker.label} ${sticker.size})`, qty);
 }
 
 function printBulkLabels(items, stickerType, shopName) {
   if (!items.length) return;
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
   if (!sticker) return;
-  const labelCfg = loadPrinterConfig().label[stickerType];
   const isFourRow = stickerType === 'four-row';
 
   let allHTML, pageW, pageH;
@@ -1124,7 +1062,7 @@ function printBulkLabels(items, stickerType, shopName) {
   }
 
   openPrintWindow(allHTML, pageW, pageH, isFourRow,
-    `Bulk Print — ${items.length} products, ${totalQty} labels (${sticker.label})`, totalQty, labelCfg);
+    `Bulk Print — ${items.length} products, ${totalQty} labels (${sticker.label})`, totalQty);
 }
 
 function BarChart({ data }) {
@@ -1200,341 +1138,6 @@ function printOrderShippingLabel(order, shopName, shopAddress) {
 <script>window.onload=()=>{window.print();}<\/script>
 </body></html>`);
   w.document.close();
-}
-
-/* ── Printer Settings / Calibration page ── */
-function PrinterSettingsPage({ tenantInfo }) {
-  const [cfg, setCfg] = useState(() => loadPrinterConfig());
-  const [tab, setTab] = useState('receipt');
-  const [testType, setTestType] = useState('two-row');
-  const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saved' | 'reset'
-
-  const updateReceipt = (key, val) =>
-    setCfg(c => ({ ...c, receipt: { ...c.receipt, [key]: val } }));
-  const updateLabel = (type, key, val) =>
-    setCfg(c => ({ ...c, label: { ...c.label, [type]: { ...c.label[type], [key]: val } } }));
-
-  const save = () => {
-    savePrinterConfig(cfg);
-    setSaveState('saved');
-    setTimeout(() => setSaveState('idle'), 2500);
-  };
-  const reset = () => {
-    setCfg(JSON.parse(JSON.stringify(DEFAULT_PRINTER_CONFIG)));
-    setSaveState('reset');
-    setTimeout(() => setSaveState('idle'), 2500);
-  };
-
-  const printTestLabel = () => {
-    const fakeProd = {
-      id: 'test-calib', name: 'TEST PRODUCT NAME', sku: 'SKU-TEST-001',
-      barcode: '1234567890', sellingPrice: 99.99, productType: 'RETAIL', color: '', size: 'M',
-    };
-    const lcfg = cfg.label[testType];
-    const { labelsHTML, pageW, pageH, isFourRow, sticker } = buildProductLabels(fakeProd, testType, 4, tenantInfo?.name || 'MY SHOP');
-    if (!sticker) return;
-    openPrintWindow(labelsHTML, pageW, pageH, isFourRow, `Test Label — ${sticker.label} (${sticker.size})`, 4, lcfg);
-  };
-
-  const printTestReceipt = () => {
-    // Save current config so printBillReceipt picks it up (it loads from localStorage internally)
-    savePrinterConfig(cfg);
-    const fakeBill = {
-      billNo: 'TEST-RECEIPT-001',
-      billDate: new Date().toISOString(),
-      customerName: 'Test Customer',
-      paymentMode: 'CASH',
-      paymentStatus: 'PAID',
-      items: [
-        { productName: 'Sample Product One', quantity: 2, unitPrice: 150, lineTotal: 300 },
-        { productName: 'Sample Product With A Longer Name', quantity: 1, unitPrice: 499, lineTotal: 499 },
-      ],
-      subTotal: 799,
-      discountAmount: 0,
-      grandTotal: 799,
-      totalGst: 0,
-    };
-    printBillReceipt(fakeBill, tenantInfo?.name || 'MY SHOP', {
-      phone: tenantInfo?.phoneNumber,
-      address: tenantInfo?.shopAddress,
-    });
-  };
-
-  const InfoBox = ({ msg }) => (
-    <div style={{ fontSize: 11, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '7px 10px', marginTop: 6, lineHeight: 1.5 }}>
-      {msg}
-    </div>
-  );
-
-  const rcfg = cfg.receipt;
-  const lcfg = cfg.label[testType] || DEFAULT_PRINTER_CONFIG.label[testType];
-  const contentW = Math.max(0, rcfg.paperWidth - rcfg.marginLeft - rcfg.marginRight);
-
-  return (
-    <div className="page-content">
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1.5px solid #e5e7eb' }}>
-        {[['receipt', '🧾 Receipt Printer'], ['label', '🏷 Barcode Label Printer']].map(([id, lbl]) => (
-          <button key={id} onClick={() => setTab(id)} style={{
-            padding: '8px 18px', fontSize: 13, fontWeight: 600,
-            background: 'none', border: 'none', borderBottom: tab === id ? '2.5px solid #1e3a5f' : '2.5px solid transparent',
-            color: tab === id ? '#1e3a5f' : '#6b7280', cursor: 'pointer', marginBottom: -1.5,
-          }}>{lbl}</button>
-        ))}
-      </div>
-
-      {/* ─── RECEIPT TAB ─── */}
-      {tab === 'receipt' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px,380px) 1fr', gap: 28, alignItems: 'start' }}>
-          <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: '#111827' }}>Receipt Printer Settings</h3>
-
-            {/* Paper Width */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Paper Width</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {[58, 80].map(w => (
-                  <button key={w} onClick={() => updateReceipt('paperWidth', w)} style={{
-                    padding: '8px 22px', borderRadius: 8, border: '1.5px solid',
-                    borderColor: rcfg.paperWidth === w ? '#1e3a5f' : '#d1d5db',
-                    background: rcfg.paperWidth === w ? '#EFF6FF' : '#fff',
-                    color: rcfg.paperWidth === w ? '#1e3a5f' : '#374151',
-                    fontWeight: 700, fontSize: 14, cursor: 'pointer',
-                  }}>{w} mm</button>
-                ))}
-              </div>
-              <InfoBox msg="Match this to the paper roll in your receipt printer. 80mm is the standard for most countertop thermal receipt printers. 58mm is for compact/portable models." />
-            </div>
-
-            {/* Margins */}
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 8 }}>Page Margins (mm)</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                {[['marginTop','Top'],['marginRight','Right'],['marginBottom','Bottom'],['marginLeft','Left']].map(([k, lbl]) => (
-                  <div key={k}>
-                    <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 3 }}>{lbl}</label>
-                    <input type="number" min={0} max={20} step={0.5}
-                      value={rcfg[k]}
-                      onChange={e => updateReceipt(k, parseFloat(e.target.value) || 0)}
-                      style={{ width: '100%', padding: '6px 8px', border: '1.5px solid #d1d5db', borderRadius: 6, fontSize: 13 }} />
-                  </div>
-                ))}
-              </div>
-              <InfoBox msg="Margins are passed to the printer driver as CSS hints. Actual output depends on your printer model and driver settings." />
-            </div>
-
-            {/* Font Size */}
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Body Font Size (px)</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <input type="number" min={10} max={18} step={1}
-                  value={rcfg.fontSize}
-                  onChange={e => updateReceipt('fontSize', parseInt(e.target.value) || 13)}
-                  style={{ width: 90, padding: '6px 10px', border: '1.5px solid #d1d5db', borderRadius: 7, fontSize: 14 }} />
-                <span style={{ fontSize: 12, color: '#6b7280' }}>px</span>
-              </div>
-              <InfoBox msg="Larger fonts may cause text to wrap. Recommended: 12–14px for 80mm, 11–13px for 58mm paper." />
-            </div>
-
-            {/* Limitation notice */}
-            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#92400e', marginTop: 16 }}>
-              <strong>Browser-only controls</strong> — ShopClaude sends these as CSS hints to the browser. <strong>Print darkness, speed, cutter behavior, and paper feed</strong> must be set in the <strong>printer driver</strong> (Printing Preferences) or on the printer's hardware controls.
-            </div>
-          </div>
-
-          {/* Receipt preview */}
-          <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14, color: '#111827' }}>Receipt Preview</h3>
-            <div style={{
-              background: '#fff', border: '2px dashed #d1d5db', borderRadius: 10,
-              padding: '16px 14px', width: `${Math.min(rcfg.paperWidth * 2.2, 260)}px`, maxWidth: '100%',
-              fontFamily: "'Courier New', monospace", fontSize: 11, lineHeight: 1.4, boxSizing: 'border-box',
-            }}>
-              <div style={{ textAlign: 'center', fontWeight: 900, fontSize: 15, letterSpacing: 3 }}>{tenantInfo?.name || 'MY SHOP'}</div>
-              {tenantInfo?.phoneNumber && <div style={{ textAlign: 'center', fontSize: 10, marginTop: 2 }}>☎ {tenantInfo.phoneNumber}</div>}
-              {tenantInfo?.shopAddress && <div style={{ textAlign: 'center', fontSize: 10, whiteSpace: 'pre-line', marginTop: 2 }}>{tenantInfo.shopAddress}</div>}
-              <div style={{ textAlign: 'center', fontSize: 10, marginTop: 4 }}>Tax Invoice / Receipt</div>
-              <div style={{ borderTop: '1px dashed #000', margin: '5px 0' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}><span>Bill No:</span><span>TEST-001</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}><span>Customer:</span><span>Test Customer</span></div>
-              <div style={{ borderTop: '1px dashed #000', margin: '5px 0' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}><span style={{ flex: 1 }}>Sample Product 1</span><span>₹300</span></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10 }}><span style={{ flex: 1 }}>Sample Product 2</span><span>₹499</span></div>
-              <div style={{ borderTop: '1px dashed #000', margin: '5px 0' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 900, fontSize: 12, borderTop: '2px solid #000', paddingTop: 4, marginTop: 2 }}>
-                <span>TOTAL</span><span>₹799</span>
-              </div>
-              <div style={{ textAlign: 'center', fontSize: 11, marginTop: 6 }}>★ PAID ★</div>
-              <div style={{ textAlign: 'center', fontSize: 9, marginTop: 4 }}>Thank you for shopping!</div>
-            </div>
-            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
-              Paper: {rcfg.paperWidth}mm &nbsp;·&nbsp; Content width: {contentW}mm
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── LABEL TAB ─── */}
-      {tab === 'label' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px,380px) 1fr', gap: 28, alignItems: 'start' }}>
-          <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: '#111827' }}>Barcode Label Printer Settings</h3>
-
-            {/* Sticker type selector */}
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Label Type</div>
-              <select value={testType} onChange={e => setTestType(e.target.value)}
-                style={{ padding: '7px 10px', borderRadius: 7, border: '1.5px solid #d1d5db', fontSize: 13, width: '100%' }}>
-                {STICKER_TYPES.map(s => <option key={s.id} value={s.id}>{s.label} — {s.size}</option>)}
-              </select>
-            </div>
-
-            {/* Per-type adjustments */}
-            <div key={testType} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px', marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 12 }}>
-                Offsets for: {STICKER_TYPES.find(s => s.id === testType)?.label}
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 3 }}>Top Offset (mm)</label>
-                  <input type="number" min={-5} max={10} step={0.5}
-                    value={lcfg.marginTop}
-                    onChange={e => updateLabel(testType, 'marginTop', parseFloat(e.target.value) || 0)}
-                    style={{ width: '100%', padding: '6px 8px', border: '1.5px solid #d1d5db', borderRadius: 6, fontSize: 13 }} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 3 }}>Left Offset (mm)</label>
-                  <input type="number" min={-5} max={20} step={0.5}
-                    value={lcfg.marginLeft}
-                    onChange={e => updateLabel(testType, 'marginLeft', parseFloat(e.target.value) || 0)}
-                    style={{ width: '100%', padding: '6px 8px', border: '1.5px solid #d1d5db', borderRadius: 6, fontSize: 13 }} />
-                </div>
-              </div>
-              <InfoBox msg={
-                testType === 'three-row'
-                  ? 'Three-row default left offset is 7mm (sheet margin). Adjust if labels print too far left or right.'
-                  : 'Use offsets to correct printer drift (e.g., if content prints 1mm too far right, set Left Offset to -1).'
-              } />
-
-              <div style={{ marginTop: 12 }}>
-                <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 3 }}>Barcode Height (mm)</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <input type="number" min={2} max={20} step={0.5}
-                    value={lcfg.barcodeH}
-                    onChange={e => updateLabel(testType, 'barcodeH', parseFloat(e.target.value) || lcfg.barcodeH)}
-                    style={{ width: 90, padding: '6px 8px', border: '1.5px solid #d1d5db', borderRadius: 6, fontSize: 13 }} />
-                  <span style={{ fontSize: 12, color: '#6b7280' }}>mm</span>
-                </div>
-                <InfoBox msg="Adjusts the printed height of barcode images. If barcodes print too thick or too thin, change this and print a test label." />
-              </div>
-            </div>
-
-            {/* Limitations */}
-            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#92400e' }}>
-              <strong>Browser-only controls</strong> — Offsets and barcode height are CSS adjustments. <strong>Print darkness, speed, head alignment, and gap/black-mark sensing</strong> must be configured in the <strong>printer driver</strong> (e.g., Zebra ZDesigner, TSC, Godex) or on the <strong>printer's hardware menu</strong>.
-            </div>
-
-            {/* Driver reference */}
-            <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#0369a1', marginTop: 10 }}>
-              <strong>Set these in the printer driver (outside ShopClaude):</strong>
-              <ul style={{ paddingLeft: 16, marginTop: 6, lineHeight: 2 }}>
-                <li>Paper stock / media type (label gap or continuous)</li>
-                <li>Print darkness / thermal density</li>
-                <li>Print speed</li>
-                <li>Gap / black-mark sensor calibration</li>
-                <li>Print orientation (portrait / landscape / rotation)</li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Label type reference */}
-          <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14, color: '#111827' }}>All Label Types</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
-              {STICKER_TYPES.map(s => {
-                const lc = cfg.label[s.id];
-                const isActive = testType === s.id;
-                return (
-                  <div key={s.id} onClick={() => setTestType(s.id)} style={{
-                    padding: '10px 14px', borderRadius: 8, border: '1.5px solid',
-                    borderColor: isActive ? '#1e3a5f' : '#e5e7eb',
-                    background: isActive ? '#EFF6FF' : '#fafafa',
-                    cursor: 'pointer',
-                  }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, color: '#111827', marginBottom: 3 }}>{s.label} &nbsp;·&nbsp; {s.size}</div>
-                    <div style={{ fontSize: 11, color: '#6b7280' }}>
-                      Top {lc.marginTop}mm &nbsp;|&nbsp; Left {lc.marginLeft}mm &nbsp;|&nbsp; Barcode {lc.barcodeH}mm
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── Action bar ─── */}
-      <div style={{ display: 'flex', gap: 10, marginTop: 24, flexWrap: 'wrap', borderTop: '1.5px solid #e5e7eb', paddingTop: 20, alignItems: 'center' }}>
-        <button className="btn-primary" onClick={save} style={{ minWidth: 160 }}>
-          {saveState === 'saved' ? '✓ Saved!' : '💾 Save Calibration'}
-        </button>
-        <button className="btn-secondary" onClick={reset}>
-          {saveState === 'reset' ? '✓ Reset done' : '↺ Reset to Defaults'}
-        </button>
-        <div style={{ width: 1, height: 28, background: '#e5e7eb', margin: '0 4px', flexShrink: 0 }} />
-        {tab === 'label' ? (
-          <>
-            <select value={testType} onChange={e => setTestType(e.target.value)}
-              style={{ padding: '7px 10px', borderRadius: 7, border: '1.5px solid #d1d5db', fontSize: 13 }}>
-              {STICKER_TYPES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
-            <button className="btn-secondary" onClick={printTestLabel}>🖨 Print Test Label</button>
-          </>
-        ) : (
-          <button className="btn-secondary" onClick={printTestReceipt}>🖨 Print Test Receipt</button>
-        )}
-        {saveState === 'reset' && (
-          <span style={{ fontSize: 12, color: '#b45309' }}>Settings reset — click Save Calibration to persist.</span>
-        )}
-      </div>
-
-      {/* ─── Capability matrix ─── */}
-      <div className="pcal-matrix">
-        <h4 style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 12 }}>What can be configured where?</h4>
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ background: '#f3f4f6' }}>
-              {['Setting', 'Controlled by', 'Where to change'].map(h => (
-                <th key={h} style={{ textAlign: 'left', padding: '7px 10px', fontWeight: 700, color: '#374151', borderBottom: '1px solid #e5e7eb' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {[
-              ['Paper size / label dimensions',       'ShopClaude + Browser',       'Select label type in Print Labels'],
-              ['Label top / left print offsets',      'ShopClaude (CSS padding)',    'Printer Settings → Label tab'],
-              ['Barcode image height',                'ShopClaude (CSS override)',   'Printer Settings → Label tab'],
-              ['Receipt paper width (58 / 80mm)',     'ShopClaude (CSS @page)',      'Printer Settings → Receipt tab'],
-              ['Receipt page margins',                'ShopClaude (CSS @page)',      'Printer Settings → Receipt tab'],
-              ['Receipt font size',                   'ShopClaude (CSS)',            'Printer Settings → Receipt tab'],
-              ['Print darkness / density',            'Printer driver / hardware',  'Printer driver → Printing Preferences'],
-              ['Print speed',                         'Printer driver / hardware',  'Printer driver → Advanced settings'],
-              ['Gap / black-mark gap detection',      'Physical printer',           'Printer menu → Calibrate, or driver Media Setup'],
-              ['Cutter / paper-feed after print',     'Physical printer',           'Printer driver or printer control panel'],
-              ['Print head alignment (horizontal)',   'Physical printer',           'Printer hardware calibration menu'],
-            ].map(([setting, ctrl, where], i) => (
-              <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                <td style={{ padding: '6px 10px', fontWeight: 600 }}>{setting}</td>
-                <td style={{ padding: '6px 10px', color: ctrl.startsWith('ShopClaude') ? '#1d4ed8' : '#b45309' }}>{ctrl}</td>
-                <td style={{ padding: '6px 10px', color: '#6b7280' }}>{where}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
 }
 
 /* ── PDF Store — tenant console page ── */
@@ -2984,7 +2587,7 @@ function App() {
       setDiscountType('AMOUNT');
       setBillError('');
       loadProducts();
-      printBillReceipt(res.data, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress });
+      printBillReceipt(res.data, tenantInfo?.name);
       // Refocus the barcode field for the next customer. lastBill stays visible so
       // the cashier can still regenerate the receipt; they dismiss it with the × button.
       setTimeout(() => {
@@ -3139,9 +2742,6 @@ function App() {
           <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }} data-label="Print Labels" title="Print Labels">
             <span className="nav-icon">🏷</span><span className="nav-label"> Print Labels</span>
           </button>
-          <button className={`nav-item ${activePage==='printer-settings'?'nav-active':''}`} onClick={() => { setActivePage('printer-settings'); setSidebarOpen(false); }} data-label="Printer Settings" title="Printer Settings">
-            <span className="nav-icon">⚙</span><span className="nav-label"> Printer Settings</span>
-          </button>
         </div>
 
         {lowStockItems.length > 0 && (
@@ -3189,7 +2789,7 @@ function App() {
               </svg>
             )}
           </button>
-          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock', expenses:'Expenses', offers:'Offers & Combos', 'printer-settings':'Printer Settings' }[activePage] || 'Home'}</h2>
+          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock', expenses:'Expenses', offers:'Offers & Combos' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
             <a href={`https://${tenantInfo?.subdomain ?? getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
               title="Visit your store"
@@ -3352,10 +2952,10 @@ function App() {
               <div className="bill-result-row">
                 <span>Status:</span><span className="paid-badge">{lastBill.paymentStatus || 'PAID'}</span>
               </div>
-              <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress })}>
+              <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
                 🖨 Reprint Receipt
               </button>
-              <button className="regenerate-bill-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress })}>
+              <button className="regenerate-bill-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
                 ↺ Regenerate Bill
               </button>
             </div>
@@ -3375,7 +2975,7 @@ function App() {
                   try {
                     const res = await axios.get(`${API}/bills/${lastBillId}`);
                     setLastBill(res.data);
-                    printBillReceipt(res.data, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress });
+                    printBillReceipt(res.data, tenantInfo?.name);
                   } catch {
                     setBillError('Could not retrieve the bill. Please check your connection.');
                   } finally {
@@ -5448,9 +5048,6 @@ function App() {
             </div>
           );
         })()}{/* end plan page */}
-
-        {/* ── Printer Settings page ── */}
-        {activePage === 'printer-settings' && <PrinterSettingsPage tenantInfo={tenantInfo} />}
 
         {/* ── PDF Store page ── */}
         {activePage === 'pdf-store' && <PdfStorePage tenantInfo={tenantInfo} />}

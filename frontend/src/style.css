@@ -1944,30 +1944,6 @@ section {
 }
 
 /* ═══════════════════════════════════════════════════
-   Printer Settings / Calibration page
-   ═══════════════════════════════════════════════════ */
-
-.pcal-matrix {
-  margin-top: 28px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 16px 20px;
-  overflow-x: auto;
-}
-.pcal-matrix table th,
-.pcal-matrix table td {
-  white-space: nowrap;
-}
-@media (max-width: 768px) {
-  .pcal-matrix table th,
-  .pcal-matrix table td {
-    white-space: normal;
-    font-size: 11px;
-  }
-}
-
-/* ═══════════════════════════════════════════════════
    Offers & Combos — Admin UI
    ═══════════════════════════════════════════════════ */
 
