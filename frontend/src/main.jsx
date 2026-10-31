@@ -778,7 +778,9 @@ function printRentalReturnReceipt(rental, shopName = 'GOSUAS') {
 function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
   const name    = product.name || '';
   const sku     = product.sku  || '';
-  const barUrl  = `${API}/barcodes/${product.barcode}`;
+  const barUrl  = product.barcode
+    ? `${API}/barcodes/${product.barcode}`
+    : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const details = variantLabel(product);
   const F = 'font-family:Arial,sans-serif;font-weight:600;color:#000;';
   const p = product.productType === 'RENTAL'
@@ -823,7 +825,9 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
 function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
   const name    = product.name || '';
   const sku     = product.sku  || '';
-  const barUrl  = `${API}/barcodes/${product.barcode}`;
+  const barUrl  = product.barcode
+    ? `${API}/barcodes/${product.barcode}`
+    : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const details = variantLabel(product);
   const F = 'font-family:Arial,sans-serif;font-weight:600;color:#000;';
   const p = product.productType === 'RENTAL'
@@ -1002,8 +1006,37 @@ function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty) {
 </body></html>`);
   labelDoc.close();
 
-  // Delay to allow barcode images to load, then print
-  setTimeout(() => { iframe.contentWindow.print(); }, 600);
+  // Wait for every barcode <img> inside the iframe to finish loading (or fail)
+  // before triggering print.  A fixed delay is unreliable — a cold JVM or multiple
+  // labels can easily exceed 600 ms and print blank/broken barcodes.
+  const imgs = Array.from(labelDoc.querySelectorAll('img'));
+  let remaining = imgs.length;
+  let printFired = false;
+
+  const doPrint = () => {
+    if (printFired) return;
+    printFired = true;
+    try { iframe.contentWindow.print(); }
+    catch (e) { console.error('[ShopClaude] label print error:', e); }
+  };
+
+  if (!remaining) {
+    // No images — fire immediately (small tick so the DOM fully settles)
+    setTimeout(doPrint, 50);
+  } else {
+    // Give up waiting and print anyway after 8 s (handles very slow networks /
+    // unreachable backends — at least the text content will print)
+    const fallback = setTimeout(doPrint, 8000);
+    const onDone = () => { if (--remaining <= 0) { clearTimeout(fallback); doPrint(); } };
+    imgs.forEach(img => {
+      if (img.complete) {
+        onDone(); // already cached / failed synchronously
+      } else {
+        img.addEventListener('load',  onDone, { once: true });
+        img.addEventListener('error', onDone, { once: true });
+      }
+    });
+  }
 }
 
 // Four-row is the tightest layout (4×20mm columns) — any drift in the printer driver's
@@ -7064,6 +7097,9 @@ function App() {
             <label className="modal-label" style={{marginTop:'14px'}}>Quantity</label>
             <input type="number" min="1" max="100" className="modal-qty" value={labelModal.qty}
               onChange={e => setLabelModal(m => ({...m, qty:Math.max(1,Number(e.target.value))}))} />
+            <p style={{fontSize:'12px',color:'#666',margin:'14px 0 6px',lineHeight:'1.5',background:'#f8f9fa',padding:'8px 10px',borderRadius:'6px',borderLeft:'3px solid #94a3b8'}}>
+              <strong>Print dialog:</strong> set Scale to <strong>100%</strong> (not "Fit to page"), Margins to <strong>None</strong>, and select your thermal printer.
+            </p>
             <div className="modal-actions">
               <button className="modal-cancel" onClick={() => setLabelModal(null)}>Cancel</button>
               <button className="modal-print" onClick={() => {
