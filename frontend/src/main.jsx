@@ -151,6 +151,49 @@ const STICKER_TYPES = [
 
 // CATEGORY_STICKER removed — sticker type defaults to 'two-row'
 
+// Centralized layout config — single source of truth for every sticker format.
+// pageW/pageH  : full print-media dimensions sent to @page (all columns combined).
+// cellW/cellH  : individual sticker size (grid types only).
+// cols         : labels per row (grid types only).
+// offsetLeft   : left margin of the row block (physical sheet offset).
+// gapH         : horizontal gap between cells in the same row.
+// itemGap      : CSS gap between flex children inside one cell.
+// barcodeW/H   : barcode image dimensions inside the label.
+// padV/padH    : cell content padding (vertical / horizontal).
+const LABEL_CONFIG = {
+  'butterfly': {
+    pageW: '75mm',  pageH: '24mm',  isGrid: false,
+    barcodeW: '20mm', barcodeH: '5mm',
+    padV: '1.5mm',  padH: '1mm',
+  },
+  'two-row': {
+    pageW: '76mm',  pageH: '25mm',  isGrid: true,
+    cols: 2,        cellW: '38mm',  cellH: '25mm',
+    offsetLeft: '0mm',  gapH: '0mm',  itemGap: '0.5mm',
+    barcodeW: '34mm',   barcodeH: '8mm',
+    padV: '1.5mm',  padH: '2mm',
+  },
+  'three-row': {
+    pageW: '90mm',  pageH: '20mm',  isGrid: true,
+    cols: 3,        cellW: '27mm',  cellH: '20mm',
+    offsetLeft: '7mm',  gapH: '1mm',  itemGap: '0.3mm',
+    barcodeW: '25mm',   barcodeH: '8mm',
+    padV: '1mm',    padH: '1mm',
+  },
+  'four-row': {
+    pageW: '80mm',  pageH: '15mm',  isGrid: true,
+    cols: 4,        cellW: '20mm',  cellH: '15mm',
+    offsetLeft: '0mm',  gapH: '0mm',  itemGap: '0.3mm',
+    barcodeW: '18mm',   barcodeH: '3.5mm',
+    padV: '0.8mm',  padH: '1mm',
+  },
+  'single-row': {
+    pageW: '50mm',  pageH: '15mm',  isGrid: false,
+    barcodeW: '28mm', barcodeH: '12mm',
+    padV: '1mm',    padH: '1.5mm',
+  },
+};
+
 function ChipGroup({ label, options, selected, onToggle, onSelectAll, onClear }) {
   const [customVal, setCustomVal] = useState('');
   const addCustom = () => {
@@ -775,7 +818,11 @@ function printRentalReturnReceipt(rental, shopName = 'GOSUAS') {
 
 // Inner HTML for one label cell of a grid sticker type (four-row / three-row / two-row).
 // Shared by single-product and bulk printing so multiple products' cells can pack into the same physical rows.
+// All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
 function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || !cfg.isGrid) return '';
+  const { cellW, cellH, barcodeW, barcodeH, padV, padH, itemGap } = cfg;
   const name    = product.name || '';
   const sku     = product.sku  || '';
   const barUrl  = product.barcode
@@ -787,22 +834,23 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
     ? Number(product.depositAmount || 0) + Number(product.rentAmount || 0)
     : Number(product.sellingPrice);
   const priceStr = p % 1 === 0 ? String(Math.round(p)) : p.toFixed(2);
+  const base = `width:${cellW};height:${cellH};padding:${padV} ${padH};display:flex;flex-direction:column;gap:${itemGap};justify-content:flex-start;box-sizing:border-box;overflow:hidden;`;
 
   if (stickerType === 'four-row') {
     return `
-    <div style="width:100%;height:100%;padding:0.8mm 1mm;display:flex;flex-direction:column;gap:0.3mm;justify-content:flex-start;border-right:0.3mm solid #ddd;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}border-right:0.3mm solid #ddd;">
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">${shopName}</div>
       <div style="${F}font-size:4.5pt;line-height:1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
-      <img src="${barUrl}" style="width:18mm;height:3.5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
     </div>`;
   }
   if (stickerType === 'three-row') {
     return `
-    <div style="width:27mm;height:20mm;padding:1mm;display:flex;flex-direction:column;gap:0.3mm;justify-content:flex-start;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}">
       <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${shopName}</div>
-      <img src="${barUrl}" style="width:25mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:5pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:5.5pt;line-height:1.1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
       <div style="${F}font-size:8pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
@@ -810,9 +858,9 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
   }
   if (stickerType === 'two-row') {
     return `
-    <div style="width:38mm;height:25mm;padding:1.5mm 2mm;display:flex;flex-direction:column;gap:0.5mm;justify-content:flex-start;border-right:0.3mm solid #ddd;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}border-right:0.3mm solid #ddd;">
       <div style="${F}font-size:7pt;line-height:1;flex-shrink:0;">${shopName}</div>
-      <img src="${barUrl}" style="width:34mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:6pt;line-height:1.1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
       <div style="${F}font-size:9pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
@@ -822,7 +870,11 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
 }
 
 // Full standalone label (butterfly / single-row) — one label = one physical page, never shared across products.
+// All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
 function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || cfg.isGrid) return '';
+  const { pageW, pageH, barcodeW, barcodeH, padV, padH } = cfg;
   const name    = product.name || '';
   const sku     = product.sku  || '';
   const barUrl  = product.barcode
@@ -836,11 +888,14 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
   const priceStr = p % 1 === 0 ? String(Math.round(p)) : p.toFixed(2);
 
   if (stickerType === 'butterfly') {
+    // Butterfly: two wings on one 75×24mm label, separated by a centre fold zone.
+    // Each wing is 22mm wide; 4.5mm left spacer + wing + 26.5mm fold gap + wing = 75mm.
+    const wingW = '22mm';
     const butterflyWing = `
-      <div style="width:22mm;height:24mm;padding:1.5mm 1mm 0.8mm;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden;">
+      <div style="width:${wingW};height:${pageH};padding:1.5mm 1mm 0.8mm;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden;">
         <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${shopName}</div>
         <div style="height:0.5mm;flex-shrink:0;"></div>
-        <img src="${barUrl}" style="width:20mm;height:5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+        <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
         <div style="height:0.5mm;flex-shrink:0;"></div>
         <div style="${F}font-size:5pt;line-height:1;flex-shrink:0;">${sku}</div>
         <div style="height:2mm;flex-shrink:0;"></div>
@@ -849,17 +904,17 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
         <div style="${F}font-size:10pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
       </div>`;
     return `
-      <div class="label" style="width:75mm;height:24mm;display:flex;flex-direction:row;box-sizing:border-box;overflow:hidden;">
+      <div class="label" style="width:${pageW};height:${pageH};display:flex;flex-direction:row;box-sizing:border-box;overflow:hidden;">
         <div style="width:4.5mm;flex-shrink:0;"></div>
         ${butterflyWing}
-        <div style="width:26.5mm;height:24mm;flex-shrink:0;"></div>
+        <div style="width:26.5mm;height:${pageH};flex-shrink:0;"></div>
         ${butterflyWing}
       </div>`;
   }
   // single-row
   return `
-      <div class="label" style="width:50mm;height:15mm;padding:1mm 1.5mm;display:flex;align-items:center;gap:2mm;border:0.3mm solid #bbb;box-sizing:border-box;overflow:hidden;">
-        <img src="${barUrl}" style="width:28mm;height:12mm;object-fit:contain;object-position:left;flex-shrink:0;display:block;">
+      <div class="label" style="width:${pageW};height:${pageH};padding:${padV} ${padH};display:flex;align-items:center;gap:2mm;border:0.3mm solid #bbb;box-sizing:border-box;overflow:hidden;">
+        <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;flex-shrink:0;display:block;">
         <div style="display:flex;flex-direction:column;gap:0.4mm;overflow:hidden;">
           <span style="${F}font-size:5pt;line-height:1;white-space:nowrap;overflow:hidden;">${shopName}</span>
           <span style="${F}font-size:5pt;line-height:1;white-space:nowrap;overflow:hidden;">${sku}</span>
@@ -869,115 +924,63 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
       </div>`;
 }
 
-function buildGrid(cellsHTML, cols, cellW, cellH, stretch = false) {
+// Packs a flat list of already-built cell HTML into grid rows using LABEL_CONFIG.
+// All dimensions come from config — no magic numbers, no stretch-percentage hacks.
+// Fixed mm cell widths prevent the progressive alignment drift that percentage widths cause.
+function buildGridRowsHTML(cellsHTML, stickerType) {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || !cfg.isGrid) return { html: '', pageW: '0mm', pageH: '0mm' };
+  const { cols, cellW, cellH, offsetLeft, gapH, pageW, pageH } = cfg;
+
   let html = '';
   const rows = Math.ceil(cellsHTML.length / cols);
-  const totalW = `${cols * parseInt(cellW)}mm`;
-  // stretch: size the row/cells as percentages of the actual printed page instead of fixed mm,
-  // so if the printer's real page ends up wider than requested, cells fill it exactly with no
-  // leftover blank space on the right — instead of relying on the page matching totalW exactly.
-  const rowW  = stretch ? '100%' : totalW;
-  const cellW_ = stretch ? `${100 / cols}%` : cellW;
   for (let r = 0; r < rows; r++) {
     const pb = r < rows - 1 ? 'always' : 'auto';
-    html += `<div class="label" style="font-size:0;white-space:nowrap;width:${rowW};height:${cellH};overflow:hidden;page-break-after:${pb};break-after:${pb === 'always' ? 'page' : 'auto'};">`;
+    const rowParts = [
+      `font-size:0`, `white-space:nowrap`, `height:${cellH}`, `overflow:hidden`,
+      `page-break-after:${pb}`, `break-after:${pb === 'always' ? 'page' : 'auto'}`,
+      offsetLeft !== '0mm' ? `margin-left:${offsetLeft}` : null,
+    ].filter(Boolean).join(';') + ';';
+    html += `<div class="label" style="${rowParts}">`;
     for (let c = 0; c < cols; c++) {
-      const idx = r * cols + c;
-      if (idx < cellsHTML.length) {
-        html += `<div style="display:inline-block;vertical-align:top;width:${cellW_};height:${cellH};overflow:hidden;box-sizing:border-box;">${cellsHTML[idx]}</div>`;
-      } else {
-        html += `<div style="display:inline-block;vertical-align:top;width:${cellW_};height:${cellH};box-sizing:border-box;"></div>`;
+      if (c > 0 && gapH !== '0mm') {
+        html += `<div style="display:inline-block;vertical-align:top;width:${gapH};height:${cellH};"></div>`;
       }
+      const idx = r * cols + c;
+      html += `<div style="display:inline-block;vertical-align:top;width:${cellW};height:${cellH};overflow:hidden;box-sizing:border-box;">`;
+      html += idx < cellsHTML.length ? cellsHTML[idx] : '';
+      html += `</div>`;
     }
     html += `</div>`;
   }
-  return { html, pageW: totalW, pageH: cellH };
+  return { html, pageW, pageH };
 }
-
-// Packs a flat list of already-built cell HTML (which may span several different products) into
-// full grid rows, so bulk-printing multiple products never leaves a wasted blank row between them.
-function buildGridRowsHTML(cellsHTML, stickerType) {
-  if (stickerType === 'four-row') return buildGrid(cellsHTML, 4, '20mm', '15mm', true);
-  if (stickerType === 'two-row')  return buildGrid(cellsHTML, 2, '38mm', '25mm');
-  if (stickerType === 'three-row') {
-    // 7mm left sheet margin + 3×27mm cells + 2×1mm gaps = 90mm sheet width
-    const TR_COLS = 3, TR_CELL = '27mm', TR_H = '20mm', TR_GAP = '1mm', TR_OFF = '7mm';
-    let html = '';
-    const rows = Math.ceil(cellsHTML.length / TR_COLS);
-    for (let r = 0; r < rows; r++) {
-      const pb = r < rows - 1 ? 'always' : 'auto';
-      html += `<div class="label" style="margin-left:${TR_OFF};font-size:0;white-space:nowrap;height:${TR_H};overflow:hidden;page-break-after:${pb};break-after:${pb === 'always' ? 'page' : 'auto'};">`;
-      for (let c = 0; c < TR_COLS; c++) {
-        if (c > 0) html += `<div style="display:inline-block;vertical-align:top;width:${TR_GAP};height:${TR_H};"></div>`;
-        const idx = r * TR_COLS + c;
-        html += `<div style="display:inline-block;vertical-align:top;width:${TR_CELL};height:${TR_H};overflow:hidden;box-sizing:border-box;">`;
-        html += idx < cellsHTML.length ? cellsHTML[idx] : '';
-        html += `</div>`;
-      }
-      html += `</div>`;
-    }
-    return { html, pageW: '90mm', pageH: TR_H };
-  }
-  return { html: '', pageW: '0mm', pageH: '0mm' };
-}
-
-const GRID_STICKER_TYPES = ['four-row', 'three-row', 'two-row'];
 
 function buildProductLabels(product, stickerType, qty, shopName = 'GOSUAS') {
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
-  if (!sticker) return { labelsHTML: '', pageW: '50mm', pageH: '25mm' };
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!sticker || !cfg) return { labelsHTML: '', stickerType, sticker: null };
 
-  let labelsHTML, pageW, pageH;
-
-  if (GRID_STICKER_TYPES.includes(stickerType)) {
+  let labelsHTML;
+  if (cfg.isGrid) {
     const cellHTML = buildLabelCellHTML(product, stickerType, shopName);
-    const g = buildGridRowsHTML(Array.from({length: qty}, () => cellHTML), stickerType);
-    labelsHTML = g.html; pageW = g.pageW; pageH = g.pageH;
+    labelsHTML = buildGridRowsHTML(Array.from({length: qty}, () => cellHTML), stickerType).html;
   } else {
     const labelHTML = buildFullLabelHTML(product, stickerType, shopName);
     labelsHTML = Array.from({length: qty}, (_, i) =>
       `<div style="page-break-after:${i < qty - 1 ? 'always' : 'auto'};">${labelHTML}</div>`
     ).join('');
-    pageW = sticker.w; pageH = sticker.h;
   }
-
-  return {
-    labelsHTML,
-    pageW,
-    pageH,
-    isFourRow: stickerType === 'four-row',
-    sticker,
-  };
+  return { labelsHTML, stickerType, sticker };
 }
 
-function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty) {
-  const isButterfly  = pageW === '75mm';
-  const isTwoRow     = pageW === '76mm';   // 2 × 38mm grid
-  const isThreeRow   = pageW === '90mm';   // 3 × 30mm grid
-  const isSingleRow  = pageW === '50mm';
-  const isGrid = isFourRow || isTwoRow || isThreeRow;
-  const previewW = isButterfly ? 520 : isGrid ? 500 : 360;
-
-  const paperName = isFourRow   ? 'Row Label'
-    : isButterfly  ? 'Butterfly'
-    : isThreeRow   ? 'Three Row'
-    : isTwoRow     ? 'Two Row'
-    : isSingleRow  ? 'Single Row'
-    : pageW + ' × ' + pageH;
-
-  const paperW_in = isFourRow   ? '3.15 in'
-    : isButterfly  ? '2.953 in'
-    : isThreeRow   ? '3.54 in'
-    : isTwoRow     ? '2.99 in'
-    : isSingleRow  ? '1.97 in'
-    : pageW;
-
-  const paperH_in = isFourRow   ? '0.59 in'
-    : isButterfly  ? '0.945 in'
-    : isThreeRow   ? '0.79 in'
-    : isTwoRow     ? '0.98 in'
-    : isSingleRow  ? '0.59 in'
-    : pageH;
+// Opens a hidden iframe and triggers the browser print dialog.
+// stickerType is used to look up @page dimensions from LABEL_CONFIG so there is
+// one source of truth and no fragile pageW string comparisons.
+function openPrintWindow(labelsHTML, stickerType, title, totalQty) {
+  const cfg = LABEL_CONFIG[stickerType] || {};
+  const pageW = cfg.pageW || '50mm';
+  const pageH = cfg.pageH || '15mm';
 
   // Reuse hidden iframe so Chrome remembers printer settings across prints
   let iframe = document.getElementById('__label_print_frame__');
@@ -1052,48 +1055,89 @@ function confirmFourRowStock() {
 }
 
 function printLabels(product, stickerType, qty, shopName) {
-  const { labelsHTML, pageW, pageH, isFourRow, sticker } = buildProductLabels(product, stickerType, qty, shopName);
+  const { labelsHTML, sticker } = buildProductLabels(product, stickerType, qty, shopName);
   if (!sticker) return;
-  openPrintWindow(labelsHTML, pageW, pageH, isFourRow,
-    `Preview — ${qty} label${qty !== 1 ? 's' : ''} (${sticker.label} ${sticker.size})`, qty);
+  openPrintWindow(labelsHTML, stickerType,
+    `Print — ${qty} label${qty !== 1 ? 's' : ''} (${sticker.label} ${sticker.size})`, qty);
 }
 
 function printBulkLabels(items, stickerType, shopName) {
   if (!items.length) return;
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
-  if (!sticker) return;
-  const isFourRow = stickerType === 'four-row';
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!sticker || !cfg) return;
 
-  let allHTML, pageW, pageH;
+  let allHTML = '';
   let totalQty = 0;
 
-  if (GRID_STICKER_TYPES.includes(stickerType)) {
-    // Pack every product's cells into one continuous stream of grid rows, instead of forcing
-    // a fresh page per product — that used to leave a wasted blank row between products
-    // whenever a product's own label count didn't exactly fill a row.
+  if (cfg.isGrid) {
+    // Pack every product's cells into one continuous stream of grid rows so bulk jobs
+    // never leave a wasted blank row between products.
     const allCells = [];
     items.forEach(({ product, qty }) => {
       const cellHTML = buildLabelCellHTML(product, stickerType, shopName);
       for (let i = 0; i < qty; i++) allCells.push(cellHTML);
       totalQty += qty;
     });
-    const g = buildGridRowsHTML(allCells, stickerType);
-    allHTML = g.html; pageW = g.pageW; pageH = g.pageH;
+    allHTML = buildGridRowsHTML(allCells, stickerType).html;
   } else {
-    // butterfly / single-row: each label is already its own full page, so per-product
-    // forced breaks are harmless — just concatenate each product's labels in sequence.
-    let html = '';
+    // butterfly / single-row: each label = its own page; concatenate in sequence.
     items.forEach(({ product, qty }, idx) => {
       const { labelsHTML } = buildProductLabels(product, stickerType, qty, shopName);
       const isLast = idx === items.length - 1;
-      html += `<div style="page-break-after:${isLast ? 'auto' : 'always'};">${labelsHTML}</div>`;
+      allHTML += `<div style="page-break-after:${isLast ? 'auto' : 'always'};">${labelsHTML}</div>`;
       totalQty += qty;
     });
-    allHTML = html; pageW = sticker.w; pageH = sticker.h;
   }
 
-  openPrintWindow(allHTML, pageW, pageH, isFourRow,
+  openPrintWindow(allHTML, stickerType,
     `Bulk Print — ${items.length} products, ${totalQty} labels (${sticker.label})`, totalQty);
+}
+
+// Renders a scaled CSS preview of one label directly in the React UI.
+// mm-based CSS matches the print output (96dpi: 1mm ≈ 3.78px).
+// Grid types preview one cell; full types preview the complete label.
+// Scale is chosen to fit ~270px wide; tiny stickers are zoomed in (capped at 4×).
+function LabelPreview({ product, stickerType, shopName }) {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || !product) return null;
+
+  const html = cfg.isGrid
+    ? buildLabelCellHTML(product, stickerType, shopName || 'GOSUAS')
+    : buildFullLabelHTML(product, stickerType, shopName || 'GOSUAS');
+
+  const mmW = cfg.isGrid ? parseFloat(cfg.cellW) : parseFloat(cfg.pageW);
+  const mmH = cfg.isGrid ? parseFloat(cfg.cellH) : parseFloat(cfg.pageH);
+  const PX_PER_MM = 3.7795;
+  const naturalW = mmW * PX_PER_MM;
+  const naturalH = mmH * PX_PER_MM;
+  const scale = Math.min(270 / naturalW, 4);
+  const displayH = Math.ceil(naturalH * scale) + 2;
+  const dimLabel = cfg.isGrid
+    ? `${cfg.cellW} × ${cfg.cellH} per label`
+    : `${cfg.pageW} × ${cfg.pageH}`;
+
+  return (
+    <div style={{margin:'10px 0 4px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:'6px',padding:'10px 12px'}}>
+      <div style={{fontSize:'11px',color:'#64748b',marginBottom:'8px',fontWeight:500}}>
+        Label preview — {dimLabel}
+      </div>
+      <div style={{overflow:'hidden',height:`${displayH}px`}}>
+        <div
+          style={{
+            transform:`scale(${scale.toFixed(4)})`,
+            transformOrigin:'top left',
+            width:`${naturalW}px`,
+            height:`${naturalH}px`,
+            background:'#fff',
+            border:'0.5px solid #aaa',
+            boxSizing:'border-box',
+          }}
+          dangerouslySetInnerHTML={{__html: html}}
+        />
+      </div>
+    </div>
+  );
 }
 
 function BarChart({ data }) {
@@ -4264,6 +4308,14 @@ function App() {
                 </button>
               </div>
 
+              {/* Label preview — updates when sticker type or selection changes */}
+              {(() => {
+                const previewProduct = selectedProducts[0] || bulkDisplayed[0] || null;
+                return previewProduct ? (
+                  <LabelPreview product={previewProduct} stickerType={bulkStickerType} shopName={tenantInfo?.name} />
+                ) : null;
+              })()}
+
               {/* Table meta */}
               <div className="table-meta" style={{marginBottom:'6px'}}>
                 {bq || bulkCategoryFilter
@@ -7094,10 +7146,11 @@ function App() {
                 {s.id === 'two-row' && <span className="sticker-suggested">★ Suggested</span>}
               </div>
             ))}
-            <label className="modal-label" style={{marginTop:'14px'}}>Quantity</label>
+            <LabelPreview product={labelModal.product} stickerType={labelModal.stickerType} shopName={tenantInfo?.name} />
+            <label className="modal-label" style={{marginTop:'10px'}}>Quantity</label>
             <input type="number" min="1" max="100" className="modal-qty" value={labelModal.qty}
               onChange={e => setLabelModal(m => ({...m, qty:Math.max(1,Number(e.target.value))}))} />
-            <p style={{fontSize:'12px',color:'#666',margin:'14px 0 6px',lineHeight:'1.5',background:'#f8f9fa',padding:'8px 10px',borderRadius:'6px',borderLeft:'3px solid #94a3b8'}}>
+            <p style={{fontSize:'12px',color:'#666',margin:'12px 0 6px',lineHeight:'1.5',background:'#f8f9fa',padding:'8px 10px',borderRadius:'6px',borderLeft:'3px solid #94a3b8'}}>
               <strong>Print dialog:</strong> set Scale to <strong>100%</strong> (not "Fit to page"), Margins to <strong>None</strong>, and select your thermal printer.
             </p>
             <div className="modal-actions">
