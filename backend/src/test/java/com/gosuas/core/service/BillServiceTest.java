@@ -34,6 +34,7 @@ class BillServiceTest {
     @Mock BillRepository billRepository;
     @Mock ProductRepository productRepository;
     @Mock TenantRepository tenantRepository;
+    @Mock com.gosuas.core.repository.CustomerDetailRepository customerDetailRepository;
     @InjectMocks BillService billService;
 
     private UUID tenantId;
@@ -58,6 +59,8 @@ class BillServiceTest {
         when(billRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // Default: tenant not GST-registered — GST computation is skipped
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.empty());
+        // Default: no existing customer for any phone — new customer will be created
+        when(customerDetailRepository.findByTenantIdAndPhone(any(), any())).thenReturn(Optional.empty());
     }
 
     /** Helper: creates a GST-registered intra-state tenant for GST tests. */

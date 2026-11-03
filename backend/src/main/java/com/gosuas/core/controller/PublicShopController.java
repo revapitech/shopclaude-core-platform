@@ -1,21 +1,32 @@
 package com.gosuas.core.controller;
 
+import com.gosuas.core.dto.PublicProductDTO;
 import com.gosuas.core.entity.Product;
 import com.gosuas.core.entity.ShopOrder;
 import com.gosuas.core.entity.ShopOrderItem;
 import com.gosuas.core.entity.Tenant;
+import com.gosuas.core.repository.OfferProductRepository;
+import com.gosuas.core.repository.OfferRepository;
 import com.gosuas.core.repository.ProductRepository;
 import com.gosuas.core.repository.ShopOrderRepository;
 import com.gosuas.core.repository.TenantRepository;
+import com.gosuas.core.service.OfferService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.concurrent.TimeUnit;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -28,6 +39,13 @@ public class PublicShopController {
     private final ProductRepository productRepository;
     private final ShopOrderRepository shopOrderRepository;
     private final TenantRepository tenantRepository;
+    private final OfferService offerService;
+    private final OfferRepository offerRepository;
+    private final OfferProductRepository offerProductRepository;
+
+    private static final CacheControl SHOP_INFO_CACHE  = CacheControl.maxAge(5, TimeUnit.MINUTES).cachePublic().staleWhileRevalidate(10, TimeUnit.MINUTES);
+    private static final CacheControl PRODUCTS_CACHE   = CacheControl.maxAge(60, TimeUnit.SECONDS).cachePublic().staleWhileRevalidate(5, TimeUnit.MINUTES);
+    private static final CacheControl OFFERS_CACHE     = CacheControl.maxAge(2, TimeUnit.MINUTES).cachePublic().staleWhileRevalidate(10, TimeUnit.MINUTES);
 
     @GetMapping("/shop-info")
     public ResponseEntity<Map<String, Object>> getShopInfo(@RequestParam String subdomain) {
@@ -39,24 +57,29 @@ public class PublicShopController {
                     info.put("logoUrl", t.getLogoUrl());
                     info.put("bannerUrl", t.getBannerUrl());
                     info.put("phoneNumber", t.getPhoneNumber());
-                    return ResponseEntity.ok(info);
+                    return ResponseEntity.ok().cacheControl(SHOP_INFO_CACHE).body(info);
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/products")
-    public List<Product> listPublicProducts(@RequestParam(required = false) String subdomain) {
+    public ResponseEntity<List<PublicProductDTO>> listPublicProducts(@RequestParam(required = false) String subdomain) {
+        List<PublicProductDTO> result;
         if (subdomain != null && !subdomain.isBlank()) {
-            return tenantRepository.findBySubdomain(subdomain.toLowerCase())
+            result = tenantRepository.findBySubdomain(subdomain.toLowerCase())
                     .map(t -> productRepository.findAllByTenantId(t.getId()).stream()
                             .filter(p -> Boolean.TRUE.equals(p.getActive()))
+                            .map(PublicProductDTO::new)
                             .toList())
                     .orElse(List.of());
+        } else {
+            // Backward-compat fallback: all active products
+            result = productRepository.findAll().stream()
+                    .filter(p -> Boolean.TRUE.equals(p.getActive()))
+                    .map(PublicProductDTO::new)
+                    .toList();
         }
-        // Backward-compat fallback: all active products
-        return productRepository.findAll().stream()
-                .filter(p -> Boolean.TRUE.equals(p.getActive()))
-                .toList();
+        return ResponseEntity.ok().cacheControl(PRODUCTS_CACHE).body(result);
     }
 
     @PostMapping("/orders")
@@ -152,6 +175,70 @@ public class PublicShopController {
                         "Not enough stock for " + product.getName() + colorLabel
                         + ". Only " + product.getStockQty() + " available.");
             }
+        }
+
+        // ── Combo items ──────────────────────────────────────────────────────────
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> comboData = (List<Map<String, Object>>) body.getOrDefault("comboItems", List.of());
+        ObjectMapper mapper = new ObjectMapper();
+
+        for (Map<String, Object> combo : comboData) {
+            UUID offerId = UUID.fromString((String) combo.get("offerId"));
+            @SuppressWarnings("unchecked")
+            List<String> selectedBarcodes = (List<String>) combo.get("selectedBarcodes");
+            int comboQty = combo.containsKey("quantity") ? ((Number) combo.get("quantity")).intValue() : 1;
+
+            BigDecimal comboPrice = offerService.validateAndGetComboPrice(offerId, tenantId, selectedBarcodes);
+
+            // Build combo contents summary for the order item record
+            List<Map<String, Object>> contents = new ArrayList<>();
+            Map<String, Integer> barcodeCounts = new LinkedHashMap<>();
+            for (String bc : selectedBarcodes) {
+                barcodeCounts.merge(bc, 1, Integer::sum);
+            }
+            for (Map.Entry<String, Integer> entry : barcodeCounts.entrySet()) {
+                Product p = productRepository.findByBarcodeAndTenantId(entry.getKey(), tenantId)
+                        .orElseThrow(() -> new RuntimeException("Product not found: " + entry.getKey()));
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("barcode", p.getBarcode());
+                row.put("productName", p.getName());
+                row.put("qty", entry.getValue());
+                contents.add(row);
+
+                // Deduct stock per product in the combo (respects trackStock setting)
+                if (!Boolean.FALSE.equals(p.getTrackStock())) {
+                    int qty = entry.getValue() * comboQty;
+                    int updated = productRepository.decrementStock(p.getId(), tenantId, qty);
+                    if (updated == 0) {
+                        throw new IllegalArgumentException(
+                                "Not enough stock for " + p.getName() + " in combo.");
+                    }
+                } else {
+                    productRepository.incrementSoldCount(p.getId(), tenantId, entry.getValue() * comboQty);
+                }
+            }
+
+            String comboContentsJson;
+            try { comboContentsJson = mapper.writeValueAsString(contents); }
+            catch (Exception e) { comboContentsJson = "[]"; }
+
+            // Fetch offer name
+            String offerName = offerRepository.findById(offerId)
+                    .map(o -> "Combo: " + o.getName()).orElse("Combo");
+
+            items.add(ShopOrderItem.builder()
+                    .order(order)
+                    .productId(null)
+                    .productName(offerName)
+                    .barcode(offerId.toString())
+                    .unitPrice(comboPrice)
+                    .quantity(comboQty)
+                    .lineTotal(comboPrice.multiply(BigDecimal.valueOf(comboQty)))
+                    .offerId(offerId)
+                    .comboContents(comboContentsJson)
+                    .build());
+
+            total = total.add(comboPrice.multiply(BigDecimal.valueOf(comboQty)));
         }
 
         order.setItems(items);

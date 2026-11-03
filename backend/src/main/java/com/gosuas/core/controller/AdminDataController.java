@@ -25,20 +25,76 @@ public class AdminDataController {
     @GetMapping("/customers")
     public List<Map<String, Object>> listCustomers() {
         UUID tenantId = TenantContext.getTenantId();
-        return customerRepo.findAllByTenantId(tenantId).stream().map(c -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id",          c.getId().toString());
-            m.put("firstName",   c.getFirstName()  != null ? c.getFirstName()  : "");
-            m.put("lastName",    c.getLastName()   != null ? c.getLastName()   : "");
-            m.put("email",       c.getEmail()      != null ? c.getEmail()      : "");
-            m.put("phone",       c.getPhone()      != null ? c.getPhone()      : "");
-            m.put("city",        c.getCity()       != null ? c.getCity()       : "");
-            m.put("state",       c.getState()      != null ? c.getState()      : "");
-            m.put("address",     c.getAddress()    != null ? c.getAddress()    : "");
-            m.put("totalSpent",  c.getTotalSpent() != null ? c.getTotalSpent() : 0);
-            m.put("totalOrders", c.getTotalOrders()!= null ? c.getTotalOrders(): 0);
-            return m;
-        }).collect(Collectors.toList());
+        return customerRepo.findAllByTenantId(tenantId).stream().map(c -> customerMap(c)).collect(Collectors.toList());
+    }
+
+    @GetMapping("/customers/{id}")
+    public ResponseEntity<?> getCustomer(@PathVariable UUID id) {
+        UUID tenantId = TenantContext.getTenantId();
+        return customerRepo.findById(id)
+            .filter(c -> tenantId.equals(c.getTenantId()))
+            .map(c -> {
+                Map<String, Object> m = customerMap(c);
+                // Attach POS bill history for this customer's phone
+                List<Map<String, Object>> bills = new ArrayList<>();
+                String phone = c.getPhone();
+                if (phone != null && !phone.isBlank()) {
+                    billRepo.findAllByTenantIdAndCustomerMobileOrderByBillDateDesc(tenantId, phone)
+                        .forEach(b -> {
+                            Map<String, Object> bm = new LinkedHashMap<>();
+                            bm.put("id",          b.getId().toString());
+                            bm.put("billNo",      b.getBillNo());
+                            bm.put("date",        b.getBillDate() != null ? b.getBillDate().toLocalDate().toString() : null);
+                            bm.put("total",       b.getGrandTotal());
+                            bm.put("paymentMode", b.getPaymentMode());
+                            bm.put("itemCount",   b.getItems() != null ? b.getItems().size() : 0);
+                            bills.add(bm);
+                        });
+                }
+                m.put("bills", bills);
+                return ResponseEntity.ok(m);
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/customers/{id}")
+    public ResponseEntity<?> updateCustomer(@PathVariable UUID id, @RequestBody Map<String, String> body) {
+        UUID tenantId = TenantContext.getTenantId();
+        return customerRepo.findById(id)
+            .filter(c -> tenantId.equals(c.getTenantId()))
+            .map(c -> {
+                if (body.containsKey("firstName")) c.setFirstName(body.get("firstName"));
+                if (body.containsKey("lastName"))  c.setLastName(body.get("lastName"));
+                if (body.containsKey("phone"))     c.setPhone(body.get("phone"));
+                customerRepo.save(c);
+                return ResponseEntity.ok(customerMap(c));
+            })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    @DeleteMapping("/customers/{id}")
+    public ResponseEntity<?> deleteCustomer(@PathVariable UUID id) {
+        UUID tenantId = TenantContext.getTenantId();
+        return customerRepo.findById(id)
+            .filter(c -> tenantId.equals(c.getTenantId()))
+            .map(c -> { customerRepo.delete(c); return ResponseEntity.ok().build(); })
+            .orElse(ResponseEntity.notFound().build());
+    }
+
+    private Map<String, Object> customerMap(com.gosuas.core.entity.CustomerDetail c) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id",               c.getId().toString());
+        m.put("firstName",        c.getFirstName()        != null ? c.getFirstName()        : "");
+        m.put("lastName",         c.getLastName()         != null ? c.getLastName()         : "");
+        m.put("email",            c.getEmail()            != null ? c.getEmail()            : "");
+        m.put("phone",            c.getPhone()            != null ? c.getPhone()            : "");
+        m.put("city",             c.getCity()             != null ? c.getCity()             : "");
+        m.put("state",            c.getState()            != null ? c.getState()            : "");
+        m.put("address",          c.getAddress()          != null ? c.getAddress()          : "");
+        m.put("totalSpent",       c.getTotalSpent()       != null ? c.getTotalSpent()       : 0);
+        m.put("totalOrders",      c.getTotalOrders()      != null ? c.getTotalOrders()      : 0);
+        m.put("lastPurchaseDate", c.getLastPurchaseDate() != null ? c.getLastPurchaseDate().toString() : null);
+        return m;
     }
 
     // ── All Orders (Shopify imported + POS bills + Online shop orders) ───────

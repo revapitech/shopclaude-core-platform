@@ -36,4 +36,12 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     @Modifying(clearAutomatically = true)
     @Query("UPDATE Product p SET p.stockQty = p.stockQty + :qty WHERE p.id = :id AND p.tenantId = :tenantId")
     int restoreStock(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("qty") int qty);
+
+    /**
+     * Increments soldCount only, without touching stockQty. Used for products where
+     * trackStock = false so revenue/sales data remains accurate.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Product p SET p.soldCount = COALESCE(p.soldCount, 0) + :qty WHERE p.id = :id AND p.tenantId = :tenantId")
+    int incrementSoldCount(@Param("id") UUID id, @Param("tenantId") UUID tenantId, @Param("qty") int qty);
 }

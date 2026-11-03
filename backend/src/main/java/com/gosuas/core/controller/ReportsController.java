@@ -3,6 +3,7 @@ package com.gosuas.core.controller;
 import com.gosuas.core.config.TenantContext;
 import com.gosuas.core.entity.*;
 import com.gosuas.core.repository.*;
+import com.gosuas.core.service.ExpenseService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +27,7 @@ public class ReportsController {
     private final RentalOrderRepository rentalOrderRepo;
     private final DamageStockRepository damageRepo;
     private final ProductRepository     productRepo;
+    private final ExpenseRepository     expenseRepo;
 
     @GetMapping
     public Map<String, Object> getStats(
@@ -279,6 +281,90 @@ public class ReportsController {
         res.put("damageByProduct",    damageByProduct);
         res.put("damageByDate",       damageByDate);
         res.put("damageEntries",      damageEntries);
+
+        // ── Expense Summary ──────────────────────────────────────────────────
+        LocalDate expFrom = from != null ? from : LocalDate.of(2000, 1, 1);
+        LocalDate expTo   = to   != null ? to   : LocalDate.now();
+
+        long       expenseCount = expenseRepo.countByTenantIdAndDateRange(tenantId, expFrom, expTo);
+        BigDecimal expenseTotal = expenseRepo.sumByTenantIdAndDateRange(tenantId, expFrom, expTo);
+        if (expenseTotal == null) expenseTotal = BigDecimal.ZERO;
+
+        // Seed all 7 categories with zero — missing categories still appear.
+        Map<String, Object> expenseByCat = new LinkedHashMap<>();
+        for (String cat : ExpenseService.VALID_CATEGORIES) expenseByCat.put(cat, BigDecimal.ZERO);
+        expenseRepo.sumByCategoryAndDateRange(tenantId, expFrom, expTo)
+                .forEach(row -> expenseByCat.put((String) row[0], row[1]));
+
+        List<Map<String, Object>> expenseDaily = new ArrayList<>();
+        expenseRepo.sumByDayAndDateRange(tenantId, expFrom, expTo).forEach(row -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("date",   row[0].toString());
+            m.put("amount", row[1]);
+            expenseDaily.add(m);
+        });
+
+        // Fixed-period expense totals (always relative to today, not affected by the report date filter)
+        LocalDate rptToday      = LocalDate.now();
+        LocalDate rptWeekStart  = rptToday.minusDays(rptToday.getDayOfWeek().getValue() - 1L);
+        LocalDate rptMonthStart = rptToday.withDayOfMonth(1);
+        BigDecimal expTotalToday = expenseRepo.sumByTenantIdAndDateRange(tenantId, rptToday, rptToday);
+        if (expTotalToday == null) expTotalToday = BigDecimal.ZERO;
+        BigDecimal expTotalWeek  = expenseRepo.sumByTenantIdAndDateRange(tenantId, rptWeekStart,  rptToday);
+        if (expTotalWeek  == null) expTotalWeek  = BigDecimal.ZERO;
+        BigDecimal expTotalMonth = expenseRepo.sumByTenantIdAndDateRange(tenantId, rptMonthStart, rptToday);
+        if (expTotalMonth == null) expTotalMonth = BigDecimal.ZERO;
+
+        // Individual expense records for the selected period (detail table, max 200)
+        List<Map<String, Object>> expenseEntries = expenseRepo
+                .findAllByTenantIdAndExpenseDateBetweenOrderByExpenseDateDescCreatedAtDesc(
+                        tenantId, expFrom, expTo)
+                .stream().limit(200).map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id",              e.getId() != null ? e.getId().toString() : null);
+                    m.put("date",            e.getExpenseDate() != null ? e.getExpenseDate().toString() : null);
+                    m.put("category",        e.getCategory());
+                    m.put("description",     e.getDescription());
+                    m.put("paymentMethod",   e.getPaymentMethod());
+                    m.put("referenceNumber", e.getReferenceNumber());
+                    m.put("amount",          e.getAmount());
+                    return m;
+                }).collect(Collectors.toList());
+
+        // ── Estimated Operating Profit / Loss ─────────────────────────────────────
+        // offlineRevenue is already net of discounts (grandTotal). Add back discounts + refunds to get Gross Sales.
+        BigDecimal plGrossSales = BigDecimal.valueOf(
+                offlineRevenue + offlineDiscount + onlineRevenue + shopifyRevenue + refundAmount)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        BigDecimal plDiscounts  = BigDecimal.valueOf(offlineDiscount)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        BigDecimal plRefunds    = BigDecimal.valueOf(refundAmount)
+                .setScale(2, java.math.RoundingMode.HALF_UP);
+        // Net Sales Revenue = Gross Sales - Discounts - Refunds = totalRevenue (POS net + online + non-refunded Shopify)
+        BigDecimal plNetSalesRevenue    = BigDecimal.valueOf(totalRevenue).setScale(2, java.math.RoundingMode.HALF_UP);
+        BigDecimal plNetOperatingResult = plNetSalesRevenue.subtract(expenseTotal);
+        String plMarginPct = plNetSalesRevenue.compareTo(BigDecimal.ZERO) > 0
+                ? String.format("%.1f", plNetOperatingResult.doubleValue() / plNetSalesRevenue.doubleValue() * 100.0)
+                : null;
+        String plStatus = plNetOperatingResult.compareTo(BigDecimal.ZERO) > 0 ? "PROFIT"
+                : plNetOperatingResult.compareTo(BigDecimal.ZERO) < 0 ? "LOSS" : "BREAKEVEN";
+
+        res.put("expenseCount",      expenseCount);
+        res.put("expenseTotal",      expenseTotal);
+        res.put("expenseByCat",      expenseByCat);
+        res.put("expenseDaily",      expenseDaily);
+        res.put("expTotalToday",     expTotalToday);
+        res.put("expTotalWeek",      expTotalWeek);
+        res.put("expTotalMonth",     expTotalMonth);
+        res.put("expenseEntries",    expenseEntries);
+        res.put("plGrossSales",      plGrossSales);
+        res.put("plDiscounts",       plDiscounts);
+        res.put("plRefunds",         plRefunds);
+        res.put("plNetSalesRevenue", plNetSalesRevenue);
+        res.put("plExpenses",        expenseTotal);
+        res.put("plNetResult",       plNetOperatingResult);
+        res.put("plMarginPct",       plMarginPct);
+        res.put("plStatus",          plStatus);
         return res;
     }
 

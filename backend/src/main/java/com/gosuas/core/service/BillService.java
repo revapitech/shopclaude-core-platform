@@ -10,9 +10,11 @@ import com.gosuas.core.dto.PaymentEntryResponse;
 import com.gosuas.core.entity.Bill;
 import com.gosuas.core.entity.BillItem;
 import com.gosuas.core.entity.BillPayment;
+import com.gosuas.core.entity.CustomerDetail;
 import com.gosuas.core.entity.Product;
 import com.gosuas.core.entity.Tenant;
 import com.gosuas.core.repository.BillRepository;
+import com.gosuas.core.repository.CustomerDetailRepository;
 import com.gosuas.core.repository.ProductRepository;
 import com.gosuas.core.repository.TenantRepository;
 import jakarta.transaction.Transactional;
@@ -34,6 +36,7 @@ public class BillService {
     private final BillRepository billRepository;
     private final ProductRepository productRepository;
     private final TenantRepository tenantRepository;
+    private final CustomerDetailRepository customerDetailRepository;
 
     @Transactional
     public BillResponse createBill(BillRequest request) {
@@ -54,9 +57,15 @@ public class BillService {
             Product product = productRepository.findByBarcodeAndTenantId(itemRequest.barcode(), tenantId)
                     .orElseThrow(() -> new RuntimeException("Product not found: " + itemRequest.barcode()));
 
-            int updated = productRepository.decrementStock(product.getId(), tenantId, itemRequest.quantity());
-            if (updated == 0) {
-                throw new RuntimeException("Insufficient stock for: " + product.getName());
+            // trackStock=null treated as true for backward compat with pre-existing products
+            if (!Boolean.FALSE.equals(product.getTrackStock())) {
+                int updated = productRepository.decrementStock(product.getId(), tenantId, itemRequest.quantity());
+                if (updated == 0) {
+                    throw new RuntimeException("Insufficient stock for: " + product.getName());
+                }
+            } else {
+                // Not stock-tracked: only record the sale count, never touch stockQty
+                productRepository.incrementSoldCount(product.getId(), tenantId, itemRequest.quantity());
             }
 
             BigDecimal lineTotal = product.getSellingPrice().multiply(BigDecimal.valueOf(itemRequest.quantity()));
@@ -169,7 +178,40 @@ public class BillService {
             bill.setPaymentMode(request.paymentMode());
         }
 
-        return mapToResponse(billRepository.save(bill));
+        Bill savedBill = billRepository.save(bill);
+
+        // Auto-save / update customer record when a phone number is provided.
+        // Scoped to this tenant so the same phone in another shop is a separate customer.
+        String mobile = request.customerMobile() != null ? request.customerMobile().trim() : "";
+        if (!mobile.isBlank()) {
+            BigDecimal billTotal = savedBill.getGrandTotal() != null ? savedBill.getGrandTotal() : BigDecimal.ZERO;
+            java.time.LocalDate today = java.time.LocalDate.now();
+            String fullName = request.customerName() != null ? request.customerName().trim() : "";
+            customerDetailRepository.findByTenantIdAndPhone(tenantId, mobile).ifPresentOrElse(
+                existing -> {
+                    existing.setTotalSpent((existing.getTotalSpent() != null
+                            ? existing.getTotalSpent() : BigDecimal.ZERO).add(billTotal));
+                    existing.setTotalOrders((existing.getTotalOrders() != null
+                            ? existing.getTotalOrders() : 0) + 1);
+                    existing.setLastPurchaseDate(today);
+                    // Only update name if the record has none yet (never overwrite a manually set name)
+                    if (!fullName.isBlank() && (existing.getFirstName() == null || existing.getFirstName().isBlank())) {
+                        existing.setFirstName(fullName);
+                    }
+                    customerDetailRepository.save(existing);
+                },
+                () -> customerDetailRepository.save(CustomerDetail.builder()
+                        .tenantId(tenantId)
+                        .firstName(fullName.isBlank() ? null : fullName)
+                        .phone(mobile)
+                        .totalSpent(billTotal)
+                        .totalOrders(1)
+                        .lastPurchaseDate(today)
+                        .build())
+            );
+        }
+
+        return mapToResponse(savedBill);
     }
 
     @Transactional

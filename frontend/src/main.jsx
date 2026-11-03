@@ -1,21 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import axios from 'axios';
 import './style.css';
-import LandingPage from './pages/LandingPage';
+
+// Lazy-load LandingPage so storefront/admin visitors don't download its code.
+const LandingPage = React.lazy(() => import('./pages/LandingPage'));
 
 const API     = import.meta.env.VITE_API_URL     ?? 'http://localhost:8080/gosuas-core/api';
 const BACKEND = import.meta.env.VITE_BACKEND_URL ?? API.replace(/\/api$/, '');
 
-function getSubdomain() {
-  const host = window.location.hostname;
-  if (host === 'localhost' || host === '127.0.0.1') return 'gosuas';
-  // Any *.gosuas.com or gosuas.com domain → always gosuas tenant (backward compat)
-  if (host === 'gosuas.com' || host.endsWith('.gosuas.com')) return 'gosuas';
-  const parts = host.split('.');
-  if (parts.length >= 3) return parts[0]; // e.g. "gosuas" from "gosuas.theshopclaude.com"
-  return 'www'; // theshopclaude.com or www.theshopclaude.com → landing page
-}
+import { getSubdomain } from './utils/getSubdomain.js';
 
 function maxPhotosForPlan(plan) {
   return plan === 'PRO' ? 6 : 2; // STARTER (₹999) → 2, PRO (₹1,699) → 6, FREE defaults to 2
@@ -28,15 +22,22 @@ axios.interceptors.request.use(config => {
   return config;
 });
 
-// On 401/403, clear token and reload to login screen.
-// Skip auto-logout for file upload requests — those errors are handled by the
-// calling try/catch so the user sees a meaningful toast instead of a silent reload.
+// On 401, clear token and reload to login screen.
+// Guards to prevent false-positive logouts:
+//   1. File uploads — errors handled by the calling try/catch for a meaningful toast.
+//   2. Auth endpoints (/auth/) — a wrong-password login returns 401 legitimately; that
+//      must never clear an already-stored session token.
+//   3. Requests sent WITHOUT an Authorization header — if the request was unauthenticated
+//      to begin with, a 401 response cannot indicate an expired session.
 axios.interceptors.response.use(
   res => res,
   err => {
     if (err.response?.status === 401) {
-      const isFileUpload = err.config?.headers?.['Content-Type']?.includes('multipart/form-data');
-      if (!isFileUpload) {
+      const url            = err.config?.url || '';
+      const isFileUpload   = url.includes('/upload') || url.includes('/logo') || url.includes('/banner') || (err.config?.data instanceof FormData);
+      const isAuthEndpoint = (err.config?.url || '').includes('/auth/');
+      const hadAuthHeader  = !!err.config?.headers?.['Authorization'];
+      if (!isFileUpload && !isAuthEndpoint && hadAuthHeader) {
         const token = localStorage.getItem('gosuas_token');
         if (token) { localStorage.removeItem('gosuas_token'); window.location.reload(); }
       }
@@ -46,7 +47,7 @@ axios.interceptors.response.use(
 );
 
 // Shop admin pages that can be opened directly via the URL hash (/#returns etc.)
-const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'print-labels', 'pdf-store'];
+const ADMIN_PAGES = ['home', 'reports', 'customers', 'orders', 'rental', 'alerts', 'plan', 'returns', 'damage', 'expenses', 'print-labels', 'pdf-store', 'offers'];
 
 const FIELD_LABELS = {
   name: 'Product Name',
@@ -151,6 +152,49 @@ const STICKER_TYPES = [
 ];
 
 // CATEGORY_STICKER removed — sticker type defaults to 'two-row'
+
+// Centralized layout config — single source of truth for every sticker format.
+// pageW/pageH  : full print-media dimensions sent to @page (all columns combined).
+// cellW/cellH  : individual sticker size (grid types only).
+// cols         : labels per row (grid types only).
+// offsetLeft   : left margin of the row block (physical sheet offset).
+// gapH         : horizontal gap between cells in the same row.
+// itemGap      : CSS gap between flex children inside one cell.
+// barcodeW/H   : barcode image dimensions inside the label.
+// padV/padH    : cell content padding (vertical / horizontal).
+const LABEL_CONFIG = {
+  'butterfly': {
+    pageW: '75mm',  pageH: '24mm',  isGrid: false,
+    barcodeW: '20mm', barcodeH: '5mm',
+    padV: '1.5mm',  padH: '1mm',
+  },
+  'two-row': {
+    pageW: '76mm',  pageH: '25mm',  isGrid: true,
+    cols: 2,        cellW: '38mm',  cellH: '25mm',
+    offsetLeft: '0mm',  gapH: '0mm',  itemGap: '0.5mm',
+    barcodeW: '34mm',   barcodeH: '8mm',
+    padV: '1.5mm',  padH: '2mm',
+  },
+  'three-row': {
+    pageW: '90mm',  pageH: '20mm',  isGrid: true,
+    cols: 3,        cellW: '27mm',  cellH: '20mm',
+    offsetLeft: '7mm',  gapH: '1mm',  itemGap: '0.3mm',
+    barcodeW: '25mm',   barcodeH: '8mm',
+    padV: '1mm',    padH: '1mm',
+  },
+  'four-row': {
+    pageW: '80mm',  pageH: '15mm',  isGrid: true,
+    cols: 4,        cellW: '20mm',  cellH: '15mm',
+    offsetLeft: '0mm',  gapH: '0mm',  itemGap: '0.3mm',
+    barcodeW: '18mm',   barcodeH: '3.5mm',
+    padV: '0.8mm',  padH: '1mm',
+  },
+  'single-row': {
+    pageW: '50mm',  pageH: '15mm',  isGrid: false,
+    barcodeW: '28mm', barcodeH: '12mm',
+    padV: '1mm',    padH: '1.5mm',
+  },
+};
 
 function ChipGroup({ label, options, selected, onToggle, onSelectAll, onClear }) {
   const [customVal, setCustomVal] = useState('');
@@ -776,32 +820,39 @@ function printRentalReturnReceipt(rental, shopName = 'GOSUAS') {
 
 // Inner HTML for one label cell of a grid sticker type (four-row / three-row / two-row).
 // Shared by single-product and bulk printing so multiple products' cells can pack into the same physical rows.
+// All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
 function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || !cfg.isGrid) return '';
+  const { cellW, cellH, barcodeW, barcodeH, padV, padH, itemGap } = cfg;
   const name    = product.name || '';
   const sku     = product.sku  || '';
-  const barUrl  = `${API}/barcodes/${product.barcode}`;
+  const barUrl  = product.barcode
+    ? `${API}/barcodes/${product.barcode}`
+    : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const details = variantLabel(product);
   const F = 'font-family:Arial,sans-serif;font-weight:600;color:#000;';
   const p = product.productType === 'RENTAL'
     ? Number(product.depositAmount || 0) + Number(product.rentAmount || 0)
     : Number(product.sellingPrice);
   const priceStr = p % 1 === 0 ? String(Math.round(p)) : p.toFixed(2);
+  const base = `width:${cellW};height:${cellH};padding:${padV} ${padH};display:flex;flex-direction:column;gap:${itemGap};justify-content:flex-start;box-sizing:border-box;overflow:hidden;`;
 
   if (stickerType === 'four-row') {
     return `
-    <div style="width:100%;height:100%;padding:0.8mm 1mm;display:flex;flex-direction:column;gap:0.3mm;justify-content:flex-start;border-right:0.3mm solid #ddd;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}border-right:0.3mm solid #ddd;">
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">${shopName}</div>
       <div style="${F}font-size:4.5pt;line-height:1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
-      <img src="${barUrl}" style="width:18mm;height:3.5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
     </div>`;
   }
   if (stickerType === 'three-row') {
     return `
-    <div style="width:27mm;height:20mm;padding:1mm;display:flex;flex-direction:column;gap:0.3mm;justify-content:flex-start;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}">
       <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${shopName}</div>
-      <img src="${barUrl}" style="width:25mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:5pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:5.5pt;line-height:1.1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
       <div style="${F}font-size:8pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
@@ -809,9 +860,9 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
   }
   if (stickerType === 'two-row') {
     return `
-    <div style="width:38mm;height:25mm;padding:1.5mm 2mm;display:flex;flex-direction:column;gap:0.5mm;justify-content:flex-start;border-right:0.3mm solid #ddd;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}border-right:0.3mm solid #ddd;">
       <div style="${F}font-size:7pt;line-height:1;flex-shrink:0;">${shopName}</div>
-      <img src="${barUrl}" style="width:34mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:6pt;line-height:1.1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
       <div style="${F}font-size:9pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
@@ -821,10 +872,16 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
 }
 
 // Full standalone label (butterfly / single-row) — one label = one physical page, never shared across products.
+// All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
 function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || cfg.isGrid) return '';
+  const { pageW, pageH, barcodeW, barcodeH, padV, padH } = cfg;
   const name    = product.name || '';
   const sku     = product.sku  || '';
-  const barUrl  = `${API}/barcodes/${product.barcode}`;
+  const barUrl  = product.barcode
+    ? `${API}/barcodes/${product.barcode}`
+    : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const details = variantLabel(product);
   const F = 'font-family:Arial,sans-serif;font-weight:600;color:#000;';
   const p = product.productType === 'RENTAL'
@@ -833,11 +890,14 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
   const priceStr = p % 1 === 0 ? String(Math.round(p)) : p.toFixed(2);
 
   if (stickerType === 'butterfly') {
+    // Butterfly: two wings on one 75×24mm label, separated by a centre fold zone.
+    // Each wing is 22mm wide; 4.5mm left spacer + wing + 26.5mm fold gap + wing = 75mm.
+    const wingW = '22mm';
     const butterflyWing = `
-      <div style="width:22mm;height:24mm;padding:1.5mm 1mm 0.8mm;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden;">
+      <div style="width:${wingW};height:${pageH};padding:1.5mm 1mm 0.8mm;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden;">
         <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${shopName}</div>
         <div style="height:0.5mm;flex-shrink:0;"></div>
-        <img src="${barUrl}" style="width:20mm;height:5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+        <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
         <div style="height:0.5mm;flex-shrink:0;"></div>
         <div style="${F}font-size:5pt;line-height:1;flex-shrink:0;">${sku}</div>
         <div style="height:2mm;flex-shrink:0;"></div>
@@ -846,17 +906,17 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
         <div style="${F}font-size:10pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
       </div>`;
     return `
-      <div class="label" style="width:75mm;height:24mm;display:flex;flex-direction:row;box-sizing:border-box;overflow:hidden;">
+      <div class="label" style="width:${pageW};height:${pageH};display:flex;flex-direction:row;box-sizing:border-box;overflow:hidden;">
         <div style="width:4.5mm;flex-shrink:0;"></div>
         ${butterflyWing}
-        <div style="width:26.5mm;height:24mm;flex-shrink:0;"></div>
+        <div style="width:26.5mm;height:${pageH};flex-shrink:0;"></div>
         ${butterflyWing}
       </div>`;
   }
   // single-row
   return `
-      <div class="label" style="width:50mm;height:15mm;padding:1mm 1.5mm;display:flex;align-items:center;gap:2mm;border:0.3mm solid #bbb;box-sizing:border-box;overflow:hidden;">
-        <img src="${barUrl}" style="width:28mm;height:12mm;object-fit:contain;object-position:left;flex-shrink:0;display:block;">
+      <div class="label" style="width:${pageW};height:${pageH};padding:${padV} ${padH};display:flex;align-items:center;gap:2mm;border:0.3mm solid #bbb;box-sizing:border-box;overflow:hidden;">
+        <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;flex-shrink:0;display:block;">
         <div style="display:flex;flex-direction:column;gap:0.4mm;overflow:hidden;">
           <span style="${F}font-size:5pt;line-height:1;white-space:nowrap;overflow:hidden;">${shopName}</span>
           <span style="${F}font-size:5pt;line-height:1;white-space:nowrap;overflow:hidden;">${sku}</span>
@@ -866,115 +926,63 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
       </div>`;
 }
 
-function buildGrid(cellsHTML, cols, cellW, cellH, stretch = false) {
+// Packs a flat list of already-built cell HTML into grid rows using LABEL_CONFIG.
+// All dimensions come from config — no magic numbers, no stretch-percentage hacks.
+// Fixed mm cell widths prevent the progressive alignment drift that percentage widths cause.
+function buildGridRowsHTML(cellsHTML, stickerType) {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || !cfg.isGrid) return { html: '', pageW: '0mm', pageH: '0mm' };
+  const { cols, cellW, cellH, offsetLeft, gapH, pageW, pageH } = cfg;
+
   let html = '';
   const rows = Math.ceil(cellsHTML.length / cols);
-  const totalW = `${cols * parseInt(cellW)}mm`;
-  // stretch: size the row/cells as percentages of the actual printed page instead of fixed mm,
-  // so if the printer's real page ends up wider than requested, cells fill it exactly with no
-  // leftover blank space on the right — instead of relying on the page matching totalW exactly.
-  const rowW  = stretch ? '100%' : totalW;
-  const cellW_ = stretch ? `${100 / cols}%` : cellW;
   for (let r = 0; r < rows; r++) {
     const pb = r < rows - 1 ? 'always' : 'auto';
-    html += `<div class="label" style="font-size:0;white-space:nowrap;width:${rowW};height:${cellH};overflow:hidden;page-break-after:${pb};break-after:${pb === 'always' ? 'page' : 'auto'};">`;
+    const rowParts = [
+      `font-size:0`, `white-space:nowrap`, `height:${cellH}`, `overflow:hidden`,
+      `page-break-after:${pb}`, `break-after:${pb === 'always' ? 'page' : 'auto'}`,
+      offsetLeft !== '0mm' ? `margin-left:${offsetLeft}` : null,
+    ].filter(Boolean).join(';') + ';';
+    html += `<div class="label" style="${rowParts}">`;
     for (let c = 0; c < cols; c++) {
-      const idx = r * cols + c;
-      if (idx < cellsHTML.length) {
-        html += `<div style="display:inline-block;vertical-align:top;width:${cellW_};height:${cellH};overflow:hidden;box-sizing:border-box;">${cellsHTML[idx]}</div>`;
-      } else {
-        html += `<div style="display:inline-block;vertical-align:top;width:${cellW_};height:${cellH};box-sizing:border-box;"></div>`;
+      if (c > 0 && gapH !== '0mm') {
+        html += `<div style="display:inline-block;vertical-align:top;width:${gapH};height:${cellH};"></div>`;
       }
+      const idx = r * cols + c;
+      html += `<div style="display:inline-block;vertical-align:top;width:${cellW};height:${cellH};overflow:hidden;box-sizing:border-box;">`;
+      html += idx < cellsHTML.length ? cellsHTML[idx] : '';
+      html += `</div>`;
     }
     html += `</div>`;
   }
-  return { html, pageW: totalW, pageH: cellH };
+  return { html, pageW, pageH };
 }
-
-// Packs a flat list of already-built cell HTML (which may span several different products) into
-// full grid rows, so bulk-printing multiple products never leaves a wasted blank row between them.
-function buildGridRowsHTML(cellsHTML, stickerType) {
-  if (stickerType === 'four-row') return buildGrid(cellsHTML, 4, '20mm', '15mm', true);
-  if (stickerType === 'two-row')  return buildGrid(cellsHTML, 2, '38mm', '25mm');
-  if (stickerType === 'three-row') {
-    // 7mm left sheet margin + 3×27mm cells + 2×1mm gaps = 90mm sheet width
-    const TR_COLS = 3, TR_CELL = '27mm', TR_H = '20mm', TR_GAP = '1mm', TR_OFF = '7mm';
-    let html = '';
-    const rows = Math.ceil(cellsHTML.length / TR_COLS);
-    for (let r = 0; r < rows; r++) {
-      const pb = r < rows - 1 ? 'always' : 'auto';
-      html += `<div class="label" style="margin-left:${TR_OFF};font-size:0;white-space:nowrap;height:${TR_H};overflow:hidden;page-break-after:${pb};break-after:${pb === 'always' ? 'page' : 'auto'};">`;
-      for (let c = 0; c < TR_COLS; c++) {
-        if (c > 0) html += `<div style="display:inline-block;vertical-align:top;width:${TR_GAP};height:${TR_H};"></div>`;
-        const idx = r * TR_COLS + c;
-        html += `<div style="display:inline-block;vertical-align:top;width:${TR_CELL};height:${TR_H};overflow:hidden;box-sizing:border-box;">`;
-        html += idx < cellsHTML.length ? cellsHTML[idx] : '';
-        html += `</div>`;
-      }
-      html += `</div>`;
-    }
-    return { html, pageW: '90mm', pageH: TR_H };
-  }
-  return { html: '', pageW: '0mm', pageH: '0mm' };
-}
-
-const GRID_STICKER_TYPES = ['four-row', 'three-row', 'two-row'];
 
 function buildProductLabels(product, stickerType, qty, shopName = 'GOSUAS') {
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
-  if (!sticker) return { labelsHTML: '', pageW: '50mm', pageH: '25mm' };
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!sticker || !cfg) return { labelsHTML: '', stickerType, sticker: null };
 
-  let labelsHTML, pageW, pageH;
-
-  if (GRID_STICKER_TYPES.includes(stickerType)) {
+  let labelsHTML;
+  if (cfg.isGrid) {
     const cellHTML = buildLabelCellHTML(product, stickerType, shopName);
-    const g = buildGridRowsHTML(Array.from({length: qty}, () => cellHTML), stickerType);
-    labelsHTML = g.html; pageW = g.pageW; pageH = g.pageH;
+    labelsHTML = buildGridRowsHTML(Array.from({length: qty}, () => cellHTML), stickerType).html;
   } else {
     const labelHTML = buildFullLabelHTML(product, stickerType, shopName);
     labelsHTML = Array.from({length: qty}, (_, i) =>
       `<div style="page-break-after:${i < qty - 1 ? 'always' : 'auto'};">${labelHTML}</div>`
     ).join('');
-    pageW = sticker.w; pageH = sticker.h;
   }
-
-  return {
-    labelsHTML,
-    pageW,
-    pageH,
-    isFourRow: stickerType === 'four-row',
-    sticker,
-  };
+  return { labelsHTML, stickerType, sticker };
 }
 
-function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty) {
-  const isButterfly  = pageW === '75mm';
-  const isTwoRow     = pageW === '76mm';   // 2 × 38mm grid
-  const isThreeRow   = pageW === '90mm';   // 3 × 30mm grid
-  const isSingleRow  = pageW === '50mm';
-  const isGrid = isFourRow || isTwoRow || isThreeRow;
-  const previewW = isButterfly ? 520 : isGrid ? 500 : 360;
-
-  const paperName = isFourRow   ? 'Row Label'
-    : isButterfly  ? 'Butterfly'
-    : isThreeRow   ? 'Three Row'
-    : isTwoRow     ? 'Two Row'
-    : isSingleRow  ? 'Single Row'
-    : pageW + ' × ' + pageH;
-
-  const paperW_in = isFourRow   ? '3.15 in'
-    : isButterfly  ? '2.953 in'
-    : isThreeRow   ? '3.54 in'
-    : isTwoRow     ? '2.99 in'
-    : isSingleRow  ? '1.97 in'
-    : pageW;
-
-  const paperH_in = isFourRow   ? '0.59 in'
-    : isButterfly  ? '0.945 in'
-    : isThreeRow   ? '0.79 in'
-    : isTwoRow     ? '0.98 in'
-    : isSingleRow  ? '0.59 in'
-    : pageH;
+// Opens a hidden iframe and triggers the browser print dialog.
+// stickerType is used to look up @page dimensions from LABEL_CONFIG so there is
+// one source of truth and no fragile pageW string comparisons.
+function openPrintWindow(labelsHTML, stickerType, title, totalQty) {
+  const cfg = LABEL_CONFIG[stickerType] || {};
+  const pageW = cfg.pageW || '50mm';
+  const pageH = cfg.pageH || '15mm';
 
   // Reuse hidden iframe so Chrome remembers printer settings across prints
   let iframe = document.getElementById('__label_print_frame__');
@@ -1003,8 +1011,37 @@ function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty) {
 </body></html>`);
   labelDoc.close();
 
-  // Delay to allow barcode images to load, then print
-  setTimeout(() => { iframe.contentWindow.print(); }, 600);
+  // Wait for every barcode <img> inside the iframe to finish loading (or fail)
+  // before triggering print.  A fixed delay is unreliable — a cold JVM or multiple
+  // labels can easily exceed 600 ms and print blank/broken barcodes.
+  const imgs = Array.from(labelDoc.querySelectorAll('img'));
+  let remaining = imgs.length;
+  let printFired = false;
+
+  const doPrint = () => {
+    if (printFired) return;
+    printFired = true;
+    try { iframe.contentWindow.print(); }
+    catch (e) { console.error('[ShopClaude] label print error:', e); }
+  };
+
+  if (!remaining) {
+    // No images — fire immediately (small tick so the DOM fully settles)
+    setTimeout(doPrint, 50);
+  } else {
+    // Give up waiting and print anyway after 8 s (handles very slow networks /
+    // unreachable backends — at least the text content will print)
+    const fallback = setTimeout(doPrint, 8000);
+    const onDone = () => { if (--remaining <= 0) { clearTimeout(fallback); doPrint(); } };
+    imgs.forEach(img => {
+      if (img.complete) {
+        onDone(); // already cached / failed synchronously
+      } else {
+        img.addEventListener('load',  onDone, { once: true });
+        img.addEventListener('error', onDone, { once: true });
+      }
+    });
+  }
 }
 
 // Four-row is the tightest layout (4×20mm columns) — any drift in the printer driver's
@@ -1020,48 +1057,89 @@ function confirmFourRowStock() {
 }
 
 function printLabels(product, stickerType, qty, shopName) {
-  const { labelsHTML, pageW, pageH, isFourRow, sticker } = buildProductLabels(product, stickerType, qty, shopName);
+  const { labelsHTML, sticker } = buildProductLabels(product, stickerType, qty, shopName);
   if (!sticker) return;
-  openPrintWindow(labelsHTML, pageW, pageH, isFourRow,
-    `Preview — ${qty} label${qty !== 1 ? 's' : ''} (${sticker.label} ${sticker.size})`, qty);
+  openPrintWindow(labelsHTML, stickerType,
+    `Print — ${qty} label${qty !== 1 ? 's' : ''} (${sticker.label} ${sticker.size})`, qty);
 }
 
 function printBulkLabels(items, stickerType, shopName) {
   if (!items.length) return;
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
-  if (!sticker) return;
-  const isFourRow = stickerType === 'four-row';
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!sticker || !cfg) return;
 
-  let allHTML, pageW, pageH;
+  let allHTML = '';
   let totalQty = 0;
 
-  if (GRID_STICKER_TYPES.includes(stickerType)) {
-    // Pack every product's cells into one continuous stream of grid rows, instead of forcing
-    // a fresh page per product — that used to leave a wasted blank row between products
-    // whenever a product's own label count didn't exactly fill a row.
+  if (cfg.isGrid) {
+    // Pack every product's cells into one continuous stream of grid rows so bulk jobs
+    // never leave a wasted blank row between products.
     const allCells = [];
     items.forEach(({ product, qty }) => {
       const cellHTML = buildLabelCellHTML(product, stickerType, shopName);
       for (let i = 0; i < qty; i++) allCells.push(cellHTML);
       totalQty += qty;
     });
-    const g = buildGridRowsHTML(allCells, stickerType);
-    allHTML = g.html; pageW = g.pageW; pageH = g.pageH;
+    allHTML = buildGridRowsHTML(allCells, stickerType).html;
   } else {
-    // butterfly / single-row: each label is already its own full page, so per-product
-    // forced breaks are harmless — just concatenate each product's labels in sequence.
-    let html = '';
+    // butterfly / single-row: each label = its own page; concatenate in sequence.
     items.forEach(({ product, qty }, idx) => {
       const { labelsHTML } = buildProductLabels(product, stickerType, qty, shopName);
       const isLast = idx === items.length - 1;
-      html += `<div style="page-break-after:${isLast ? 'auto' : 'always'};">${labelsHTML}</div>`;
+      allHTML += `<div style="page-break-after:${isLast ? 'auto' : 'always'};">${labelsHTML}</div>`;
       totalQty += qty;
     });
-    allHTML = html; pageW = sticker.w; pageH = sticker.h;
   }
 
-  openPrintWindow(allHTML, pageW, pageH, isFourRow,
+  openPrintWindow(allHTML, stickerType,
     `Bulk Print — ${items.length} products, ${totalQty} labels (${sticker.label})`, totalQty);
+}
+
+// Renders a scaled CSS preview of one label directly in the React UI.
+// mm-based CSS matches the print output (96dpi: 1mm ≈ 3.78px).
+// Grid types preview one cell; full types preview the complete label.
+// Scale is chosen to fit ~270px wide; tiny stickers are zoomed in (capped at 4×).
+function LabelPreview({ product, stickerType, shopName }) {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || !product) return null;
+
+  const html = cfg.isGrid
+    ? buildLabelCellHTML(product, stickerType, shopName || 'GOSUAS')
+    : buildFullLabelHTML(product, stickerType, shopName || 'GOSUAS');
+
+  const mmW = cfg.isGrid ? parseFloat(cfg.cellW) : parseFloat(cfg.pageW);
+  const mmH = cfg.isGrid ? parseFloat(cfg.cellH) : parseFloat(cfg.pageH);
+  const PX_PER_MM = 3.7795;
+  const naturalW = mmW * PX_PER_MM;
+  const naturalH = mmH * PX_PER_MM;
+  const scale = Math.min(270 / naturalW, 4);
+  const displayH = Math.ceil(naturalH * scale) + 2;
+  const dimLabel = cfg.isGrid
+    ? `${cfg.cellW} × ${cfg.cellH} per label`
+    : `${cfg.pageW} × ${cfg.pageH}`;
+
+  return (
+    <div style={{margin:'10px 0 4px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:'6px',padding:'10px 12px'}}>
+      <div style={{fontSize:'11px',color:'#64748b',marginBottom:'8px',fontWeight:500}}>
+        Label preview — {dimLabel}
+      </div>
+      <div style={{overflow:'hidden',height:`${displayH}px`}}>
+        <div
+          style={{
+            transform:`scale(${scale.toFixed(4)})`,
+            transformOrigin:'top left',
+            width:`${naturalW}px`,
+            height:`${naturalH}px`,
+            background:'#fff',
+            border:'0.5px solid #aaa',
+            boxSizing:'border-box',
+          }}
+          dangerouslySetInnerHTML={{__html: html}}
+        />
+      </div>
+    </div>
+  );
 }
 
 function BarChart({ data }) {
@@ -1218,7 +1296,7 @@ function PdfStorePage({ tenantInfo }) {
       fd.append('price', uploadForm.price);
       fd.append('password', uploadForm.password);
       fd.append('coverEmoji', uploadForm.coverEmoji);
-      await axios.post(`${API}/digital-products/upload`, fd, { headers: { ...headers, 'Content-Type': 'multipart/form-data' } });
+      await axios.post(`${API}/digital-products/upload`, fd);
       setShowUpload(false);
       setUploadForm({ title:'', description:'', price:'', password:'', coverEmoji:'📄' });
       setUploadFile(null);
@@ -1396,8 +1474,10 @@ function PdfStorePage({ tenantInfo }) {
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sc_sidebar') === '1');
+  const toggleSidebarCollapse = () => setSidebarCollapsed(v => { const n = !v; localStorage.setItem('sc_sidebar', n ? '1' : '0'); return n; });
   const [products, setProducts] = useState([]);
-  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, description: '', hsnCode: '', gstRate: '' };
+  const EMPTY_FORM = { productType: 'OTHER', name: '', category: '', subcategory: '', sku: '', purchasePrice: '', sellingPrice: '', mrp: '', depositAmount: '', rentAmount: '', stockQty: '', selectedAttrs: {}, variants: [], colours: [], colorPhotos: {}, colourStocks: {}, showColourPicker: false, showToWebsite: false, festiveOffer: false, rentalAvailable: false, trackStock: true, description: '', hsnCode: '', gstRate: '' };
   const [form, setForm] = useState(EMPTY_FORM);
   const makeEmptyImageSlots = (n) => Array.from({length:n}, () => ({file:null,preview:null}));
   const [imageSlots, setImageSlots] = useState(makeEmptyImageSlots(2));
@@ -1452,6 +1532,12 @@ function App() {
   const [bills, setBills] = useState([]);
   const [showNotif, setShowNotif] = useState(false);
   const [customers, setCustomers] = useState([]);
+  const [custViewId, setCustViewId]         = useState(null);
+  const [custViewData, setCustViewData]     = useState(null);
+  const [custViewLoading, setCustViewLoading] = useState(false);
+  const [custEditModal, setCustEditModal]   = useState(null);
+  const [custEditError, setCustEditError]   = useState('');
+  const [custEditLoading, setCustEditLoading] = useState(false);
   const [orders, setOrders] = useState([]);
   const [expandedOrder, setExpandedOrder] = useState(null);
   const [custSearch, setCustSearch] = useState('');
@@ -1459,6 +1545,7 @@ function App() {
   const [orderSourceFilter, setOrderSourceFilter] = useState('ALL');
   const [custPage, setCustPage] = useState(1);
   const [orderPage, setOrderPage] = useState(1);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const PAGE_ROWS = 25;
   const [tenantInfo, setTenantInfo] = useState(null);
   const [upgradingPlan, setUpgradingPlan] = useState(false);
@@ -1502,6 +1589,50 @@ function App() {
   const [damageForm, setDamageForm] = useState({ qty: '', reason: 'OTHER', notes: '' });
   const [damageSubmitError, setDamageSubmitError] = useState('');
   const [damageSubmitLoading, setDamageSubmitLoading] = useState(false);
+
+  // ── Quick Billing Catalogue ─────────────────────────────────────────────────
+  const [catalogSearch, setCatalogSearch]             = useState('');
+  const [catalogCategoryFilter, setCatalogCategoryFilter] = useState('');
+  const [catalogInStockOnly, setCatalogInStockOnly]   = useState(false);
+  const [catalogVariantModal, setCatalogVariantModal] = useState(null); // product whose siblings are being picked
+
+  // ── Expenses state ──────────────────────────────────────────────────────────
+  const [expenses, setExpenses] = useState([]);
+  const [expenseLoading, setExpenseLoading] = useState(false);
+  const [expenseError, setExpenseError] = useState('');
+  const [expensePage, setExpensePage] = useState(1);
+  const [expenseSearch, setExpenseSearch] = useState('');
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState('');
+  const [expensePaymentFilter, setExpensePaymentFilter] = useState('');
+  const [expenseDateFilter, setExpenseDateFilter] = useState('');
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const EXPENSE_FORM_EMPTY = { category: '', amount: '', expenseDate: new Date().toISOString().slice(0,10), description: '', paymentMethod: 'CASH', referenceNumber: '' };
+  const [expenseForm, setExpenseForm] = useState(EXPENSE_FORM_EMPTY);
+  const [expenseFormError, setExpenseFormError] = useState('');
+  const [expenseFormLoading, setExpenseFormLoading] = useState(false);
+  const [expenseEditId, setExpenseEditId] = useState(null);
+  const [expenseSummary, setExpenseSummary] = useState(null);
+
+  // ── Offers & Combos ────────────────────────────────────────────────────────
+  const [offers, setOffers] = useState([]);
+  const [offersLoading, setOffersLoading] = useState(false);
+  const [offerSearch, setOfferSearch] = useState('');
+  const [offerStatusFilter, setOfferStatusFilter] = useState('ALL');
+  const [offerFormOpen, setOfferFormOpen] = useState(false);
+  const [offerEditId, setOfferEditId] = useState(null);
+  const OFFER_FORM_EMPTY = {
+    name: '', description: '', offerType: 'CUSTOMER_SELECT', requiredQty: 1,
+    comboPrice: '', startDateTime: '', endDateTime: '',
+    active: true, showOnHome: true, allowRepeat: false, posterUrl: '',
+    eligibleProducts: [],
+  };
+  const [offerForm, setOfferForm] = useState(OFFER_FORM_EMPTY);
+  const [offerFormError, setOfferFormError] = useState('');
+  const [offerFormLoading, setOfferFormLoading] = useState(false);
+  const [offerProductSearch, setOfferProductSearch] = useState('');
+  const [offerPosterPreview, setOfferPosterPreview] = useState(null);
+  const [offerPosterUploading, setOfferPosterUploading] = useState(false);
+  const [offerDeleteConfirm, setOfferDeleteConfirm] = useState(null);
 
   // ── Sales Returns ──────────────────────────────────────────────────────────
   const [salesReturns, setSalesReturns] = useState([]);
@@ -1592,13 +1723,13 @@ function App() {
       if (shopLogoFile) {
         const fd = new FormData();
         fd.append('file', shopLogoFile);
-        const res = await axios.post(`${API}/tenant/logo`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const res = await axios.post(`${API}/tenant/logo`, fd);
         setTenantInfo(res.data);
       }
       if (shopBannerFile) {
         const fd = new FormData();
         fd.append('file', shopBannerFile);
-        const res = await axios.post(`${API}/tenant/banner`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const res = await axios.post(`${API}/tenant/banner`, fd);
         setTenantInfo(res.data);
       }
       const infoUpdate = {};
@@ -1682,6 +1813,102 @@ function App() {
     }
   };
 
+  const loadExpenses = async () => {
+    setExpenseLoading(true);
+    try {
+      const res = await axios.get(`${API}/expenses`);
+      setExpenses(res.data);
+      setExpenseError('');
+    } catch (e) {
+      setExpenseError(e.response?.data?.error || 'Could not load expenses.');
+    } finally {
+      setExpenseLoading(false);
+    }
+  };
+
+  const loadExpenseSummary = async () => {
+    try {
+      const res = await axios.get(`${API}/expenses/summary`);
+      setExpenseSummary(res.data);
+    } catch (e) {
+      // Non-critical — silent fail
+    }
+  };
+
+  // ── Expense CRUD handlers ──────────────────────────────────────────────────
+
+  const EXPENSE_CATEGORIES = [
+    { value:'DAILY_EXPENSE',  label:'Daily Expense' },
+    { value:'RENT',           label:'Rent' },
+    { value:'ELECTRICITY',    label:'Electricity' },
+    { value:'WATER_BILL',     label:'Water Bill' },
+    { value:'SALARY',         label:'Salary' },
+    { value:'TRANSPORT',      label:'Transport' },
+    { value:'OTHER_EXPENSE',  label:'Other Expense' },
+  ];
+  const EXPENSE_PAYMENT_METHODS = [
+    { value:'CASH',  label:'Cash' },
+    { value:'CARD',  label:'Card' },
+    { value:'UPI',   label:'UPI' },
+    { value:'OTHER', label:'Other' },
+  ];
+
+  const saveExpense = async (e) => {
+    e.preventDefault();
+    if (expenseFormLoading) return;
+    setExpenseFormError('');
+    if (!expenseForm.category) { setExpenseFormError('Category is required'); return; }
+    const amt = parseFloat(expenseForm.amount);
+    if (!expenseForm.amount || isNaN(amt) || amt <= 0) { setExpenseFormError('Amount must be greater than zero'); return; }
+    if (!expenseForm.expenseDate) { setExpenseFormError('Expense date is required'); return; }
+    setExpenseFormLoading(true);
+    try {
+      const payload = {
+        category:        expenseForm.category,
+        amount:          amt,
+        expenseDate:     expenseForm.expenseDate,
+        description:     expenseForm.description || null,
+        paymentMethod:   expenseForm.paymentMethod || 'CASH',
+        referenceNumber: expenseForm.referenceNumber || null,
+      };
+      if (expenseEditId) {
+        await axios.put(`${API}/expenses/${expenseEditId}`, payload);
+        showToast('Expense updated');
+      } else {
+        await axios.post(`${API}/expenses`, payload);
+        showToast('Expense added');
+      }
+      setShowExpenseForm(false);
+      setExpenseForm(EXPENSE_FORM_EMPTY);
+      setExpenseEditId(null);
+      await loadExpenses();
+      loadExpenseSummary();
+    } catch (err) {
+      setExpenseFormError(err.response?.data?.error || err.response?.data?.message || 'Failed to save expense');
+    } finally {
+      setExpenseFormLoading(false);
+    }
+  };
+
+  const deleteExpense = (id, category) => {
+    const catLabel = EXPENSE_CATEGORIES.find(c => c.value === category)?.label || category;
+    setConfirmDialog({
+      title: 'Delete Expense',
+      message: `Delete this ${catLabel} expense? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await axios.delete(`${API}/expenses/${id}`);
+          setExpenses(prev => prev.filter(ex => ex.id !== id));
+          loadExpenseSummary();
+          showToast('Expense deleted');
+        } catch (err) {
+          showToast('Failed to delete expense: ' + (err.response?.data?.error || err.message), 'error');
+        }
+      }
+    });
+  };
+
   useEffect(() => {
     const current = window.location.hash.replace(/^#\/?/, '');
     if (current === activePage || (!current && activePage === 'home')) return;
@@ -1698,7 +1925,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isLoggedIn) { loadProducts(); loadTenantInfo(); loadTenantCategories(); loadDigitalProducts(); }
+    if (isLoggedIn) { loadProducts(); loadTenantInfo(); loadTenantCategories(); loadDigitalProducts(); loadExpenseSummary(); }
   }, [isLoggedIn]);
 
   useEffect(() => {
@@ -1707,14 +1934,21 @@ function App() {
 
   useEffect(() => {
     if (isLoggedIn && activePage === 'reports') { loadBills(); if (!rptStats) loadReports('', ''); }
-    if (isLoggedIn && activePage === 'customers' && customers.length === 0)
-      axios.get(`${API}/admin/customers`).then(r => setCustomers(r.data)).catch(() => {});
-    if (isLoggedIn && activePage === 'orders' && orders.length === 0)
-      axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {});
+    if (isLoggedIn && activePage === 'customers')
+      axios.get(`${API}/admin/customers`).then(r => setCustomers(r.data)).catch(e => console.error('Failed to load customers:', e));
+    if (isLoggedIn && activePage === 'orders') {
+      setOrdersLoading(true);
+      axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {}).finally(() => setOrdersLoading(false));
+    }
     if (isLoggedIn && activePage === 'rental')
       axios.get(`${API}/rentals`).then(r => setRentals(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'returns') loadSalesReturns();
     if (isLoggedIn && activePage === 'damage') loadDamages();
+  if (isLoggedIn && activePage === 'expenses') loadExpenses();
+  if (isLoggedIn && activePage === 'offers') {
+    setOffersLoading(true);
+    axios.get(`${API}/offers`).then(r => setOffers(r.data)).catch(() => {}).finally(() => setOffersLoading(false));
+  }
   }, [activePage, isLoggedIn]);
 
   useEffect(() => {
@@ -1747,6 +1981,11 @@ function App() {
         }
       }
     });
+  };
+
+  const refreshOrders = () => {
+    setOrdersLoading(true);
+    axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {}).finally(() => setOrdersLoading(false));
   };
 
   // ── Rental register handlers ──
@@ -1906,9 +2145,11 @@ function App() {
 
   const handleLogin = (token) => {
     localStorage.setItem('gosuas_token', token);
-    // Navigate to home (strip hash) so the app starts fresh instead of
-    // reloading at whatever protected page triggered the session-expiry redirect.
-    window.location.replace(window.location.pathname);
+    // Strip any stale URL hash left from the session-expiry redirect, then
+    // update React state directly — avoids an unreliable same-path reload.
+    if (window.location.hash) window.history.replaceState(null, '', window.location.pathname);
+    setIsLoggedIn(true);
+    setActivePage('home');
   };
 
   const handleLogout = () => {
@@ -1947,7 +2188,7 @@ function App() {
     if (!slot?.file) return null;
     const fd = new FormData();
     fd.append('file', slot.file);
-    const res = await axios.post(`${API}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    const res = await axios.post(`${API}/upload`, fd);
     return res.data.url;
   };
 
@@ -1970,7 +2211,7 @@ function App() {
     if (!slot.file) return slot.serverUrl || null; // keep the existing photo if it wasn't changed
     const fd = new FormData();
     fd.append('file', slot.file);
-    const res = await axios.post(`${API}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    const res = await axios.post(`${API}/upload`, fd);
     return res.data.url;
   };
 
@@ -1980,7 +2221,7 @@ function App() {
       if (slot.file) {
         const fd = new FormData();
         fd.append('file', slot.file);
-        const res = await axios.post(`${API}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const res = await axios.post(`${API}/upload`, fd);
         urls.push(res.data.url);
       }
     }
@@ -1992,13 +2233,35 @@ function App() {
   };
 
   // Ad-hoc variant rows (Colour, Size, or any custom type) for categories with no predefined attributes.
-  const addVariantRow = (presetName = '') => setForm(f => ({...f, variants: [...f.variants, { name: presetName, value: '' }]}));
+  const addVariantRow = (presetName = '') => setForm(f => ({...f, variants: [...f.variants, { name: presetName, value: '', imageSlot: null }]}));
   const updateVariantRow = (idx, patch) => setForm(f => ({...f, variants: f.variants.map((v, i) => i === idx ? {...v, ...patch} : v)}));
   const removeVariantRow = (idx) => setForm(f => ({...f, variants: f.variants.filter((_, i) => i !== idx)}));
 
-  const addEditVariantRow = (presetName = '') => setEditModal(m => ({...m, variants: [...(m.variants||[]), { name: presetName, value: '' }]}));
+  const addEditVariantRow = (presetName = '') => setEditModal(m => ({...m, variants: [...(m.variants||[]), { name: presetName, value: '', imageSlot: null }]}));
   const updateEditVariantRow = (idx, patch) => setEditModal(m => ({...m, variants: m.variants.map((v, i) => i === idx ? {...v, ...patch} : v)}));
   const removeEditVariantRow = (idx) => setEditModal(m => ({...m, variants: m.variants.filter((_, i) => i !== idx)}));
+  const setVariantImage = (idx, file) => setForm(f => ({...f, variants: f.variants.map((v, i) => i === idx ? {...v, imageSlot: {file, preview: URL.createObjectURL(file), serverUrl: null}} : v)}));
+  const removeVariantImage = (idx) => setForm(f => ({...f, variants: f.variants.map((v, i) => i === idx ? {...v, imageSlot: null} : v)}));
+  const setEditVariantImage = (idx, file) => setEditModal(m => ({...m, variants: m.variants.map((v, i) => i === idx ? {...v, imageSlot: {file, preview: URL.createObjectURL(file), serverUrl: null}} : v)}));
+  const removeEditVariantImage = (idx) => setEditModal(m => ({...m, variants: m.variants.map((v, i) => i === idx ? {...v, imageSlot: null} : v)}));
+  const uploadVariantImages = async (variants) => {
+    const result = {};
+    for (const v of (variants || [])) {
+      const name = (v.name || '').trim();
+      const value = (v.value || '').trim();
+      if (!name || !value || !v.imageSlot) continue;
+      const key = `${name}|${value}`;
+      if (v.imageSlot.file) {
+        const fd = new FormData();
+        fd.append('file', v.imageSlot.file);
+        const res = await axios.post(`${API}/upload`, fd);
+        result[key] = res.data.url;
+      } else if (v.imageSlot.serverUrl) {
+        result[key] = v.imageSlot.serverUrl;
+      }
+    }
+    return Object.keys(result).length ? JSON.stringify(result) : null;
+  };
 
   const createProduct = async (e) => {
     e.preventDefault();
@@ -2014,8 +2277,10 @@ function App() {
         purchasePrice: Number(form.purchasePrice), ...pricing, stockQty: Number(form.stockQty),
         lowStockAlertQty: null, imageUrl, active: form.showToWebsite, festiveOffer: form.festiveOffer,
         hsnCode: form.hsnCode || null, gstRate: form.gstRate !== '' ? Number(form.gstRate) : null,
+        trackStock: form.trackStock !== false,
         rentalAvailable: form.rentalAvailable, productType: form.productType,
         description: form.description || null,
+        variantImages: variantImagesJson,
       };
       if (activeAttrs.length > 0) {
         const combos = cartesian(activeAttrs.map(a => form.selectedAttrs[a.name]));
@@ -2130,9 +2395,14 @@ function App() {
     // editable name+value rows, not limited to Colour/Size. Colour is pulled out into its
     // own multi-select + per-colour-photo picker, same as Add Product.
     const colourEntry = Object.entries(editAttrValues).find(([name]) => ['colour','color'].includes(name.trim().toLowerCase()));
+    let variantImagesMap = {};
+    if (p.variantImages) { try { variantImagesMap = JSON.parse(p.variantImages); } catch {} }
     const variants = Object.entries(editAttrValues)
       .filter(([name]) => !['colour','color'].includes(name.trim().toLowerCase()))
-      .map(([name, value]) => ({ name, value }));
+      .map(([name, value]) => {
+        const imgUrl = variantImagesMap[`${name}|${value}`] || null;
+        return { name, value, imageSlot: imgUrl ? { file: null, preview: `${BACKEND}${imgUrl}`, serverUrl: imgUrl } : null };
+      });
     const makeSlot = (url) => ({
       file: null,
       preview: url ? `${BACKEND}${url}` : null,
@@ -2192,6 +2462,7 @@ function App() {
       imageSlots: Array.from({length: slotCount}, (_, i) => makeSlot(existingUrls[i])),
       hsnCode: p.hsnCode || '',
       gstRate: p.gstRate != null ? String(p.gstRate) : '',
+      trackStock: p.trackStock !== false,
     });
   };
 
@@ -2231,13 +2502,14 @@ function App() {
       if (slot.file) {
         const fd = new FormData();
         fd.append('file', slot.file);
-        const r = await axios.post(`${API}/upload`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        const r = await axios.post(`${API}/upload`, fd);
         savedUrls.push(r.data.url);
       } else if (slot.serverUrl) {
         savedUrls.push(slot.serverUrl);
       }
     }
     const imageUrl = savedUrls.join(',') || null;
+    const editVariantImagesJson = await uploadVariantImages(editModal.variants || []);
     const editCatDef = tenantCategories.find(c => c.name === editModal.category);
     const editAttrs = editCatDef?.attributes || [];
     const attrVals = editModal.editAttrValues || {};
@@ -2260,6 +2532,8 @@ function App() {
       active: editModal.showToWebsite,
       hsnCode: editModal.hsnCode || null,
       gstRate: editModal.gstRate !== '' && editModal.gstRate != null ? Number(editModal.gstRate) : null,
+      trackStock: editModal.trackStock !== false,
+      variantImages: editVariantImagesJson,
     };
       if (editAttrs.length > 0) {
         const color = attrVals[editAttrs[0]?.name] || null;
@@ -2435,7 +2709,7 @@ function App() {
   })();
 
   // ── Stock alerts ──
-  const lowStockItems  = products.filter(p => (p.stockQty ?? 0) < 5);
+  const lowStockItems  = products.filter(p => p.trackStock !== false && (p.stockQty ?? 0) < 5);
   const criticalItems  = lowStockItems.filter(p => p.stockQty === 0);
   const warningItems   = lowStockItems.filter(p => p.stockQty > 0);
 
@@ -2480,7 +2754,7 @@ function App() {
   const avgBill       = totalBills > 0 ? totalRevenue / totalBills : 0;
 
   return (
-    <div className={`app-layout${sidebarOpen ? ' sidebar-open' : ''}`} onClick={() => { showNotif && setShowNotif(false); }}>
+    <div className={`app-layout${sidebarOpen ? ' sidebar-open' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`} onClick={() => { showNotif && setShowNotif(false); }}>
 
       {/* Mobile sidebar overlay */}
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
@@ -2506,38 +2780,44 @@ function App() {
         </div>
 
         <div className="sidebar-nav">
-          <button className={`nav-item ${activePage==='home'?'nav-active':''}`} onClick={() => { setActivePage('home'); setSidebarOpen(false); }}>
-            🏠 Home
+          <button className={`nav-item ${activePage==='home'?'nav-active':''}`} onClick={() => { setActivePage('home'); setSidebarOpen(false); }} data-label="Home" title="Home">
+            <span className="nav-icon">🏠</span><span className="nav-label"> Home</span>
           </button>
-          <button className={`nav-item ${activePage==='reports'?'nav-active':''}`} onClick={() => { setActivePage('reports'); setSidebarOpen(false); }}>
-            📊 Reports
+          <button className={`nav-item ${activePage==='reports'?'nav-active':''}`} onClick={() => { setActivePage('reports'); setSidebarOpen(false); }} data-label="Reports" title="Reports">
+            <span className="nav-icon">📊</span><span className="nav-label"> Reports</span>
           </button>
-          <button className={`nav-item ${activePage==='customers'?'nav-active':''}`} onClick={() => { setActivePage('customers'); setSidebarOpen(false); }}>
-            👥 Customers
+          <button className={`nav-item ${activePage==='orders'?'nav-active':''}`} onClick={() => { setActivePage('orders'); setSidebarOpen(false); }} data-label="Orders" title="Orders">
+            <span className="nav-icon">🛒</span><span className="nav-label"> Orders</span>
           </button>
-          <button className={`nav-item ${activePage==='orders'?'nav-active':''}`} onClick={() => { setActivePage('orders'); setSidebarOpen(false); }}>
-            🛒 Orders
+          <button className={`nav-item ${activePage==='customers'?'nav-active':''}`} onClick={() => { setActivePage('customers'); setSidebarOpen(false); }} data-label="Customer Data" title="Customer Data">
+            <span className="nav-icon">👥</span><span className="nav-label"> Customer Data</span>
           </button>
           {tenantInfo?.subdomain === 'gosuas' && (
-            <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }}>
-              🔑 Rental
+            <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }} data-label="Rental" title="Rental">
+              <span className="nav-icon">🔑</span><span className="nav-label"> Rental</span>
             </button>
           )}
-          <button className={`nav-item ${activePage==='alerts'?'nav-active':''}`} onClick={() => { setActivePage('alerts'); setSidebarOpen(false); }}>
-            ⚠ Stock Alerts
-            {lowStockItems.length > 0 && <span className="alert-count-badge" style={{marginLeft:6}}>{lowStockItems.length}</span>}
+          <button className={`nav-item ${activePage==='alerts'?'nav-active':''}`} onClick={() => { setActivePage('alerts'); setSidebarOpen(false); }} data-label="Stock Alerts" title="Stock Alerts">
+            <span className="nav-icon">⚠</span><span className="nav-label"> Stock Alerts</span>
+            {lowStockItems.length > 0 && <span className="alert-count-badge nav-badge" style={{marginLeft:6}}>{lowStockItems.length}</span>}
           </button>
-          <button className={`nav-item ${activePage==='plan'?'nav-active':''}`} onClick={() => { setActivePage('plan'); setSidebarOpen(false); }}>
-            💎 My Plan
+          <button className={`nav-item ${activePage==='plan'?'nav-active':''}`} onClick={() => { setActivePage('plan'); setSidebarOpen(false); }} data-label="My Plan" title="My Plan">
+            <span className="nav-icon">💎</span><span className="nav-label"> My Plan</span>
           </button>
-          <button className={`nav-item ${activePage==='returns'?'nav-active':''}`} onClick={() => { setActivePage('returns'); setSidebarOpen(false); }}>
-            🔄 Sales Returns
+          <button className={`nav-item ${activePage==='returns'?'nav-active':''}`} onClick={() => { setActivePage('returns'); setSidebarOpen(false); }} data-label="Sales Returns" title="Sales Returns">
+            <span className="nav-icon">🔄</span><span className="nav-label"> Sales Returns</span>
           </button>
-          <button className={`nav-item ${activePage==='damage'?'nav-active':''}`} onClick={() => { setActivePage('damage'); setSidebarOpen(false); }}>
-            🗑 Damage Stock
+          <button className={`nav-item ${activePage==='damage'?'nav-active':''}`} onClick={() => { setActivePage('damage'); setSidebarOpen(false); }} data-label="Damage Stock" title="Damage Stock">
+            <span className="nav-icon">🗑</span><span className="nav-label"> Damage Stock</span>
           </button>
-          <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }}>
-            🏷 Print Labels
+          <button className={`nav-item ${activePage==='expenses'?'nav-active':''}`} onClick={() => { setActivePage('expenses'); setSidebarOpen(false); }} data-label="Expenses" title="Expenses">
+            <span className="nav-icon">💸</span><span className="nav-label"> Expenses</span>
+          </button>
+          <button className={`nav-item ${activePage==='offers'?'nav-active':''}`} onClick={() => { setActivePage('offers'); setSidebarOpen(false); }} data-label="Offers &amp; Combos" title="Offers & Combos">
+            <span className="nav-icon">🎁</span><span className="nav-label"> Offers &amp; Combos</span>
+          </button>
+          <button className={`nav-item ${activePage==='print-labels'?'nav-active':''}`} onClick={() => { setActivePage('print-labels'); setSidebarOpen(false); setBulkSelectedIds(new Set()); }} data-label="Print Labels" title="Print Labels">
+            <span className="nav-icon">🏷</span><span className="nav-label"> Print Labels</span>
           </button>
         </div>
 
@@ -2560,7 +2840,7 @@ function App() {
           </div>
         )}
 
-        <button className="sidebar-logout" onClick={() => { handleLogout(); setSidebarOpen(false); }}>⏻ Logout</button>
+        <button className="sidebar-logout" onClick={() => { handleLogout(); setSidebarOpen(false); }} title="Logout"><span className="nav-icon">⏻</span><span className="nav-label"> Logout</span></button>
       </nav>
 
       {/* ── Main area ── */}
@@ -2571,9 +2851,24 @@ function App() {
           <button className="hamburger-btn" onClick={e => { e.stopPropagation(); setSidebarOpen(o => !o); }}>
             {sidebarOpen ? '✕' : '☰'}
           </button>
-          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock' }[activePage] || 'Home'}</h2>
+          <button className="sidebar-toggle-btn" onClick={toggleSidebarCollapse} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+            {sidebarCollapsed ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <line x1="9" y1="3" x2="9" y2="21"/>
+                <polyline points="11 9 15 12 11 15"/>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <line x1="9" y1="3" x2="9" y2="21"/>
+                <polyline points="15 9 11 12 15 15"/>
+              </svg>
+            )}
+          </button>
+          <h2 className="page-title">{{ home:'Home', reports:'Reports', customers:'Customers', orders:'Orders', rental:'Rental', alerts:'Stock Alerts', 'print-labels':'Print Labels', plan:'My Plan & Billing', returns:'Sales Returns', damage:'Damage Stock', expenses:'Expenses', offers:'Offers & Combos' }[activePage] || 'Home'}</h2>
           <div className="header-right" onClick={e => e.stopPropagation()}>
-            <a href={`https://${getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
+            <a href={`https://${tenantInfo?.subdomain ?? getSubdomain()}.theshopclaude.com/shops`} target="_blank" rel="noreferrer"
               title="Visit your store"
               style={{display:'flex',alignItems:'center',justifyContent:'center',width:36,height:36,borderRadius:10,background:'#EFF6FF',border:'1.5px solid #BFDBFE',textDecoration:'none',fontSize:18,flexShrink:0}}>
               🏪
@@ -2617,7 +2912,8 @@ function App() {
 
         {/* ── HOME PAGE ── */}
         {activePage === 'home' && <div className="page-content">
-        <section>
+        <div className="pos-layout">
+        <section className="pos-billing">
           <h2>Offline Billing</h2>
           <div className="barcode-row">
             <input
@@ -2769,6 +3065,147 @@ function App() {
             </div>
           )}
         </section>
+        <div className="pos-left">
+        {/* ── Quick Billing – Products catalogue ── */}
+        {(() => {
+          // Helpers (scoped to avoid polluting outer scope)
+          const firstImgUrl = (p) => (p.imageUrl || '').split(',').filter(Boolean)[0] || null;
+          const catalogCategories = [...new Set(products.filter(p => p.productType !== 'RENTAL' && p.sellingPrice).map(p => p.category).filter(Boolean))].sort();
+          const q = catalogSearch.trim().toLowerCase();
+          const catalogProducts = products.filter(p => {
+            if (p.productType === 'RENTAL') return false;
+            if (!p.sellingPrice) return false;
+            if (catalogInStockOnly && p.trackStock !== false && (p.stockQty ?? 0) <= 0) return false;
+            if (catalogCategoryFilter && p.category !== catalogCategoryFilter) return false;
+            if (q && !p.name?.toLowerCase().includes(q) && !p.sku?.toLowerCase().includes(q) && !p.barcode?.toLowerCase().includes(q) && !variantLabel(p).toLowerCase().includes(q)) return false;
+            return true;
+          });
+          // Detect color siblings for a product (same base SKU + category, different colors)
+          const getColorSiblings = (p) => {
+            if (!p.color) return [];
+            const base = baseSkuOf(p.sku);
+            return products.filter(x => x.id !== p.id && x.category === p.category && x.color && baseSkuOf(x.sku) === base);
+          };
+          // When a product card is clicked, either add directly or open variant picker for grouped colors
+          const handleCatalogAdd = (p) => {
+            const siblings = getColorSiblings(p);
+            if (siblings.length > 0) {
+              // Show all color variants including current product
+              const allVariants = [p, ...siblings].sort((a, b) => (a.color || '').localeCompare(b.color || ''));
+              setCatalogVariantModal({ canonical: p, variants: allVariants });
+            } else {
+              addProductToCart(p);
+            }
+          };
+          return (
+          <section style={{marginTop:24,paddingTop:20,borderTop:'1.5px solid #e5e7eb'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:8}}>
+              <h2 style={{margin:0,fontSize:16,fontWeight:700}}>🛍 Quick Billing – Products</h2>
+              <span style={{fontSize:12,color:'#6b7280'}}>{catalogProducts.length} product{catalogProducts.length !== 1 ? 's' : ''}</span>
+            </div>
+            {/* Filters */}
+            <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14,alignItems:'center'}}>
+              <input
+                className="cust-search"
+                style={{flex:'1 1 180px',minWidth:0}}
+                placeholder="🔍 Search by name, SKU, barcode…"
+                value={catalogSearch}
+                onChange={e => setCatalogSearch(e.target.value)}
+              />
+              {catalogCategories.length > 0 && (
+                <select
+                  style={{padding:'7px 10px',borderRadius:8,border:'1.5px solid #e5e7eb',fontSize:13,background:'#fff',color:'#374151',cursor:'pointer'}}
+                  value={catalogCategoryFilter}
+                  onChange={e => setCatalogCategoryFilter(e.target.value)}
+                >
+                  <option value="">All Categories</option>
+                  {catalogCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
+              <label style={{display:'flex',alignItems:'center',gap:6,fontSize:13,color:'#374151',cursor:'pointer',userSelect:'none'}}>
+                <input type="checkbox" checked={catalogInStockOnly} onChange={e => setCatalogInStockOnly(e.target.checked)} style={{accentColor:'#2563eb',width:14,height:14}} />
+                In stock only
+              </label>
+            </div>
+            {/* Product grid */}
+            {catalogProducts.length === 0 ? (
+              <div style={{padding:'32px 0',textAlign:'center',color:'#9ca3af',fontSize:14}}>
+                {products.filter(p => p.productType !== 'RENTAL' && p.sellingPrice).length === 0
+                  ? 'No products yet. Add products in the Inventory section to use Quick Billing.'
+                  : 'No products match the current filters.'}
+              </div>
+            ) : (
+              <div className="catalog-grid">
+                {catalogProducts.map(p => {
+                  const imgUrl = firstImgUrl(p);
+                  const outOfStock = p.trackStock !== false && (p.stockQty ?? 0) <= 0;
+                  const vLabel = variantLabel(p);
+                  const hasSiblings = getColorSiblings(p).length > 0;
+                  return (
+                    <div key={p.id} className={`catalog-card${outOfStock ? ' catalog-card-oos' : ''}`} onClick={() => !outOfStock && handleCatalogAdd(p)} title={outOfStock ? `${p.name} — out of stock` : `Add ${p.name} to cart`}>
+                      <div className="catalog-img-wrap">
+                        {imgUrl
+                          ? <img src={`${BACKEND}${imgUrl}`} alt={p.name} className="catalog-img" onError={e => { e.currentTarget.onerror = null; e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }} />
+                          : null}
+                        <div className="catalog-img-placeholder" style={{display: imgUrl ? 'none' : 'flex'}}>📦</div>
+                        {outOfStock && <div className="catalog-oos-badge">OUT OF STOCK</div>}
+                        {!outOfStock && (p.stockQty ?? 0) <= 5 && <div className="catalog-low-badge">{p.stockQty} left</div>}
+                      </div>
+                      <div className="catalog-info">
+                        <div className="catalog-name" title={p.name}>{p.name}</div>
+                        {vLabel && <div className="catalog-variant">{vLabel}{hasSiblings ? ' ▾' : ''}</div>}
+                        <div className="catalog-price">₹{Number(p.sellingPrice).toLocaleString('en-IN')}</div>
+                      </div>
+                      <button
+                        className={`catalog-add-btn${outOfStock ? ' catalog-add-btn-disabled' : ''}`}
+                        disabled={outOfStock}
+                        onClick={e => { e.stopPropagation(); if (!outOfStock) handleCatalogAdd(p); }}
+                      >
+                        {hasSiblings ? 'Choose Variant' : '+ Add'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {/* Variant picker modal */}
+            {catalogVariantModal && (
+              <div className="modal-overlay" onClick={() => setCatalogVariantModal(null)}>
+                <div className="modal-box" style={{maxWidth:400}} onClick={e => e.stopPropagation()}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+                    <h3 style={{margin:0,fontSize:15,fontWeight:700}}>Choose Colour Variant</h3>
+                    <button onClick={() => setCatalogVariantModal(null)} style={{background:'none',border:'none',fontSize:18,cursor:'pointer',color:'#6b7280'}}>×</button>
+                  </div>
+                  <div style={{fontSize:14,color:'#374151',marginBottom:12,fontWeight:600}}>{catalogVariantModal.canonical.name}</div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:10}}>
+                    {catalogVariantModal.variants.map(v => {
+                      const vImgUrl = firstImgUrl(v);
+                      const vOos = (v.stockQty ?? 0) <= 0;
+                      return (
+                        <button
+                          key={v.id}
+                          disabled={vOos}
+                          onClick={() => { addProductToCart(v); setCatalogVariantModal(null); }}
+                          style={{padding:0,border:`2px solid ${vOos ? '#e5e7eb' : '#2563eb'}`,borderRadius:10,background:vOos?'#f9fafb':'#eff6ff',cursor:vOos?'not-allowed':'pointer',opacity:vOos?0.55:1,overflow:'hidden',display:'flex',flexDirection:'column',alignItems:'stretch'}}
+                          title={vOos ? `${v.color} — out of stock` : v.color}
+                        >
+                          {vImgUrl
+                            ? <img src={`${BACKEND}${vImgUrl}`} alt={v.color} style={{width:'100%',height:70,objectFit:'cover'}} onError={e=>{e.currentTarget.style.display='none';}} />
+                            : <div style={{height:70,display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,background:'#f3f4f6'}}>📦</div>}
+                          <div style={{padding:'6px 4px',textAlign:'center'}}>
+                            <div style={{fontSize:12,fontWeight:600,color:'#1f2937'}}>{v.color}</div>
+                            <div style={{fontSize:11,color:vOos?'#ef4444':'#059669',marginTop:2}}>{vOos ? 'Out of stock' : `${v.stockQty} in stock`}</div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+          );
+        })()}
 
         {/* ── Add Product modal ── */}
         {showAddForm && (
@@ -2974,6 +3411,22 @@ function App() {
                     ) : (
                       <input placeholder="Value" value={v.value} onChange={e => updateVariantRow(idx, { value: e.target.value })} />
                     )}
+                    {v.name.trim().toLowerCase() !== 'size' && (
+                      <div className="variant-img-row">
+                        {v.imageSlot?.preview ? (
+                          <div className="variant-img-preview">
+                            <img src={v.imageSlot.preview} alt="variant" />
+                            <button type="button" className="variant-img-remove" onClick={() => removeVariantImage(idx)}>✕</button>
+                          </div>
+                        ) : (
+                          <label className="variant-img-upload">
+                            <span>＋ Variant Image</span>
+                            <input type="file" accept="image/*" style={{display:'none'}}
+                              onChange={e => { const f = e.target.files?.[0]; if (f) setVariantImage(idx, f); }} />
+                          </label>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 <div className="variant-add-row">
@@ -2993,8 +3446,8 @@ function App() {
               required
             />
             {(form.productType === 'RENTAL'
-              ? ['purchasePrice','depositAmount','rentAmount','stockQty']
-              : ['purchasePrice','sellingPrice','mrp','stockQty']
+              ? ['purchasePrice','depositAmount','rentAmount']
+              : ['purchasePrice','sellingPrice','mrp']
             ).map(k => (
               <input
                 key={k}
@@ -3005,6 +3458,19 @@ function App() {
                 min="0"
               />
             ))}
+            <input
+              type="number"
+              placeholder="Stock Quantity"
+              value={form.stockQty}
+              onChange={e => setForm({...form, stockQty: e.target.value})}
+              min="0"
+              disabled={!form.trackStock}
+              style={!form.trackStock ? {opacity:0.4, pointerEvents:'none'} : {}}
+            />
+            <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'#64748B',cursor:'pointer',userSelect:'none',marginTop:-4}}>
+              <input type="checkbox" checked={!form.trackStock} onChange={e => setForm({...form, trackStock: !e.target.checked, stockQty: e.target.checked ? '' : form.stockQty})} style={{width:15,height:15,cursor:'pointer'}} />
+              Don't Track Stock
+            </label>
             {tenantInfo?.gstRegistered && (
               <div style={{display:'flex',gap:8,marginTop:4}}>
                 <input
@@ -3161,6 +3627,8 @@ function App() {
               </div>
             </section>
           )}
+        </div>{/* end pos-left */}
+        </div>{/* end pos-layout */}
         </div>}{/* end home page */}
 
         {/* ── REPORTS PAGE ── */}
@@ -3307,6 +3775,70 @@ function App() {
                   </table>
                 </div>
               )}
+
+            {/* ── Profit & Loss Summary ── */}
+            {(() => {
+              const plGross    = Number(s.plGrossSales      ?? 0);
+              const plDisc     = Number(s.plDiscounts       ?? 0);
+              const plRef      = Number(s.plRefunds         ?? 0);
+              const plNet      = Number(s.plNetSalesRevenue ?? 0);
+              const plExp      = Number(s.plExpenses        ?? 0);
+              const plResult   = Number(s.plNetResult       ?? 0);
+              const plMargin   = s.plMarginPct;   // string or null
+              const plStatus   = s.plStatus;      // "PROFIT" | "LOSS" | "BREAKEVEN"
+              const inr = v => '₹' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+              const statusColor = plStatus === 'PROFIT' ? '#059669' : plStatus === 'LOSS' ? '#dc2626' : '#d97706';
+              const statusLabel = plStatus === 'PROFIT' ? 'Profit' : plStatus === 'LOSS' ? 'Loss' : 'Break-even';
+              return (
+                <div style={{marginTop:'2rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'0.5rem',marginBottom:'1rem'}}>
+                    <span style={{fontSize:'1.25rem'}}>📊</span>
+                    <h3 style={{margin:0,fontSize:'1.1rem',fontWeight:700,color:'var(--text)'}}>Estimated Operating Profit / Loss</h3>
+                  </div>
+                  <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                    <p style={{fontSize:11.5,color:'#9ca3af',margin:'0 0 12px',lineHeight:1.5}}>
+                      <strong>Formula:</strong> Net Sales Revenue = Gross Sales − Discounts − Refunds &nbsp;|&nbsp;
+                      Estimated Operating Result = Net Sales Revenue − Recorded Expenses.
+                      Cost of goods sold (inventory cost) and taxes are <em>not</em> included — consult your accountant for final profitability.
+                    </p>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                      <tbody>
+                        {[
+                          { label:'Gross Sales',              value: inr(plGross),    note:'POS (pre-discount) + Online + Shopify (incl. refunded)', color:'#1f2937' },
+                          { label:'− Discounts',              value: inr(plDisc),     note:'POS discounts applied',                                  color:'#f97316' },
+                          { label:'− Refunds',                value: inr(plRef),      note:'Shopify refunded orders',                                color:'#f97316' },
+                          { label:'Net Sales Revenue',        value: inr(plNet),      note:'Gross Sales − Discounts − Refunds',                      color:'#2563eb', bold:true },
+                          { label:'− Total Expenses',         value: inr(plExp),      note:'Recorded operating expenses (payment date in period)',    color:'#dc2626' },
+                        ].map(row => (
+                          <tr key={row.label} style={{borderBottom:'1px solid #f3f4f6'}}>
+                            <td style={{padding:'7px 0',color: row.bold ? row.color : '#374151',fontWeight: row.bold ? 700 : 400}}>{row.label}</td>
+                            <td style={{padding:'7px 0',color:'#6b7280',fontSize:11,paddingLeft:8}}>{row.note}</td>
+                            <td style={{padding:'7px 0',textAlign:'right',fontWeight: row.bold ? 700 : 500,color: row.color,whiteSpace:'nowrap'}}>{row.value}</td>
+                          </tr>
+                        ))}
+                        <tr style={{borderTop:'2px solid '+statusColor}}>
+                          <td style={{padding:'10px 0',fontWeight:800,color:statusColor,fontSize:14}}>
+                            Estimated Operating {statusLabel}
+                          </td>
+                          <td style={{padding:'10px 0',paddingLeft:8}}>
+                            {plMargin != null && (
+                              <span style={{fontSize:12,color:statusColor,fontWeight:600}}>Margin: {plMargin}%</span>
+                            )}
+                          </td>
+                          <td style={{padding:'10px 0',textAlign:'right',fontWeight:800,color:statusColor,fontSize:15,whiteSpace:'nowrap'}}>
+                            {inr(Math.abs(plResult))}
+                            <span style={{fontSize:11,marginLeft:6,padding:'2px 8px',borderRadius:99,
+                              background:statusColor+'18',color:statusColor,fontWeight:700,border:'1px solid '+statusColor+'44'}}>
+                              {statusLabel.toUpperCase()}
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── Damage Stock Summary ── */}
             {(() => {
@@ -3470,6 +4002,193 @@ function App() {
               );
             })()}
 
+            {/* ── Expense Summary ── */}
+            {(() => {
+              const expenseTotal   = rptStats.expenseTotal    ?? 0;
+              const expenseByCat   = rptStats.expenseByCat    ?? {};
+              const expenseDaily   = rptStats.expenseDaily    ?? [];
+              const expenseCount   = rptStats.expenseCount    ?? 0;
+              const expTotalToday  = rptStats.expTotalToday   ?? 0;
+              const expTotalWeek   = rptStats.expTotalWeek    ?? 0;
+              const expTotalMonth  = rptStats.expTotalMonth   ?? 0;
+              const expenseEntries = rptStats.expenseEntries  ?? [];
+
+              const EXPENSE_CAT_LABELS = {
+                DAILY_EXPENSE:'Daily Expense', RENT:'Rent', ELECTRICITY:'Electricity',
+                WATER_BILL:'Water Bill', SALARY:'Salary', TRANSPORT:'Transport', OTHER_EXPENSE:'Other Expense',
+              };
+              const EXPENSE_CAT_COLORS = {
+                DAILY_EXPENSE:'#7C3AED', RENT:'#2563EB', ELECTRICITY:'#D97706',
+                WATER_BILL:'#0891B2', SALARY:'#059669', TRANSPORT:'#F97316', OTHER_EXPENSE:'#6B7280',
+              };
+              const catValues = Object.values(expenseByCat).map(v => Number(v));
+              const maxCatAmt = Math.max(1, ...catValues);
+
+              function exportExpenseCsv() {
+                const rows = [['Category','Amount (INR)']];
+                Object.entries(EXPENSE_CAT_LABELS).forEach(([k, label]) => {
+                  rows.push([label, Number(expenseByCat[k] || 0).toFixed(2)]);
+                });
+                const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g,'""') + '"').join(',')).join('\n');
+                const a = document.createElement('a');
+                a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+                a.download = 'expense_report.csv';
+                a.click();
+              }
+
+              return (
+                <div style={{marginTop:'2rem'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'0.5rem',marginBottom:'1rem'}}>
+                    <span style={{fontSize:'1.25rem'}}>💸</span>
+                    <h3 style={{margin:0,fontSize:'1.1rem',fontWeight:700,color:'var(--text)'}}>Expense Summary</h3>
+                  </div>
+
+                  <>
+                      {expenseCount === 0 && (
+                        <div style={{marginBottom:'0.75rem',padding:'8px 14px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,fontSize:12.5,color:'#166534',display:'flex',alignItems:'center',gap:6}}>
+                          <span>✔</span> No expenses in this period — <span style={{fontWeight:600,cursor:'pointer',textDecoration:'underline'}} onClick={()=>setActivePage('expenses')}>add from Expenses page</span>
+                        </div>
+                      )}
+                      {/* Summary cards — fixed periods + selected period */}
+                      <div className="rpt-row" style={{marginBottom:'1rem'}}>
+                        {[
+                          { label:'Today',        value: expTotalToday,  color:'#dc2626' },
+                          { label:'This Week',     value: expTotalWeek,   color:'#d97706' },
+                          { label:'This Month',    value: expTotalMonth,  color:'#7c3aed' },
+                          { label:'This Period',   value: expenseTotal,   color:'#0891b2' },
+                        ].map(c => (
+                          <div key={c.label} className="rpt-card">
+                            <div className="rpt-card-label">{c.label}</div>
+                            <div className="rpt-card-value" style={{color:c.color}}>
+                              {'₹' + Number(c.value).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Expense Details table */}
+                      <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                          <span style={{fontWeight:600,fontSize:'0.9rem'}}>Expense Details ({expenseEntries.length}{expenseEntries.length === 200 ? '+' : ''} entries)</span>
+                          {expenseEntries.length > 0 && (
+                            <button className="rpt-export-btn" onClick={() => exportToCsv('expense_details.csv', expenseEntries, [
+                              { label:'Date',           key:'date' },
+                              { label:'Category',       key:'category' },
+                              { label:'Description',    key:'description' },
+                              { label:'Payment Method', key:'paymentMethod' },
+                              { label:'Reference',      key:'referenceNumber' },
+                              { label:'Amount (INR)',   key: r => Number(r.amount || 0).toFixed(2) },
+                            ])}>Export CSV</button>
+                          )}
+                        </div>
+                        {expenseEntries.length === 0 ? (
+                          <div style={{textAlign:'center',padding:'1rem',color:'var(--text-muted)',fontSize:13}}>No expense records in this period.</div>
+                        ) : (
+                          <div style={{overflowX:'auto'}}>
+                            <table className="rpt-table">
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th>Category</th>
+                                  <th>Description</th>
+                                  <th>Payment</th>
+                                  <th>Reference</th>
+                                  <th style={{textAlign:'right'}}>Amount (₹)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {expenseEntries.map((e,i) => (
+                                  <tr key={e.id || i}>
+                                    <td style={{whiteSpace:'nowrap'}}>{e.date ? new Date(e.date + 'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                                    <td>
+                                      <span style={{display:'inline-block',padding:'2px 8px',borderRadius:10,fontSize:11,fontWeight:700,
+                                        background:(EXPENSE_CAT_COLORS[e.category]||'#6B7280')+'18',
+                                        color:EXPENSE_CAT_COLORS[e.category]||'#6B7280',
+                                        border:'1px solid '+(EXPENSE_CAT_COLORS[e.category]||'#6B7280')+'44'}}>
+                                        {EXPENSE_CAT_LABELS[e.category] || e.category}
+                                      </span>
+                                    </td>
+                                    <td style={{maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'#4b5563'}}>{e.description || '—'}</td>
+                                    <td style={{color:'#6b7280',fontSize:12}}>{e.paymentMethod || '—'}</td>
+                                    <td style={{color:'#9ca3af',fontSize:12,fontFamily:'monospace'}}>{e.referenceNumber || '—'}</td>
+                                    <td style={{textAlign:'right',fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>
+                                      {'₹' + Number(e.amount || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot>
+                                <tr style={{background:'#f9fafb',fontWeight:700}}>
+                                  <td colSpan={5} style={{textAlign:'right',padding:'8px 12px',color:'#374151',fontSize:12}}>
+                                    Total ({expenseEntries.length} entries):
+                                  </td>
+                                  <td style={{textAlign:'right',padding:'8px 12px',color:'#dc2626',fontWeight:800}}>
+                                    {'₹' + expenseEntries.reduce((s,e) => s + parseFloat(e.amount||0), 0)
+                                      .toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Category breakdown */}
+                      <div className="rpt-card" style={{marginBottom:'1rem'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                          <span style={{fontWeight:600,fontSize:'0.9rem'}}>Category Breakdown</span>
+                          <button className="rpt-export-btn" onClick={exportExpenseCsv}>Export CSV</button>
+                        </div>
+                        {Object.entries(EXPENSE_CAT_LABELS).map(([key, label]) => {
+                          const amt = Number(expenseByCat[key] || 0);
+                          return (
+                            <div key={key} className="rpt-pay-row">
+                              <span className="rpt-pay-label">{label}</span>
+                              <div className="rpt-pay-bar-wrap">
+                                <div className="rpt-pay-bar" style={{
+                                  width: amt > 0 ? Math.round((amt/maxCatAmt)*100)+'%' : '0%',
+                                  background: EXPENSE_CAT_COLORS[key] || '#6b7280'
+                                }} />
+                              </div>
+                              <span className="rpt-pay-val">
+                                {'₹' + amt.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Daily breakdown */}
+                      {expenseDaily.length > 0 && (
+                        <div className="rpt-card">
+                          <div style={{fontWeight:600,fontSize:'0.9rem',marginBottom:'0.75rem'}}>Daily Expense Breakdown</div>
+                          <div style={{overflowX:'auto'}}>
+                            <table className="rpt-table">
+                              <thead>
+                                <tr>
+                                  <th>Date</th>
+                                  <th style={{textAlign:'right'}}>Amount (₹)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {expenseDaily.map((r,i) => (
+                                  <tr key={i}>
+                                    <td>{r.date}</td>
+                                    <td style={{textAlign:'right',color:'var(--danger,#ef4444)',fontWeight:600}}>
+                                      {'₹' + Number(r.amount).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                  </>
+                </div>
+              );
+            })()}
+
             </>;
           })()}
 
@@ -3591,6 +4310,14 @@ function App() {
                 </button>
               </div>
 
+              {/* Label preview — updates when sticker type or selection changes */}
+              {(() => {
+                const previewProduct = selectedProducts[0] || bulkDisplayed[0] || null;
+                return previewProduct ? (
+                  <LabelPreview product={previewProduct} stickerType={bulkStickerType} shopName={tenantInfo?.name} />
+                ) : null;
+              })()}
+
               {/* Table meta */}
               <div className="table-meta" style={{marginBottom:'6px'}}>
                 {bq || bulkCategoryFilter
@@ -3685,43 +4412,181 @@ function App() {
         {/* ── CUSTOMERS PAGE ── */}
         {activePage === 'customers' && (() => {
           const q = custSearch.toLowerCase();
-          const filtered = customers.filter(c => !q || [c.firstName,c.lastName,c.email,c.phone,c.city].join(' ').toLowerCase().includes(q));
+          const filtered = customers.filter(c =>
+            !q || [c.firstName, c.lastName, c.phone, c.email].join(' ').toLowerCase().includes(q));
           const totalCustPages = Math.max(1, Math.ceil(filtered.length / PAGE_ROWS));
           const safeCustPage = Math.min(custPage, totalCustPages);
           const custSlice = filtered.slice((safeCustPage-1)*PAGE_ROWS, safeCustPage*PAGE_ROWS);
+
+          const openView = async (id) => {
+            setCustViewId(id); setCustViewLoading(true);
+            // Pre-populate with list data so basic info shows even if detail API fails
+            const listData = customers.find(c => c.id === id) || null;
+            setCustViewData(listData);
+            try {
+              const r = await axios.get(`${API}/admin/customers/${id}`);
+              setCustViewData(r.data);
+            } catch(e) { /* keep list data as fallback */ }
+            finally { setCustViewLoading(false); }
+          };
+
+          const saveCustomerEdit = async () => {
+            if (!custEditModal) return;
+            setCustEditError(''); setCustEditLoading(true);
+            try {
+              await axios.put(`${API}/admin/customers/${custEditModal.id}`, {
+                firstName: custEditModal.firstName,
+                lastName:  custEditModal.lastName,
+                phone:     custEditModal.phone,
+              });
+              setCustomers(cs => cs.map(c => c.id === custEditModal.id
+                ? { ...c, firstName: custEditModal.firstName, lastName: custEditModal.lastName, phone: custEditModal.phone }
+                : c));
+              if (custViewData?.id === custEditModal.id) {
+                setCustViewData(v => v ? { ...v, firstName: custEditModal.firstName, lastName: custEditModal.lastName, phone: custEditModal.phone } : v);
+              }
+              setCustEditModal(null);
+              showToast('Customer updated');
+            } catch(e) {
+              setCustEditError(e.response?.data?.error || 'Failed to update customer');
+            } finally { setCustEditLoading(false); }
+          };
+
+          const deleteCust = (c) => setConfirmDialog({
+            title: 'Delete Customer',
+            message: `Delete ${[c.firstName,c.lastName].filter(Boolean).join(' ') || c.phone}? Their billing history is preserved.`,
+            onConfirm: async () => {
+              setConfirmDialog(null);
+              try {
+                await axios.delete(`${API}/admin/customers/${c.id}`);
+                setCustomers(cs => cs.filter(x => x.id !== c.id));
+                if (custViewId === c.id) setCustViewId(null);
+                showToast('Customer deleted');
+              } catch(e) {
+                showToast('Failed to delete customer', 'error');
+              }
+            }
+          });
+
           return (
           <div className="page-content">
+            <div style={{fontSize:13,color:'#6b7280',marginBottom:16}}>
+              Customer records are created automatically when a phone number is entered during POS billing, and are updated on each purchase.
+            </div>
             <div className="cust-toolbar">
-              <input className="cust-search" placeholder="🔍 Search name, email, phone, city…"
+              <input className="cust-search" placeholder="🔍 Search name or phone…"
                 value={custSearch} onChange={e => { setCustSearch(e.target.value); setCustPage(1); }} />
               <span className="cust-count">{filtered.length} customers</span>
               <button className="export-csv-btn" onClick={() => exportToCsv('customers.csv', filtered, [
-                { label: '#', key: (_, i) => i + 1 },
-                { label: 'Name', key: r => [r.firstName, r.lastName].filter(Boolean).join(' ') },
-                { label: 'Email', key: 'email' },
-                { label: 'Phone', key: 'phone' },
-                { label: 'City', key: 'city' },
-                { label: 'State', key: 'state' },
-                { label: 'Orders', key: 'totalOrders' },
-                { label: 'Total Spent', key: r => Number(r.totalSpent || 0).toFixed(2) },
+                { label: '#',                   key: (_, i) => i + 1 },
+                { label: 'Name',               key: r => [r.firstName, r.lastName].filter(Boolean).join(' ') },
+                { label: 'Phone',              key: 'phone' },
+                { label: 'Email',              key: 'email' },
+                { label: 'Total Orders',       key: 'totalOrders' },
+                { label: 'Total Spent (₹)',    key: r => Number(r.totalSpent || 0).toFixed(2) },
+                { label: 'Last Purchase Date', key: r => r.lastPurchaseDate || '' },
               ])}>⬇ Export CSV</button>
             </div>
             <div className="data-table-wrap">
               <table className="data-table">
-                <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>City</th><th>State</th><th>Orders</th><th>Total Spent</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Customer Name</th>
+                    <th>Phone Number</th>
+                    <th style={{textAlign:'center'}}>Total Orders</th>
+                    <th style={{textAlign:'right'}}>Total Purchase (₹)</th>
+                    <th>Last Purchase</th>
+                    <th style={{textAlign:'center'}}>Actions</th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {custSlice.map((c, i) => (
-                    <tr key={c.id}>
-                      <td className="td-num">{(safeCustPage-1)*PAGE_ROWS + i + 1}</td>
-                      <td className="td-name">{[c.firstName,c.lastName].filter(Boolean).join(' ') || '—'}</td>
-                      <td className="td-email">{c.email || '—'}</td>
-                      <td>{c.phone || '—'}</td>
-                      <td>{c.city || '—'}</td>
-                      <td>{c.state || '—'}</td>
-                      <td className="td-center">{c.totalOrders}</td>
-                      <td className="td-amt">₹{Number(c.totalSpent||0).toFixed(2)}</td>
-                    </tr>
-                  ))}
+                  {custSlice.length === 0 ? (
+                    <tr><td colSpan={7} style={{textAlign:'center',padding:'32px',color:'#9ca3af'}}>
+                      {customers.length === 0
+                        ? 'No customers yet. Customer records are saved automatically when a phone number is provided during billing.'
+                        : 'No customers match the search.'}
+                    </td></tr>
+                  ) : custSlice.map((c, i) => {
+                    const fullName = [c.firstName, c.lastName].filter(Boolean).join(' ') || '—';
+                    const isExpanded = custViewId === c.id;
+                    return (
+                      <React.Fragment key={c.id}>
+                        <tr style={{cursor:'pointer'}} onClick={() => isExpanded ? setCustViewId(null) : openView(c.id)}>
+                          <td className="td-num">{(safeCustPage-1)*PAGE_ROWS + i + 1}</td>
+                          <td className="td-name" style={{fontWeight:600}}>{fullName}</td>
+                          <td>{c.phone || '—'}</td>
+                          <td style={{textAlign:'center'}}>{c.totalOrders || 0}</td>
+                          <td style={{textAlign:'right',fontWeight:600,color:'#059669'}}>
+                            ₹{Number(c.totalSpent||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                          </td>
+                          <td style={{color:'#6b7280',fontSize:12}}>
+                            {c.lastPurchaseDate
+                              ? new Date(c.lastPurchaseDate + 'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
+                              : '—'}
+                          </td>
+                          <td style={{textAlign:'center',whiteSpace:'nowrap'}} onClick={e => e.stopPropagation()}>
+                            <button className="btn-secondary" style={{fontSize:11,padding:'3px 8px',marginRight:4}}
+                              onClick={() => isExpanded ? setCustViewId(null) : openView(c.id)}>
+                              {isExpanded ? '▲ Hide' : '▼ View'}
+                            </button>
+                            <button className="btn-secondary" style={{fontSize:11,padding:'3px 8px',marginRight:4}}
+                              onClick={() => { setCustEditModal({id:c.id,firstName:c.firstName||'',lastName:c.lastName||'',phone:c.phone||''}); setCustEditError(''); }}>
+                              Edit
+                            </button>
+                            <button style={{fontSize:11,padding:'3px 8px',background:'#fef2f2',color:'#dc2626',border:'1.5px solid #fecaca',borderRadius:6,cursor:'pointer',fontWeight:600}}
+                              onClick={() => deleteCust(c)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={7} style={{padding:0,background:'#f9fafb',borderBottom:'2px solid #e5e7eb'}}>
+                              <div style={{padding:'16px 20px'}}>
+                                {custViewLoading ? (
+                                  <div style={{color:'#6b7280',fontSize:13,padding:'8px 0'}}>Loading…</div>
+                                ) : custViewData ? (
+                                  <>
+                                    <div style={{display:'flex',gap:24,flexWrap:'wrap',marginBottom:12,fontSize:13,color:'#374151'}}>
+                                      <div><span style={{color:'#9ca3af'}}>Name:</span> <strong>{[custViewData.firstName,custViewData.lastName].filter(Boolean).join(' ')||'—'}</strong></div>
+                                      <div><span style={{color:'#9ca3af'}}>Phone:</span> <strong>{custViewData.phone||'—'}</strong></div>
+                                      {custViewData.email && <div><span style={{color:'#9ca3af'}}>Email:</span> {custViewData.email}</div>}
+                                      <div><span style={{color:'#9ca3af'}}>Total Orders:</span> <strong>{custViewData.totalOrders||0}</strong></div>
+                                      <div><span style={{color:'#9ca3af'}}>Total Spent:</span> <strong style={{color:'#059669'}}>₹{Number(custViewData.totalSpent||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</strong></div>
+                                    </div>
+                                    {custViewData.bills && custViewData.bills.length > 0 ? (
+                                      <>
+                                        <div style={{fontWeight:600,fontSize:12,color:'#1f2937',marginBottom:6}}>POS Bill History ({custViewData.bills.length})</div>
+                                        <table className="admin-table" style={{fontSize:12}}>
+                                          <thead><tr><th>Bill No</th><th>Date</th><th>Items</th><th style={{textAlign:'right'}}>Amount (₹)</th><th>Payment</th></tr></thead>
+                                          <tbody>
+                                            {custViewData.bills.map(b => (
+                                              <tr key={b.id}>
+                                                <td style={{fontFamily:'monospace',fontSize:11}}>{b.billNo}</td>
+                                                <td style={{whiteSpace:'nowrap'}}>{b.date ? new Date(b.date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+                                                <td style={{textAlign:'center'}}>{b.itemCount}</td>
+                                                <td style={{textAlign:'right',fontWeight:600}}>₹{Number(b.total||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                                                <td>{b.paymentMode||'—'}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </>
+                                    ) : (
+                                      <div style={{fontSize:12,color:'#9ca3af'}}>No POS bill history found for this phone number.</div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div style={{color:'#dc2626',fontSize:13}}>Failed to load customer details.</div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -3730,6 +4595,42 @@ function App() {
                 <button className="tbl-pg-btn" onClick={() => setCustPage(p=>Math.max(1,p-1))} disabled={safeCustPage===1}>‹ Prev</button>
                 <span className="tbl-pg-info">Page {safeCustPage} of {totalCustPages}</span>
                 <button className="tbl-pg-btn" onClick={() => setCustPage(p=>Math.min(totalCustPages,p+1))} disabled={safeCustPage===totalCustPages}>Next ›</button>
+              </div>
+            )}
+
+            {/* Edit customer modal */}
+            {custEditModal && (
+              <div className="modal-overlay" onClick={() => setCustEditModal(null)}>
+                <div className="modal-box" style={{maxWidth:420}} onClick={e => e.stopPropagation()}>
+                  <h3 style={{margin:'0 0 16px',fontSize:16}}>Edit Customer</h3>
+                  <div style={{display:'grid',gap:12}}>
+                    <div>
+                      <label className="modal-label">First Name</label>
+                      <input value={custEditModal.firstName}
+                        onChange={e => setCustEditModal(m => ({...m, firstName: e.target.value}))}
+                        placeholder="First name" style={{marginTop:4}} />
+                    </div>
+                    <div>
+                      <label className="modal-label">Last Name</label>
+                      <input value={custEditModal.lastName}
+                        onChange={e => setCustEditModal(m => ({...m, lastName: e.target.value}))}
+                        placeholder="Last name" style={{marginTop:4}} />
+                    </div>
+                    <div>
+                      <label className="modal-label">Phone Number</label>
+                      <input value={custEditModal.phone}
+                        onChange={e => setCustEditModal(m => ({...m, phone: e.target.value}))}
+                        placeholder="Phone number" style={{marginTop:4}} />
+                    </div>
+                  </div>
+                  {custEditError && <div style={{fontSize:13,color:'#dc2626',marginTop:10}}>{custEditError}</div>}
+                  <div style={{marginTop:16,display:'flex',gap:10,justifyContent:'flex-end'}}>
+                    <button className="btn-secondary" onClick={() => setCustEditModal(null)}>Cancel</button>
+                    <button className="btn-primary" disabled={custEditLoading} onClick={saveCustomerEdit}>
+                      {custEditLoading ? 'Saving…' : 'Save Changes'}
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -3744,22 +4645,76 @@ function App() {
           const safeOrdPage = Math.min(orderPage, totalOrdPages);
           const ordSlice = filtered.slice((safeOrdPage-1)*PAGE_ROWS, safeOrdPage*PAGE_ROWS);
           const sourceCounts = { ALL: orders.length, SHOPIFY: orders.filter(o=>o.source==='SHOPIFY').length, POS: orders.filter(o=>o.source==='POS').length, ONLINE: orders.filter(o=>o.source==='ONLINE').length };
+
+          // Online order stats
+          const onlineOrders = orders.filter(o => o.source === 'ONLINE');
+          const onlineCounts = { pending: 0, confirmed: 0, shipped: 0, delivered: 0, cancelled: 0 };
+          let onlineRevenue = 0;
+          onlineOrders.forEach(o => {
+            const s = (o.fulfillmentStatus||'pending').toLowerCase();
+            if (onlineCounts[s] !== undefined) onlineCounts[s]++;
+            onlineRevenue += Number(o.total||0);
+          });
+
+          const statusSelectClass = (st) => {
+            const s = (st||'pending').toLowerCase();
+            return `ord-status-select st-${['pending','confirmed','shipped','delivered','cancelled'].includes(s) ? s : 'pending'}`;
+          };
+
           return (
           <div className="page-content">
+            {/* Online order stats cards */}
+            {(orderSourceFilter === 'ALL' || orderSourceFilter === 'ONLINE') && onlineOrders.length > 0 && (
+              <div className="ord-stats-row">
+                <div className="ord-stat-card ord-stat-pending">
+                  <div className="osc-label">Pending</div>
+                  <div className="osc-val">{onlineCounts.pending}</div>
+                  <div className="osc-sub">awaiting confirmation</div>
+                </div>
+                <div className="ord-stat-card ord-stat-confirmed">
+                  <div className="osc-label">Confirmed</div>
+                  <div className="osc-val">{onlineCounts.confirmed}</div>
+                  <div className="osc-sub">being prepared</div>
+                </div>
+                <div className="ord-stat-card ord-stat-shipped">
+                  <div className="osc-label">Shipped</div>
+                  <div className="osc-val">{onlineCounts.shipped}</div>
+                  <div className="osc-sub">in transit</div>
+                </div>
+                <div className="ord-stat-card ord-stat-delivered">
+                  <div className="osc-label">Delivered</div>
+                  <div className="osc-val">{onlineCounts.delivered}</div>
+                  <div className="osc-sub">completed</div>
+                </div>
+                <div className="ord-stat-card">
+                  <div className="osc-label">Online Revenue</div>
+                  <div className="osc-val" style={{fontSize:18}}>₹{onlineRevenue.toLocaleString('en-IN',{maximumFractionDigits:0})}</div>
+                  <div className="osc-sub">{onlineOrders.length} web orders</div>
+                </div>
+              </div>
+            )}
+
             <div className="cust-toolbar">
-              <input className="cust-search" placeholder="🔍 Search order #, customer, city…"
+              <input className="cust-search" placeholder="Search order #, customer, city..."
                 value={orderSearch} onChange={e => { setOrderSearch(e.target.value); setOrderPage(1); }} />
               <div className="order-src-filters">
                 {['ALL','SHOPIFY','POS','ONLINE'].map(src => (
                   <button key={src} className={`src-filter-btn ${orderSourceFilter===src?'src-active':''}`}
                     onClick={() => { setOrderSourceFilter(src); setOrderPage(1); }}>
-                    {src==='ALL'?'All':src==='SHOPIFY'?'Shopify':src==='POS'?'Offline Billing':'Online Shop'}
+                    {src==='ALL'?'All':src==='SHOPIFY'?'Shopify':src==='POS'?'Offline':'Online Shop'}
                     <span className="src-count">{sourceCounts[src]}</span>
                   </button>
                 ))}
               </div>
               <span className="cust-count">{filtered.length} orders</span>
+              <button onClick={refreshOrders} className="export-csv-btn" disabled={ordersLoading} style={{marginLeft:'auto'}}>
+                {ordersLoading ? '...' : '↻ Refresh'}
+              </button>
             </div>
+
+            {ordersLoading ? (
+              <div style={{textAlign:'center',padding:'56px 0',color:'var(--text-muted)',fontSize:15}}>Loading orders…</div>
+            ) : (
             <div className="data-table-wrap">
               <table className="data-table">
                 <thead><tr><th>Source</th><th>Order #</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th></th><th></th></tr></thead>
@@ -3771,18 +4726,31 @@ function App() {
                         style={{cursor:'pointer'}}>
                         <td><span className={`src-badge src-${o.source}`}>{o.source==='SHOPIFY'?'Shopify':o.source==='POS'?'POS':'Online'}</span></td>
                         <td className="td-ordnum">{o.orderNumber}</td>
-                        <td className="td-name">{o.source === 'POS' ? 'Walk-in Customer' : (o.customerName || o.customerContact || '—')}</td>
+                        <td className="td-name">{o.source==='POS' ? 'Walk-in' : (o.customerName || o.customerContact || '—')}</td>
                         <td className="td-date">{o.orderedAt ? o.orderedAt.slice(0,10) : '—'}</td>
                         <td className="td-center">{o.items?.length || 0}</td>
-                        <td className="td-amt">₹{Number(o.total||0).toFixed(2)}</td>
+                        <td className="td-amt">₹{Number(o.total||0).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
                         <td><span className="pay-badge">{o.paymentMethod || '—'}</span></td>
-                        <td>
-                          <span className={`status-badge status-${o.financialStatus}`}>{o.financialStatus}</span>
-                          {o.fulfillmentStatus && <span className={`status-badge status-${o.fulfillmentStatus}`} style={{marginLeft:4}}>{o.fulfillmentStatus}</span>}
+                        <td onClick={e => e.stopPropagation()}>
+                          {o.source === 'ONLINE' ? (
+                            <select
+                              value={(o.fulfillmentStatus||'pending').toUpperCase()}
+                              onChange={e => updateOrderStatus(o.id, e.target.value)}
+                              className={statusSelectClass(o.fulfillmentStatus)}>
+                              {['PENDING','CONFIRMED','SHIPPED','DELIVERED','CANCELLED'].map(s => (
+                                <option key={s} value={s}>{s.charAt(0)+s.slice(1).toLowerCase()}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <>
+                              <span className={`status-badge status-${(o.financialStatus||'').toLowerCase()}`}>{o.financialStatus}</span>
+                              {o.fulfillmentStatus && <span className={`status-badge status-${(o.fulfillmentStatus||'').toLowerCase()}`} style={{marginLeft:4}}>{o.fulfillmentStatus}</span>}
+                            </>
+                          )}
                         </td>
                         <td className="td-expand">{expandedOrder===o.id?'▲':'▼'}</td>
                         <td>
-                          <button className="delete-btn" onClick={e => { e.stopPropagation(); deleteOrder(o); }}>🗑</button>
+                          <button className="delete-btn" onClick={e => { e.stopPropagation(); deleteOrder(o); }}>Delete</button>
                         </td>
                       </tr>
                       {expandedOrder===o.id && (
@@ -3799,7 +4767,7 @@ function App() {
                                 return (
                                   <div style={{ display:'flex', gap:24, flexWrap:'wrap', marginBottom:10, padding:'12px 16px', background:'#F0F6FF', borderRadius:8, border:'1px solid #A8C4E0' }}>
                                     <div style={{ minWidth:220 }}>
-                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>📦 DELIVERY ADDRESS</div>
+                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>DELIVERY ADDRESS</div>
                                       {o.source === 'ONLINE' ? (
                                         <div style={{ fontSize:13, color:'#1f2937', lineHeight:2 }}>
                                           {o.houseNo && <div><span style={{color:'#6B7280',fontSize:11}}>House/Flat:</span> {o.houseNo}</div>}
@@ -3817,34 +4785,22 @@ function App() {
                                       )}
                                     </div>
                                     <div>
-                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>📞 CONTACT</div>
+                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>CONTACT</div>
                                       <div style={{ fontSize:13, color:'#1f2937' }}>
                                         {o.phone || o.customerContact || <span style={{color:'#9CA3AF'}}>—</span>}
                                       </div>
                                     </div>
                                     {o.customerName && (
                                       <div>
-                                        <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>👤 CUSTOMER</div>
+                                        <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>CUSTOMER</div>
                                         <div style={{ fontSize:13, color:'#1f2937' }}>{o.customerName}</div>
                                       </div>
                                     )}
-                                    <div style={{marginLeft:'auto',alignSelf:'flex-start',display:'flex',flexDirection:'column',alignItems:'flex-end',gap:8}}>
-                                      {o.source === 'ONLINE' && (
-                                        <div style={{display:'flex',alignItems:'center',gap:6}} onClick={e => e.stopPropagation()}>
-                                          <span style={{fontSize:11,fontWeight:700,color:'#1E3A5F',letterSpacing:0.5}}>STATUS:</span>
-                                          <select value={(o.fulfillmentStatus || 'pending').toUpperCase()}
-                                            onChange={e => updateOrderStatus(o.id, e.target.value)}
-                                            style={{fontSize:12,fontWeight:600,padding:'5px 8px',borderRadius:6,border:'1.5px solid #A8C4E0',background:'#fff',cursor:'pointer'}}>
-                                            {['PENDING','CONFIRMED','SHIPPED','DELIVERED','CANCELLED'].map(s => (
-                                              <option key={s} value={s}>{s.charAt(0)+s.slice(1).toLowerCase()}</option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                      )}
+                                    <div style={{marginLeft:'auto',alignSelf:'flex-start'}}>
                                       <button onClick={e => { e.stopPropagation(); printOrderShippingLabel(o, tenantInfo?.name, tenantInfo?.shopAddress); }}
                                         title="Print Shipping Label"
                                         style={{background:'#1E3A5F',color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
-                                        🖨 Print Label
+                                        Print Label
                                       </button>
                                     </div>
                                   </div>
@@ -3853,16 +4809,31 @@ function App() {
                               <table className="order-items-table">
                                 <thead><tr><th>Product</th><th>SKU / Barcode</th><th>Variant</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
                                 <tbody>
-                                  {(o.items||[]).map((item,idx) => (
-                                    <tr key={idx}>
-                                      <td>{item.productName}</td>
-                                      <td className="td-sku">{item.sku||'—'}</td>
-                                      <td className="td-sku">{variantLabel(item)||'—'}</td>
-                                      <td className="td-center">{item.quantity}</td>
-                                      <td className="td-amt">₹{Number(item.price||0).toFixed(2)}</td>
-                                      <td className="td-amt">₹{(Number(item.quantity||0)*Number(item.price||0)).toFixed(2)}</td>
-                                    </tr>
-                                  ))}
+                                  {(o.items||[]).map((item,idx) => {
+                                    let comboDetail = null;
+                                    if (item.comboContents) {
+                                      try {
+                                        const parts = JSON.parse(item.comboContents);
+                                        comboDetail = (
+                                          <ul className="combo-item-list">
+                                            {parts.map((p,pi) => (
+                                              <li key={pi}>{p.productName} ({p.barcode}) x{p.qty}</li>
+                                            ))}
+                                          </ul>
+                                        );
+                                      } catch {}
+                                    }
+                                    return (
+                                      <tr key={idx}>
+                                        <td>{item.productName}{comboDetail}</td>
+                                        <td className="td-sku">{item.sku||'—'}</td>
+                                        <td className="td-sku">{variantLabel(item)||'—'}</td>
+                                        <td className="td-center">{item.quantity}</td>
+                                        <td className="td-amt">₹{Number(item.price||0).toFixed(2)}</td>
+                                        <td className="td-amt">₹{(Number(item.quantity||0)*Number(item.price||0)).toFixed(2)}</td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                               {/* Order-level discount totals — POS bills only */}
@@ -3877,7 +4848,7 @@ function App() {
                                         </div>
                                         <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',color:'#dc2626',fontWeight:600}}>
                                           <span>Discount</span>
-                                          <span>− ₹{Number(o.discountAmount||0).toFixed(2)}</span>
+                                          <span>- ₹{Number(o.discountAmount||0).toFixed(2)}</span>
                                         </div>
                                       </>
                                     )}
@@ -3911,11 +4882,12 @@ function App() {
                 </tbody>
               </table>
             </div>
-            {totalOrdPages > 1 && (
+            )}
+            {totalOrdPages > 1 && !ordersLoading && (
               <div className="tbl-pagination">
-                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.max(1,p-1))} disabled={safeOrdPage===1}>‹ Prev</button>
+                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.max(1,p-1))} disabled={safeOrdPage===1}>Prev</button>
                 <span className="tbl-pg-info">Page {safeOrdPage} of {totalOrdPages}</span>
-                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.min(totalOrdPages,p+1))} disabled={safeOrdPage===totalOrdPages}>Next ›</button>
+                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.min(totalOrdPages,p+1))} disabled={safeOrdPage===totalOrdPages}>Next</button>
               </div>
             )}
           </div>
@@ -4966,6 +5938,716 @@ function App() {
           );
         })()}
 
+        {/* ── Expenses page ── */}
+        {activePage === 'expenses' && (() => {
+          const EXPENSE_CAT_LABELS = {
+            DAILY_EXPENSE:'Daily Expense', RENT:'Rent', ELECTRICITY:'Electricity',
+            WATER_BILL:'Water Bill', SALARY:'Salary', TRANSPORT:'Transport', OTHER_EXPENSE:'Other Expense',
+          };
+          const EXPENSE_CAT_COLORS = {
+            DAILY_EXPENSE:'#7C3AED', RENT:'#2563EB', ELECTRICITY:'#D97706',
+            WATER_BILL:'#0891B2', SALARY:'#059669', TRANSPORT:'#F97316', OTHER_EXPENSE:'#6B7280',
+          };
+          const ITEMS_PER_PAGE = 15;
+
+          const lq = expenseSearch.toLowerCase();
+          const filtered = expenses.filter(ex => {
+            if (expenseCategoryFilter && ex.category !== expenseCategoryFilter) return false;
+            if (expensePaymentFilter && ex.paymentMethod !== expensePaymentFilter) return false;
+            if (expenseDateFilter && ex.expenseDate !== expenseDateFilter) return false;
+            if (lq && !(
+              (ex.description || '').toLowerCase().includes(lq) ||
+              (EXPENSE_CAT_LABELS[ex.category] || '').toLowerCase().includes(lq) ||
+              (ex.referenceNumber || '').toLowerCase().includes(lq)
+            )) return false;
+            return true;
+          });
+
+          const totalExpPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+          const pageExps = filtered.slice((expensePage - 1) * ITEMS_PER_PAGE, expensePage * ITEMS_PER_PAGE);
+
+          return (
+            <div className="page-content">
+              {/* Header */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:12}}>
+                <div style={{fontSize:13,color:'#6b7280'}}>Manage your daily, recurring, and one-time business expenses.</div>
+                <button className="btn-primary" onClick={() => {
+                  if (showExpenseForm && !expenseEditId) {
+                    setShowExpenseForm(false);
+                  } else {
+                    setExpenseForm(EXPENSE_FORM_EMPTY); setExpenseEditId(null); setExpenseFormError(''); setShowExpenseForm(true);
+                  }
+                }}>
+                  {showExpenseForm && !expenseEditId ? '✕ Cancel' : '+ Add Expense'}
+                </button>
+              </div>
+
+              {/* Summary cards */}
+              {expenseSummary && (
+                <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:20}}>
+                  {[
+                    { label:'Today',       value: expenseSummary.totalToday,    color:'#dc2626' },
+                    { label:'This Week',   value: expenseSummary.totalWeek,     color:'#d97706' },
+                    { label:'This Month',  value: expenseSummary.totalMonth,    color:'#7c3aed' },
+                    { label:'This Period', value: expenseSummary.totalForRange, color:'#0891b2' },
+                  ].map(c => (
+                    <div key={c.label} className="rpt-card" style={{flex:'1 1 130px',minWidth:0,borderTop:`3px solid ${c.color}`}}>
+                      <div className="rpt-card-label">{c.label}</div>
+                      <div className="rpt-card-value" style={{color:c.color}}>
+                        {'₹' + Number(c.value || 0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add / Edit form */}
+              {(showExpenseForm || expenseEditId) && (
+                <div style={{background:'#f9fafb',border:'1.5px solid #e5e7eb',borderRadius:12,padding:'20px 24px',marginBottom:24}}>
+                  <h3 style={{margin:'0 0 16px',fontSize:16,color:'#1f2937'}}>
+                    {expenseEditId ? 'Edit Expense' : 'New Expense'}
+                  </h3>
+                  <form onSubmit={saveExpense}>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))',gap:14}}>
+                      <div>
+                        <label className="modal-label">Category <span style={{color:'#dc2626'}}>*</span></label>
+                        <select value={expenseForm.category}
+                          onChange={e => setExpenseForm(f => ({...f, category: e.target.value}))}
+                          style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                          <option value="">Select category…</option>
+                          {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="modal-label">Amount (₹) <span style={{color:'#dc2626'}}>*</span></label>
+                        <input type="number" min="0.01" step="0.01" placeholder="e.g. 1500.00"
+                          value={expenseForm.amount}
+                          onChange={e => setExpenseForm(f => ({...f, amount: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                      <div>
+                        <label className="modal-label">Payment Date <span style={{color:'#dc2626'}}>*</span></label>
+                        <input type="date"
+                          value={expenseForm.expenseDate}
+                          onChange={e => setExpenseForm(f => ({...f, expenseDate: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                      <div>
+                        <label className="modal-label">Payment Method</label>
+                        <select value={expenseForm.paymentMethod}
+                          onChange={e => setExpenseForm(f => ({...f, paymentMethod: e.target.value}))}
+                          style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                          {EXPENSE_PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                        </select>
+                      </div>
+                      <div style={{gridColumn:'1 / -1'}}>
+                        <label className="modal-label">Description <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+                        <input placeholder="e.g. Monthly shop rent for October"
+                          value={expenseForm.description}
+                          onChange={e => setExpenseForm(f => ({...f, description: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                      <div>
+                        <label className="modal-label">Reference No. <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+                        <input placeholder="e.g. REC-001"
+                          value={expenseForm.referenceNumber}
+                          onChange={e => setExpenseForm(f => ({...f, referenceNumber: e.target.value}))}
+                          style={{marginTop:4}} />
+                      </div>
+                    </div>
+                    {expenseFormError && <div style={{fontSize:13,color:'#dc2626',marginTop:12}}>{expenseFormError}</div>}
+                    <div style={{marginTop:16,display:'flex',gap:10,justifyContent:'flex-end'}}>
+                      <button type="button" className="btn-secondary" onClick={() => {
+                        setShowExpenseForm(false); setExpenseForm(EXPENSE_FORM_EMPTY); setExpenseEditId(null); setExpenseFormError('');
+                      }}>
+                        Cancel
+                      </button>
+                      <button type="submit" className="btn-primary" disabled={expenseFormLoading}>
+                        {expenseFormLoading ? 'Saving…' : (expenseEditId ? '✓ Update Expense' : '✓ Save Expense')}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Filters */}
+              <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+                <input placeholder="Search description, category, reference…"
+                  value={expenseSearch}
+                  onChange={e => { setExpenseSearch(e.target.value); setExpensePage(1); }}
+                  style={{flex:'1 1 200px',padding:'8px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}} />
+                <select value={expenseCategoryFilter}
+                  onChange={e => { setExpenseCategoryFilter(e.target.value); setExpensePage(1); }}
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none',flexShrink:0}}>
+                  <option value="">All Categories</option>
+                  {EXPENSE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+                <select value={expensePaymentFilter}
+                  onChange={e => { setExpensePaymentFilter(e.target.value); setExpensePage(1); }}
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none',flexShrink:0}}>
+                  <option value="">All Payment Methods</option>
+                  {EXPENSE_PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+                <input type="date" value={expenseDateFilter}
+                  onChange={e => { setExpenseDateFilter(e.target.value); setExpensePage(1); }}
+                  title="Filter by payment date"
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none',flexShrink:0}} />
+                {expenseDateFilter && (
+                  <button className="btn-secondary" style={{fontSize:12,padding:'6px 12px',flexShrink:0}}
+                    onClick={() => { setExpenseDateFilter(''); setExpensePage(1); }}>
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* Error */}
+              {expenseError && (
+                <div style={{padding:'12px 16px',background:'#fef2f2',borderRadius:8,color:'#dc2626',fontSize:13,marginBottom:16,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  {expenseError}
+                  <button className="btn-secondary" style={{fontSize:12,padding:'4px 12px'}} onClick={loadExpenses}>Retry</button>
+                </div>
+              )}
+
+              {/* Loading */}
+              {expenseLoading && (
+                <div style={{textAlign:'center',padding:'32px',color:'#6b7280',fontSize:14}}>Loading expenses…</div>
+              )}
+
+              {/* Table */}
+              {!expenseLoading && (
+                <div className="table-scroll-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Category</th>
+                        <th>Description</th>
+                        <th>Payment</th>
+                        <th>Reference</th>
+                        <th style={{textAlign:'right'}}>Amount (₹)</th>
+                        <th style={{textAlign:'center'}}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageExps.length === 0 ? (
+                        <tr><td colSpan={7} style={{textAlign:'center',padding:'32px',color:'#9ca3af'}}>
+                          {expenses.length === 0
+                            ? 'No expenses yet. Click "+ Add Expense" to record your first expense.'
+                            : 'No expenses match the current filters.'}
+                        </td></tr>
+                      ) : pageExps.map(ex => (
+                        <tr key={ex.id}>
+                          <td style={{whiteSpace:'nowrap',color:'#374151'}}>
+                            {ex.expenseDate
+                              ? new Date(ex.expenseDate + 'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})
+                              : '—'}
+                          </td>
+                          <td>
+                            <span style={{display:'inline-block',padding:'2px 10px',borderRadius:12,fontSize:11,fontWeight:700,
+                              background:(EXPENSE_CAT_COLORS[ex.category]||'#6B7280')+'18',
+                              color:EXPENSE_CAT_COLORS[ex.category]||'#6B7280',
+                              border:'1px solid '+(EXPENSE_CAT_COLORS[ex.category]||'#6B7280')+'44'}}>
+                              {EXPENSE_CAT_LABELS[ex.category] || ex.category}
+                            </span>
+                          </td>
+                          <td style={{color:'#4b5563',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                            {ex.description || '—'}
+                          </td>
+                          <td style={{color:'#6b7280',fontSize:12}}>{ex.paymentMethod || 'CASH'}</td>
+                          <td style={{color:'#9ca3af',fontSize:12,fontFamily:'monospace'}}>{ex.referenceNumber || '—'}</td>
+                          <td style={{textAlign:'right',fontWeight:700,color:'#dc2626',whiteSpace:'nowrap'}}>
+                            {'₹' + Number(ex.amount).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                          </td>
+                          <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
+                            <button className="btn-secondary" style={{fontSize:11,padding:'3px 10px',marginRight:4}}
+                              onClick={() => {
+                                setExpenseEditId(ex.id);
+                                setExpenseForm({
+                                  category: ex.category,
+                                  amount: String(ex.amount),
+                                  expenseDate: ex.expenseDate,
+                                  description: ex.description || '',
+                                  paymentMethod: ex.paymentMethod || 'CASH',
+                                  referenceNumber: ex.referenceNumber || '',
+                                });
+                                setShowExpenseForm(true);
+                                setExpenseFormError('');
+                                window.scrollTo({top:0,behavior:'smooth'});
+                              }}>
+                              Edit
+                            </button>
+                            <button style={{fontSize:11,padding:'3px 10px',background:'#fef2f2',color:'#dc2626',border:'1.5px solid #fecaca',borderRadius:6,cursor:'pointer',fontWeight:600}}
+                              onClick={() => deleteExpense(ex.id, ex.category)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {pageExps.length > 0 && (
+                      <tfoot>
+                        <tr style={{background:'#f9fafb',fontWeight:700}}>
+                          <td colSpan={5} style={{textAlign:'right',padding:'10px 16px',color:'#374151',fontSize:13}}>
+                            {filtered.length < expenses.length
+                              ? `Filtered Total (${filtered.length} entries):`
+                              : `Total (${expenses.length} entries):`}
+                          </td>
+                          <td style={{textAlign:'right',padding:'10px 16px',color:'#dc2626',fontWeight:800}}>
+                            {'₹' + filtered.reduce((s,ex) => s + parseFloat(ex.amount||0), 0)
+                              .toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}
+                          </td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
+
+              {/* Pagination */}
+              {totalExpPages > 1 && (
+                <div style={{display:'flex',justifyContent:'center',gap:6,marginTop:16}}>
+                  <button className="btn-secondary" disabled={expensePage === 1} onClick={() => setExpensePage(p => p - 1)}>‹ Prev</button>
+                  <span style={{padding:'6px 12px',fontSize:13,color:'#374151'}}>Page {expensePage} of {totalExpPages}</span>
+                  <button className="btn-secondary" disabled={expensePage === totalExpPages} onClick={() => setExpensePage(p => p + 1)}>Next ›</button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── Offers & Combos page ── */}
+        {activePage === 'offers' && (() => {
+          const STATUS_BADGE_STYLES = {
+            ACTIVE:    { bg:'#dcfce7', color:'#15803d', label:'Active' },
+            INACTIVE:  { bg:'#f3f4f6', color:'#6b7280', label:'Inactive' },
+            SCHEDULED: { bg:'#dbeafe', color:'#1d4ed8', label:'Scheduled' },
+            EXPIRED:   { bg:'#fee2e2', color:'#dc2626', label:'Expired' },
+            DRAFT:     { bg:'#fef9c3', color:'#a16207', label:'Draft' },
+          };
+
+          const filteredOffers = offers.filter(o => {
+            const s = offerSearch.toLowerCase();
+            const matchSearch = !s || o.name.toLowerCase().includes(s);
+            const matchStatus = offerStatusFilter === 'ALL' || o.status === offerStatusFilter;
+            return matchSearch && matchStatus;
+          });
+
+          const openCreateForm = () => {
+            setOfferForm(OFFER_FORM_EMPTY);
+            setOfferEditId(null);
+            setOfferFormError('');
+            setOfferPosterPreview(null);
+            setOfferProductSearch('');
+            setOfferFormOpen(true);
+          };
+
+          const openEditForm = (o) => {
+            setOfferForm({
+              name: o.name || '',
+              description: o.description || '',
+              offerType: o.offerType || 'CUSTOMER_SELECT',
+              requiredQty: o.requiredQty || 1,
+              comboPrice: o.comboPrice != null ? String(o.comboPrice) : '',
+              startDateTime: o.startDateTime ? o.startDateTime.slice(0,16) : '',
+              endDateTime: o.endDateTime ? o.endDateTime.slice(0,16) : '',
+              active: o.active !== false,
+              showOnHome: o.showOnHome !== false,
+              allowRepeat: !!o.allowRepeat,
+              posterUrl: o.posterUrl || '',
+              eligibleProducts: (o.eligibleProducts || []).map(ep => ({...ep})),
+            });
+            setOfferEditId(o.id);
+            setOfferFormError('');
+            setOfferPosterPreview(o.posterUrl ? `${BACKEND}${o.posterUrl}` : null);
+            setOfferProductSearch('');
+            setOfferFormOpen(true);
+          };
+
+          const handleDeleteOffer = async (id) => {
+            try {
+              await axios.delete(`${API}/offers/${id}`);
+              setOffers(prev => prev.filter(o => o.id !== id));
+              setOfferDeleteConfirm(null);
+            } catch { alert('Failed to delete offer.'); }
+          };
+
+          const toggleOfferActive = async (o) => {
+            try {
+              const res = await axios.patch(`${API}/offers/${o.id}/toggle-active`);
+              setOffers(prev => prev.map(x => x.id === o.id ? res.data : x));
+            } catch { alert('Failed to update offer.'); }
+          };
+
+          const handlePosterUpload = async (file) => {
+            setOfferPosterUploading(true);
+            try {
+              const fd = new FormData(); fd.append('file', file);
+              const res = await axios.post(`${API}/upload`, fd);
+              const url = res.data.url;
+              setOfferForm(f => ({...f, posterUrl: url}));
+              setOfferPosterPreview(`${BACKEND}${url}`);
+            } catch { alert('Poster upload failed.'); }
+            finally { setOfferPosterUploading(false); }
+          };
+
+          const isProductSelected = (productId) =>
+            offerForm.eligibleProducts.some(ep => ep.productId === productId);
+
+          const toggleProductSelection = (p) => {
+            if (isProductSelected(p.id)) {
+              setOfferForm(f => ({...f, eligibleProducts: f.eligibleProducts.filter(ep => ep.productId !== p.id)}));
+            } else {
+              setOfferForm(f => ({...f, eligibleProducts: [...f.eligibleProducts, {
+                productId: p.id, productName: p.name, barcode: p.barcode, sku: p.sku,
+                imageUrl: p.imageUrl, sellingPrice: p.sellingPrice, stockQty: p.stockQty,
+                trackStock: p.trackStock, quantity: 1,
+              }]}));
+            }
+          };
+
+          const updateFixedQty = (productId, qty) => {
+            setOfferForm(f => ({...f, eligibleProducts: f.eligibleProducts.map(ep =>
+              ep.productId === productId ? {...ep, quantity: Math.max(1, parseInt(qty)||1)} : ep
+            )}));
+          };
+
+          const saveOffer = async () => {
+            setOfferFormError('');
+            if (!offerForm.name.trim()) { setOfferFormError('Offer name is required.'); return; }
+            if (!offerForm.comboPrice || isNaN(Number(offerForm.comboPrice)) || Number(offerForm.comboPrice) < 0) {
+              setOfferFormError('Enter a valid combo price.'); return;
+            }
+            if (offerForm.offerType === 'CUSTOMER_SELECT' && (!offerForm.requiredQty || offerForm.requiredQty < 1)) {
+              setOfferFormError('Required quantity must be at least 1.'); return;
+            }
+            if (offerForm.startDateTime && offerForm.endDateTime && offerForm.endDateTime < offerForm.startDateTime) {
+              setOfferFormError('End date must be after start date.'); return;
+            }
+            const payload = {
+              name: offerForm.name.trim(),
+              description: offerForm.description,
+              offerType: offerForm.offerType,
+              requiredQty: offerForm.offerType === 'CUSTOMER_SELECT' ? parseInt(offerForm.requiredQty) : null,
+              comboPrice: parseFloat(offerForm.comboPrice),
+              startDateTime: offerForm.startDateTime || null,
+              endDateTime: offerForm.endDateTime || null,
+              active: offerForm.active,
+              showOnHome: offerForm.showOnHome,
+              allowRepeat: offerForm.allowRepeat,
+              posterUrl: offerForm.posterUrl || null,
+              eligibleProducts: offerForm.eligibleProducts.map(ep => ({
+                productId: ep.productId, productName: ep.productName, barcode: ep.barcode,
+                sku: ep.sku, imageUrl: ep.imageUrl, sellingPrice: ep.sellingPrice,
+                stockQty: ep.stockQty, trackStock: ep.trackStock,
+                quantity: offerForm.offerType === 'FIXED_COMBO' ? (ep.quantity || 1) : null,
+              })),
+            };
+            setOfferFormLoading(true);
+            try {
+              let res;
+              if (offerEditId) {
+                res = await axios.put(`${API}/offers/${offerEditId}`, payload);
+                setOffers(prev => prev.map(o => o.id === offerEditId ? res.data : o));
+              } else {
+                res = await axios.post(`${API}/offers`, payload);
+                setOffers(prev => [res.data, ...prev]);
+              }
+              setOfferFormOpen(false);
+            } catch (e) {
+              setOfferFormError(e.response?.data?.message || e.response?.data || 'Failed to save offer.');
+            } finally { setOfferFormLoading(false); }
+          };
+
+          const eligiblePoolForSearch = products.filter(p => Boolean(p.active));
+          const offerSearchedProducts = eligiblePoolForSearch.filter(p => {
+            const s = offerProductSearch.toLowerCase();
+            return !s || p.name.toLowerCase().includes(s) || (p.sku||'').toLowerCase().includes(s) || (p.barcode||'').toLowerCase().includes(s);
+          });
+
+          // Regular price total estimate for CUSTOMER_SELECT (if ≥ requiredQty products selected)
+          const regTotalEstimate = (() => {
+            if (offerForm.offerType !== 'CUSTOMER_SELECT' || !offerForm.requiredQty) return null;
+            const sorted = [...offerForm.eligibleProducts]
+              .sort((a,b) => Number(a.sellingPrice||0) - Number(b.sellingPrice||0))
+              .slice(0, parseInt(offerForm.requiredQty));
+            if (sorted.length < parseInt(offerForm.requiredQty)) return null;
+            return sorted.reduce((s,p) => s + Number(p.sellingPrice||0), 0);
+          })();
+          const savings = regTotalEstimate != null && offerForm.comboPrice
+            ? regTotalEstimate - Number(offerForm.comboPrice) : null;
+
+          return (
+          <div className="page-content">
+            {/* Header bar */}
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:20}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <input placeholder="Search offers…" value={offerSearch}
+                  onChange={e => setOfferSearch(e.target.value)}
+                  style={{padding:'8px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,width:220,outline:'none'}} />
+                <select value={offerStatusFilter} onChange={e => setOfferStatusFilter(e.target.value)}
+                  style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                  <option value="ALL">All Statuses</option>
+                  {['ACTIVE','INACTIVE','SCHEDULED','EXPIRED','DRAFT'].map(s =>
+                    <option key={s} value={s}>{s.charAt(0)+s.slice(1).toLowerCase()}</option>)}
+                </select>
+              </div>
+              <button className="btn-primary" onClick={openCreateForm}>+ Create Offer / Combo</button>
+            </div>
+
+            {/* Offers list */}
+            {offersLoading ? (
+              <div style={{textAlign:'center',padding:40,color:'#9ca3af'}}>Loading offers…</div>
+            ) : filteredOffers.length === 0 ? (
+              <div style={{textAlign:'center',padding:48,color:'#9ca3af'}}>
+                {offers.length === 0 ? 'No offers yet. Click "Create Offer / Combo" to get started.' : 'No offers match your search.'}
+              </div>
+            ) : (
+              <div className="offer-list">
+                {filteredOffers.map(o => {
+                  const st = STATUS_BADGE_STYLES[o.status] || STATUS_BADGE_STYLES.INACTIVE;
+                  const posterSrc = o.posterUrl ? `${BACKEND}${o.posterUrl}` : null;
+                  const eligCount = (o.eligibleProducts||[]).length;
+                  return (
+                    <div key={o.id} className="offer-card">
+                      {/* Poster thumbnail */}
+                      <div className="offer-card-poster">
+                        {posterSrc
+                          ? <img src={posterSrc} alt={o.name} />
+                          : <div className="offer-card-poster-ph">🎁</div>}
+                      </div>
+                      <div className="offer-card-body">
+                        <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:4}}>
+                          <span className="offer-card-name">{o.name}</span>
+                          <span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:99,background:st.bg,color:st.color}}>{st.label}</span>
+                          {o.showOnHome && <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#eff6ff',color:'#2563eb',fontWeight:600}}>🌐 On Website</span>}
+                        </div>
+                        {o.description && <div style={{fontSize:12,color:'#6b7280',marginBottom:6,lineHeight:1.4}}>{o.description}</div>}
+                        <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12,color:'#374151',marginBottom:4}}>
+                          <span><strong>Type:</strong> {o.offerType === 'CUSTOMER_SELECT' ? 'Customer Select' : 'Fixed Combo'}</span>
+                          {o.offerType === 'CUSTOMER_SELECT' && <span><strong>Pick:</strong> {o.requiredQty} items</span>}
+                          <span><strong>Price:</strong> ₹{Number(o.comboPrice).toFixed(2)}</span>
+                          <span><strong>Eligible products:</strong> {eligCount}</span>
+                        </div>
+                        {(o.startDateTime || o.endDateTime) && (
+                          <div style={{fontSize:11,color:'#9ca3af'}}>
+                            {o.startDateTime && `From ${new Date(o.startDateTime).toLocaleString('en-IN')}`}
+                            {o.startDateTime && o.endDateTime && ' · '}
+                            {o.endDateTime && `Until ${new Date(o.endDateTime).toLocaleString('en-IN')}`}
+                          </div>
+                        )}
+                      </div>
+                      <div className="offer-card-actions">
+                        <button className="btn-secondary" style={{fontSize:12,padding:'5px 12px'}} onClick={() => openEditForm(o)}>Edit</button>
+                        <button className="btn-secondary" style={{fontSize:12,padding:'5px 12px',background: o.active?'#fef9c3':undefined,color: o.active?'#a16207':undefined}}
+                          onClick={() => toggleOfferActive(o)}>{o.active ? 'Deactivate' : 'Activate'}</button>
+                        <button className="btn-danger" style={{fontSize:12,padding:'5px 12px'}} onClick={() => setOfferDeleteConfirm(o.id)}>Delete</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Delete confirm */}
+            {offerDeleteConfirm && (
+              <div className="modal-overlay" onClick={() => setOfferDeleteConfirm(null)}>
+                <div className="modal-box" style={{maxWidth:400}} onClick={e => e.stopPropagation()}>
+                  <h3>Delete Offer?</h3>
+                  <p style={{color:'#6b7280',fontSize:13,margin:'8px 0 20px'}}>This will permanently delete the offer and remove it from the storefront.</p>
+                  <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
+                    <button className="btn-secondary" onClick={() => setOfferDeleteConfirm(null)}>Cancel</button>
+                    <button className="btn-danger" onClick={() => handleDeleteOffer(offerDeleteConfirm)}>Delete</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Create / Edit offer form */}
+            {offerFormOpen && (
+              <div className="modal-overlay" onClick={() => setOfferFormOpen(false)}>
+                <div className="modal-box offer-form-box" onClick={e => e.stopPropagation()}>
+                  <h3 style={{marginBottom:18}}>{offerEditId ? 'Edit Offer' : 'Create Offer / Combo'}</h3>
+
+                  {/* ── A. Basic Information ── */}
+                  <div className="offer-section-title">A. Basic Information</div>
+
+                  <label className="modal-label">Offer Name *</label>
+                  <input value={offerForm.name} onChange={e => setOfferForm(f => ({...f, name: e.target.value}))}
+                    placeholder="e.g. Any 6 for ₹250" style={{marginTop:4}} />
+
+                  <label className="modal-label" style={{marginTop:12}}>Description</label>
+                  <textarea value={offerForm.description} onChange={e => setOfferForm(f => ({...f, description: e.target.value}))}
+                    rows={2} placeholder="Brief description shown on the website"
+                    style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,fontFamily:'inherit',resize:'vertical',boxSizing:'border-box',outline:'none'}} />
+
+                  <div className="offer-form-row" style={{marginTop:12}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">Offer Type *</label>
+                      <select value={offerForm.offerType} onChange={e => setOfferForm(f => ({...f, offerType: e.target.value}))}
+                        style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none'}}>
+                        <option value="CUSTOMER_SELECT">Customer Select Combo (Build Your Own)</option>
+                        <option value="FIXED_COMBO">Fixed Combo (Pre-selected Products)</option>
+                      </select>
+                    </div>
+                    {offerForm.offerType === 'CUSTOMER_SELECT' && (
+                      <div style={{width:130}}>
+                        <label className="modal-label">Required Items *</label>
+                        <input type="number" min={1} value={offerForm.requiredQty}
+                          onChange={e => setOfferForm(f => ({...f, requiredQty: parseInt(e.target.value)||1}))}
+                          style={{marginTop:4}} />
+                      </div>
+                    )}
+                    <div style={{width:150}}>
+                      <label className="modal-label">Combo Price (₹) *</label>
+                      <input type="number" min={0} step="0.01" value={offerForm.comboPrice}
+                        onChange={e => setOfferForm(f => ({...f, comboPrice: e.target.value}))}
+                        placeholder="0.00" style={{marginTop:4}} />
+                    </div>
+                  </div>
+
+                  {/* Price preview */}
+                  {regTotalEstimate != null && (
+                    <div style={{marginTop:8,padding:'8px 12px',borderRadius:8,background: savings>0?'#f0fdf4':'#fff7ed',border:`1.5px solid ${savings>0?'#bbf7d0':'#fed7aa'}`,fontSize:12}}>
+                      <span style={{color:'#374151'}}>Estimated regular total (cheapest {offerForm.requiredQty}): </span>
+                      <strong>₹{regTotalEstimate.toFixed(2)}</strong>
+                      {savings > 0 && <span style={{color:'#15803d',marginLeft:8,fontWeight:700}}>→ Customer saves ₹{savings.toFixed(2)}</span>}
+                      {savings !== null && savings <= 0 && <span style={{color:'#ea580c',marginLeft:8}}>⚠ Combo price is not lower than regular price</span>}
+                    </div>
+                  )}
+
+                  <div className="offer-form-row" style={{marginTop:12}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">Start Date & Time</label>
+                      <input type="datetime-local" value={offerForm.startDateTime}
+                        onChange={e => setOfferForm(f => ({...f, startDateTime: e.target.value}))}
+                        style={{marginTop:4}} />
+                    </div>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">End Date & Time</label>
+                      <input type="datetime-local" value={offerForm.endDateTime}
+                        onChange={e => setOfferForm(f => ({...f, endDateTime: e.target.value}))}
+                        style={{marginTop:4}} />
+                    </div>
+                  </div>
+
+                  <div style={{display:'flex',gap:24,marginTop:14,flexWrap:'wrap'}}>
+                    <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13}}>
+                      <input type="checkbox" checked={offerForm.active} onChange={e => setOfferForm(f => ({...f, active: e.target.checked}))} />
+                      <strong>Active</strong>
+                    </label>
+                    <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13}}>
+                      <input type="checkbox" checked={offerForm.showOnHome} onChange={e => setOfferForm(f => ({...f, showOnHome: e.target.checked}))} />
+                      <strong>Show on Website Home Page</strong>
+                    </label>
+                    {offerForm.offerType === 'CUSTOMER_SELECT' && (
+                      <label style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:13}}>
+                        <input type="checkbox" checked={offerForm.allowRepeat} onChange={e => setOfferForm(f => ({...f, allowRepeat: e.target.checked}))} />
+                        <strong>Allow same product multiple times</strong>
+                      </label>
+                    )}
+                  </div>
+
+                  {/* ── B. Eligible Products ── */}
+                  <div className="offer-section-title" style={{marginTop:20}}>
+                    B. Eligible Products
+                    {offerForm.eligibleProducts.length > 0 && (
+                      <span style={{marginLeft:8,fontSize:12,fontWeight:400,color:'#2563eb'}}>
+                        {offerForm.eligibleProducts.length} selected
+                      </span>
+                    )}
+                  </div>
+                  <input placeholder="Search products by name, SKU, or barcode…"
+                    value={offerProductSearch} onChange={e => setOfferProductSearch(e.target.value)}
+                    style={{marginBottom:10,padding:'8px 12px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,width:'100%',boxSizing:'border-box',outline:'none'}} />
+
+                  <div className="offer-product-grid">
+                    {offerSearchedProducts.map(p => {
+                      const sel = isProductSelected(p.id);
+                      const imgSrc0 = p.imageUrl ? `${BACKEND}${p.imageUrl.split(',')[0]}` : null;
+                      const ep = offerForm.eligibleProducts.find(x => x.productId === p.id);
+                      return (
+                        <div key={p.id} className={`offer-product-tile ${sel?'offer-product-selected':''}`}
+                          onClick={() => toggleProductSelection(p)}>
+                          <div className="offer-product-img">
+                            {imgSrc0 ? <img src={imgSrc0} alt={p.name} /> : <span style={{fontSize:18}}>💎</span>}
+                            {sel && <div className="offer-product-check">✓</div>}
+                          </div>
+                          <div className="offer-product-info">
+                            <div className="offer-product-name">{p.name}</div>
+                            <div style={{fontSize:10,color:'#9ca3af'}}>{p.sku}</div>
+                            <div style={{fontSize:12,fontWeight:700,color:'#374151'}}>₹{Number(p.sellingPrice||0).toFixed(0)}</div>
+                            {p.trackStock !== false && <div style={{fontSize:10,color: p.stockQty>0?'#15803d':'#dc2626'}}>{p.stockQty>0?`${p.stockQty} in stock`:'Out of stock'}</div>}
+                          </div>
+                          {sel && offerForm.offerType === 'FIXED_COMBO' && (
+                            <div onClick={e => e.stopPropagation()} style={{marginTop:4}}>
+                              <input type="number" min={1} value={ep?.quantity||1}
+                                onChange={e => updateFixedQty(p.id, e.target.value)}
+                                style={{width:60,padding:'3px 6px',border:'1.5px solid #93c5fd',borderRadius:6,fontSize:12,textAlign:'center'}} />
+                              <div style={{fontSize:10,color:'#6b7280',textAlign:'center'}}>qty</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {offerSearchedProducts.length === 0 && (
+                      <div style={{gridColumn:'1/-1',textAlign:'center',padding:20,color:'#9ca3af',fontSize:13}}>
+                        {products.filter(p=>p.active).length === 0 ? 'No active products found.' : 'No products match your search.'}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── C. Poster ── */}
+                  <div className="offer-section-title" style={{marginTop:20}}>C. Offer Poster / Banner</div>
+                  <p style={{fontSize:12,color:'#6b7280',margin:'4px 0 12px'}}>Recommended: 1200 × 600 px. Shown on the website home page alongside your offer.</p>
+
+                  <div style={{display:'flex',gap:16,flexWrap:'wrap',alignItems:'flex-start'}}>
+                    {/* Upload option */}
+                    <div style={{flex:1,minWidth:200}}>
+                      <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'#374151'}}>Upload Poster</div>
+                      {offerPosterPreview ? (
+                        <div style={{position:'relative',display:'inline-block'}}>
+                          <img src={offerPosterPreview} alt="poster preview"
+                            style={{width:'100%',maxWidth:300,borderRadius:8,border:'1.5px solid #e5e7eb',display:'block'}} />
+                          <button type="button" onClick={() => { setOfferPosterPreview(null); setOfferForm(f => ({...f, posterUrl:''})); }}
+                            style={{position:'absolute',top:6,right:6,background:'#dc2626',color:'#fff',border:'none',borderRadius:'50%',width:24,height:24,cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+                        </div>
+                      ) : (
+                        <label style={{display:'flex',alignItems:'center',justifyContent:'center',height:100,border:'2px dashed #93c5fd',borderRadius:8,cursor:'pointer',fontSize:13,color:'#2563eb',background:'#eff6ff'}}>
+                          {offerPosterUploading ? '⏳ Uploading…' : '📁 Choose poster image'}
+                          <input type="file" accept="image/jpeg,image/png,image/webp" style={{display:'none'}}
+                            onChange={e => { const f=e.target.files?.[0]; if(f) handlePosterUpload(f); }} />
+                        </label>
+                      )}
+                    </div>
+
+                    {/* AI generation option */}
+                    <div style={{flex:1,minWidth:200}}>
+                      <div style={{fontWeight:600,fontSize:13,marginBottom:8,color:'#374151'}}>Create Poster with AI</div>
+                      <div style={{padding:'12px 14px',background:'#f8faff',border:'1.5px solid #dbeafe',borderRadius:8,fontSize:12,color:'#374151'}}>
+                        <div style={{fontWeight:600,color:'#1d4ed8',marginBottom:6}}>⚙ Integration Required</div>
+                        <p style={{margin:'0 0 8px',lineHeight:1.5}}>AI poster generation is not currently configured. To enable it, add an image-generation API key to your backend environment:</p>
+                        <code style={{display:'block',background:'#e0f2fe',padding:'6px 8px',borderRadius:4,fontSize:11,color:'#0c4a6e',marginBottom:8}}>IMAGE_GEN_API_KEY=your_key_here</code>
+                        <p style={{margin:0,color:'#6b7280',lineHeight:1.4}}>Supported providers: OpenAI DALL·E 3 or Stability AI. Once configured, a "Generate Poster" button with prompt and style options will appear here.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {offerFormError && <p style={{color:'#dc2626',fontSize:13,marginTop:12,background:'#fef2f2',padding:'8px 12px',borderRadius:8}}>{offerFormError}</p>}
+
+                  <div style={{display:'flex',gap:10,justifyContent:'flex-end',marginTop:20}}>
+                    <button className="btn-secondary" onClick={() => setOfferFormOpen(false)}>Cancel</button>
+                    <button className="btn-primary" onClick={saveOffer} disabled={offerFormLoading}>
+                      {offerFormLoading ? 'Saving…' : offerEditId ? 'Save Changes' : 'Create Offer'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          );
+        })()}
+
       </div>{/* end main-area */}
 
       {/* ── Shop Settings Modal ── */}
@@ -5229,7 +6911,7 @@ function App() {
               </div>
             )}
 
-            <div className="edit-restock-banner" style={{marginTop:'10px'}}>
+            <div className="edit-restock-banner" style={{marginTop:'10px', opacity: editModal.trackStock === false ? 0.4 : 1, pointerEvents: editModal.trackStock === false ? 'none' : 'auto'}}>
               <span className="edit-restock-label">Stock Quantity</span>
               <div className="edit-restock-controls">
                 <button type="button" className="qty-btn" onClick={() => setEditModal(m => ({...m, stockQty: Math.max(0, Number(m.stockQty) - 1)}))}>−</button>
@@ -5238,6 +6920,10 @@ function App() {
                 <button type="button" className="qty-btn" onClick={() => setEditModal(m => ({...m, stockQty: Number(m.stockQty) + 1}))}>+</button>
               </div>
             </div>
+            <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,color:'#64748B',cursor:'pointer',userSelect:'none',marginTop:4}}>
+              <input type="checkbox" checked={editModal.trackStock === false} onChange={e => setEditModal(m => ({...m, trackStock: !e.target.checked}))} style={{width:15,height:15,cursor:'pointer'}} />
+              Don't Track Stock
+            </label>
 
             {/* Variant attributes — single-select per attribute */}
             {editAttrs.length > 0 && (
@@ -5346,6 +7032,22 @@ function App() {
                     ) : (
                       <input placeholder="Value" value={v.value} onChange={e => updateEditVariantRow(idx, { value: e.target.value })} />
                     )}
+                    {v.name.trim().toLowerCase() !== 'size' && (
+                      <div className="variant-img-row">
+                        {v.imageSlot?.preview ? (
+                          <div className="variant-img-preview">
+                            <img src={v.imageSlot.preview} alt="variant" />
+                            <button type="button" className="variant-img-remove" onClick={() => removeEditVariantImage(idx)}>✕</button>
+                          </div>
+                        ) : (
+                          <label className="variant-img-upload">
+                            <span>＋ Variant Image</span>
+                            <input type="file" accept="image/*" style={{display:'none'}}
+                              onChange={e => { const f = e.target.files?.[0]; if (f) setEditVariantImage(idx, f); }} />
+                          </label>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 <div className="variant-add-row">
@@ -5446,9 +7148,13 @@ function App() {
                 {s.id === 'two-row' && <span className="sticker-suggested">★ Suggested</span>}
               </div>
             ))}
-            <label className="modal-label" style={{marginTop:'14px'}}>Quantity</label>
+            <LabelPreview product={labelModal.product} stickerType={labelModal.stickerType} shopName={tenantInfo?.name} />
+            <label className="modal-label" style={{marginTop:'10px'}}>Quantity</label>
             <input type="number" min="1" max="100" className="modal-qty" value={labelModal.qty}
               onChange={e => setLabelModal(m => ({...m, qty:Math.max(1,Number(e.target.value))}))} />
+            <p style={{fontSize:'12px',color:'#666',margin:'12px 0 6px',lineHeight:'1.5',background:'#f8f9fa',padding:'8px 10px',borderRadius:'6px',borderLeft:'3px solid #94a3b8'}}>
+              <strong>Print dialog:</strong> set Scale to <strong>100%</strong> (not "Fit to page"), Margins to <strong>None</strong>, and select your thermal printer.
+            </p>
             <div className="modal-actions">
               <button className="modal-cancel" onClick={() => setLabelModal(null)}>Cancel</button>
               <button className="modal-print" onClick={() => {
@@ -5711,6 +7417,33 @@ const STATUS_STEPS = ['PENDING','CONFIRMED','SHIPPED','DELIVERED'];
 const STATUS_LABELS = { PENDING:'Order Placed', CONFIRMED:'Confirmed', SHIPPED:'Shipped', DELIVERED:'Delivered', CANCELLED:'Cancelled' };
 const STATUS_ICONS  = { PENDING:'🕐', CONFIRMED:'✅', SHIPPED:'🚚', DELIVERED:'🎉', CANCELLED:'❌' };
 
+/* ── Festive mandala SVG (purely decorative) ── */
+function FestiveMandala() {
+  return (
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" className="s2-festive-mandala-svg" aria-hidden="true">
+      <g transform="translate(50 50)" fill="none">
+        <circle r="44" stroke="rgba(255,215,0,0.1)" strokeWidth="0.7" />
+        <circle r="34" stroke="rgba(255,215,0,0.14)" strokeWidth="0.7" />
+        <circle r="22" stroke="rgba(255,215,0,0.18)" strokeWidth="0.8" />
+        <circle r="10" stroke="rgba(255,215,0,0.22)" strokeWidth="0.8" />
+        <circle r="4"  fill="rgba(255,215,0,0.28)" />
+        {[0,45,90,135,180,225,270,315].map(a => (
+          <ellipse key={a} cx="0" cy="-30" rx="4" ry="13"
+            transform={`rotate(${a} 0 0)`} fill="rgba(255,215,0,0.18)" />
+        ))}
+        {[22.5,67.5,112.5,157.5,202.5,247.5,292.5,337.5].map(a => (
+          <ellipse key={a} cx="0" cy="-20" rx="2.5" ry="9"
+            transform={`rotate(${a} 0 0)`} fill="rgba(255,215,0,0.11)" />
+        ))}
+        {[0,45,90,135,180,225,270,315].map(a => (
+          <ellipse key={`d${a}`} cx="0" cy="-43" rx="2" ry="5"
+            transform={`rotate(${a} 0 0)`} fill="rgba(255,215,0,0.12)" />
+        ))}
+      </g>
+    </svg>
+  );
+}
+
 function ShopApp() {
   const [products, setProducts]   = useState([]);
   const [cart, setCart]           = useState([]);
@@ -5747,11 +7480,24 @@ function ShopApp() {
   const shopLogoSrc = shopInfo.logoUrl ? `${BACKEND}${shopInfo.logoUrl}` : '/logo.png';
   const shopName = shopInfo.name || getSubdomain().replace(/[-_]/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
 
+  // ── Offers & Combos (storefront) ──
+  const [publicOffers, setPublicOffers] = useState([]);
+  const [activeOffer, setActiveOffer]   = useState(null); // offer being viewed as bundle page
+  const [comboSelection, setComboSelection] = useState([]); // selected barcodes for CUSTOMER_SELECT
+  const [productsLoading, setProductsLoading] = useState(true);
+
   useEffect(() => {
     const sub = getSubdomain();
-    axios.get(`${API}/public/products?subdomain=${sub}`).then(r => setProducts(r.data)).catch(() => {});
+    // Stage 1: shop branding loads first so the header/hero renders immediately.
     axios.get(`${API}/public/shop-info?subdomain=${sub}`).then(r => setShopInfo(r.data)).catch(() => {});
+    // Stage 2: products, digital products, and offers load in parallel.
+    setProductsLoading(true);
+    axios.get(`${API}/public/products?subdomain=${sub}`)
+      .then(r => setProducts(r.data))
+      .catch(() => {})
+      .finally(() => setProductsLoading(false));
     axios.get(`${API}/public/digital/products?subdomain=${sub}`).then(r => setDigitalProducts(r.data)).catch(() => {});
+    axios.get(`${API}/public/offers?subdomain=${sub}`).then(r => setPublicOffers(r.data)).catch(() => {});
   }, []);
 
   const addToCart = (p, selectedColor, selectedSize) => {
@@ -5774,6 +7520,25 @@ function ShopApp() {
 
   const cartTotal = cart.reduce((s, i) => s + Number(i.price) * i.qty, 0);
   const cartCount = cart.length;
+
+  const addComboToCart = (offer, selectedBarcodes) => {
+    const key = `combo-${offer.id}-${Date.now()}`;
+    const selectedProducts = selectedBarcodes.map(bc => {
+      const p = products.find(x => x.barcode === bc);
+      return p ? { barcode: bc, name: p.name } : { barcode: bc, name: bc };
+    });
+    setCart(prev => [...prev, {
+      key, isCombo: true, offerId: offer.id, offerName: offer.name,
+      price: offer.comboPrice, qty: 1,
+      selectedBarcodes, selectedProducts,
+      barcode: offer.id, name: `Combo: ${offer.name}`,
+      imageUrl: offer.posterUrl,
+      selectedColor: '', selectedSize: '',
+    }]);
+    setActiveOffer(null);
+    setComboSelection([]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const placeOrder = async (e) => {
     e.preventDefault();
@@ -5810,7 +7575,12 @@ function ShopApp() {
         pincode: orderForm.pincode,
         state: orderForm.state,
         country: orderForm.country,
-        items: cart.map(i => ({ barcode: i.barcode, quantity: i.qty, selectedColor: i.selectedColor||null, selectedSize: i.selectedSize||null })),
+        items: cart.filter(i => !i.isCombo).map(i => ({ barcode: i.barcode, quantity: i.qty, selectedColor: i.selectedColor||null, selectedSize: i.selectedSize||null })),
+        comboItems: cart.filter(i => i.isCombo).map(i => ({
+          offerId: i.offerId,
+          selectedBarcodes: i.selectedBarcodes,
+          quantity: i.qty,
+        })),
       };
 
       new window.Razorpay({
@@ -5921,6 +7691,314 @@ function ShopApp() {
   const pagedProducts  = displaySource.slice((shopPageSafe - 1) * SHOP_PAGE_SIZE, shopPageSafe * SHOP_PAGE_SIZE);
 
   useEffect(() => { setShopPage(1); }, [filterCat, search, shopTab]);
+
+  /* ── Bundle / Offer page ── */
+  if (activeOffer) {
+    const offer = activeOffer;
+    const isFixed   = offer.offerType === 'FIXED_COMBO';
+    const required  = offer.requiredQty || 0;
+    const eligible  = offer.eligibleProducts || [];
+    const selected  = comboSelection.length;
+    const canAdd    = isFixed || selected === required;
+    const remaining = Math.max(0, required - selected);
+
+    // Group eligible products by category (look up in products list)
+    const getCat = (ep) => {
+      const p = products.find(x => x.id === ep.productId);
+      return (p && p.category) ? p.category : 'Other';
+    };
+    const cats = [...new Set(eligible.map(getCat))];
+
+    const getQtySelected = (barcode) => comboSelection.filter(b => b === barcode).length;
+
+    const increment = (barcode) => {
+      if (isFixed) return;
+      if (selected >= required) return;
+      if (!offer.allowRepeat && getQtySelected(barcode) >= 1) return;
+      setComboSelection(prev => [...prev, barcode]);
+    };
+
+    const decrement = (barcode) => {
+      if (isFixed) return;
+      setComboSelection(prev => {
+        const idx = prev.lastIndexOf(barcode);
+        if (idx < 0) return prev;
+        return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+      });
+    };
+
+    const handleAddToCart = () => {
+      const barcodes = isFixed
+        ? eligible.flatMap(ep => Array(ep.quantity || 1).fill(ep.barcode))
+        : comboSelection;
+      addComboToCart(offer, barcodes);
+      setShowCart(true);
+    };
+
+    const posterSrc = offer.posterUrl ? `${BACKEND}${offer.posterUrl}` : null;
+
+    return (
+      <>
+        <div className="s2-bundle-page">
+          {/* Header */}
+          <header className="s2-header" style={{position:'sticky',top:0,zIndex:100}}>
+            <div className="s2-header-inner">
+              <img src={shopLogoSrc} className="s2-logo" alt={shopName}
+                onClick={() => { setActiveOffer(null); setComboSelection([]); window.scrollTo(0,0); }}
+                style={{cursor:'pointer'}}
+                onError={e=>{e.currentTarget.onerror=null;e.currentTarget.src='/logo.png';}} />
+              <button className="s2-back-btn" onClick={() => { setActiveOffer(null); setComboSelection([]); window.scrollTo({top:0,behavior:'smooth'}); }}>← Back</button>
+              <button className="s2-cart-icon" onClick={() => setShowCart(true)}>
+                🛍️ {cartCount > 0 && <span className="s2-cart-badge">{cartCount}</span>}
+              </button>
+            </div>
+          </header>
+
+          {/* Promotional banner */}
+          <div className={`s2-bundle-banner s2-bundle-banner-festive${posterSrc ? ' s2-bundle-banner-has-poster' : ''}`}>
+            <div className="s2-festive-bg" aria-hidden="true"/>
+            {posterSrc && <img src={posterSrc} alt={offer.name} className="s2-bundle-banner-poster" />}
+            <div className="s2-bundle-banner-info">
+              <div className="s2-bundle-banner-tag">🎁 Special Offer</div>
+              <h1 className="s2-bundle-banner-title">{offer.name}</h1>
+              {offer.description && <p className="s2-bundle-banner-desc">{offer.description}</p>}
+              <div className="s2-bundle-banner-meta">
+                <span className="s2-bundle-banner-price">₹{Number(offer.comboPrice).toFixed(0)}</span>
+                {!isFixed && <span className="s2-bundle-banner-choose">Choose any {required} product{required>1?'s':''}</span>}
+                {isFixed  && <span className="s2-bundle-banner-choose">{eligible.length}-product combo</span>}
+              </div>
+              {(offer.endDateTime) && (
+                <div className="s2-bundle-banner-validity">
+                  Valid until {new Date(offer.endDateTime).toLocaleDateString('en-IN', {day:'numeric',month:'short',year:'numeric'})}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Body: products + summary */}
+          <div className="s2-bundle-body">
+            {/* ── Product list ── */}
+            <div className="s2-bundle-products">
+              {!isFixed && (
+                <div className="s2-bundle-progress-row">
+                  <div className="s2-bundle-progress-track">
+                    <div className="s2-bundle-progress-fill" style={{width:`${Math.min(100,(selected/required)*100)}%`}} />
+                  </div>
+                  <span className="s2-bundle-progress-label">
+                    {selected === required ? '✓ Selection complete' : `${selected} of ${required} selected — ${remaining} more to go`}
+                  </span>
+                </div>
+              )}
+
+              {cats.map(cat => {
+                const catProds = eligible.filter(ep => getCat(ep) === cat);
+                return (
+                  <div key={cat} className="s2-bundle-cat-group">
+                    {cats.length > 1 && <div className="s2-bundle-cat-title">{cat}</div>}
+                    <div className="s2-bundle-product-grid">
+                      {catProds.map(ep => {
+                        const imgSrc0 = ep.imageUrl ? `${BACKEND}${ep.imageUrl.split(',')[0]}` : null;
+                        const qty = getQtySelected(ep.barcode);
+                        const stockOk = ep.trackStock === false || (ep.stockQty || 0) > 0;
+                        const canInc = !isFixed && selected < required && (offer.allowRepeat || qty === 0) && stockOk;
+                        const canDec = !isFixed && qty > 0;
+                        const isSelected = isFixed ? true : qty > 0;
+                        const fixedQty = isFixed ? (ep.quantity || 1) : null;
+
+                        return (
+                          <div key={ep.productId}
+                            className={`s2-bundle-product-card${isSelected && !isFixed ? ' s2-bundle-product-selected' : ''}${!stockOk ? ' s2-bundle-product-oos' : ''}`}>
+                            <div className="s2-bundle-product-img">
+                              {imgSrc0
+                                ? <img src={imgSrc0} alt={ep.productName} />
+                                : <span className="s2-bundle-product-img-ph">💎</span>}
+                              {!stockOk && <div className="s2-bundle-oos-badge">Out of stock</div>}
+                            </div>
+                            <div className="s2-bundle-product-info">
+                              <div className="s2-bundle-product-name">{ep.productName}</div>
+                              {ep.sku && <div className="s2-bundle-product-sku">{ep.sku}</div>}
+                              <div className="s2-bundle-product-price">₹{Number(ep.sellingPrice||0).toFixed(0)}</div>
+                            </div>
+                            {isFixed ? (
+                              <div className="s2-bundle-fixed-qty">×{fixedQty}</div>
+                            ) : (
+                              <div className="s2-bundle-qty-row">
+                                <button className="s2-bundle-qty-btn" disabled={!canDec} onClick={() => decrement(ep.barcode)}>−</button>
+                                <span className="s2-bundle-qty-count">{qty}</span>
+                                <button className="s2-bundle-qty-btn" disabled={!canInc} onClick={() => increment(ep.barcode)}>+</button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ── Sticky summary panel ── */}
+            <div className="s2-bundle-summary">
+              <div className="s2-bundle-summary-title">Your Combo</div>
+
+              {!isFixed && (
+                <div className="s2-bundle-summary-progress">
+                  <div className="s2-bundle-summary-counts">
+                    <span className="s2-bundle-summary-sel">{selected}</span>
+                    <span className="s2-bundle-summary-sep"> / </span>
+                    <span className="s2-bundle-summary-req">{required}</span>
+                    <span className="s2-bundle-summary-lbl"> selected</span>
+                  </div>
+                  <div className="s2-bundle-sum-track">
+                    <div className="s2-bundle-sum-fill" style={{width:`${Math.min(100,(selected/required)*100)}%`}} />
+                  </div>
+                  {remaining > 0 && <div className="s2-bundle-summary-hint">Pick {remaining} more item{remaining>1?'s':''}</div>}
+                  {remaining === 0 && <div className="s2-bundle-summary-ready">✓ Ready to add!</div>}
+                </div>
+              )}
+
+              {/* Selected items */}
+              <div className="s2-bundle-summary-items">
+                {(() => {
+                  const items = isFixed
+                    ? eligible.map(ep => ({ barcode: ep.barcode, name: ep.productName, qty: ep.quantity || 1 }))
+                    : Object.entries(
+                        comboSelection.reduce((acc, bc) => { acc[bc] = (acc[bc]||0)+1; return acc; }, {})
+                      ).map(([bc, q]) => {
+                        const ep = eligible.find(x => x.barcode === bc);
+                        return { barcode: bc, name: ep ? ep.productName : bc, qty: q };
+                      });
+                  if (items.length === 0) return <div className="s2-bundle-summary-empty">No items selected yet</div>;
+                  return items.map(item => (
+                    <div key={item.barcode} className="s2-bundle-summary-item">
+                      <span className="s2-bundle-summary-item-name">{item.name}</span>
+                      <span className="s2-bundle-summary-item-qty">×{item.qty}</span>
+                    </div>
+                  ));
+                })()}
+              </div>
+
+              <div className="s2-bundle-summary-price">
+                <span>Combo Price</span>
+                <strong>₹{Number(offer.comboPrice).toFixed(0)}</strong>
+              </div>
+
+              <button className="s2-bundle-add-btn" disabled={!canAdd} onClick={handleAddToCart}>
+                {canAdd ? '🛍️ Add Combo to Cart' : `Select ${remaining} more item${remaining>1?'s':''}`}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Cart Drawer */}
+        {showCart && (
+          <div className="s2-overlay" onClick={() => setShowCart(false)}>
+            <div className="s2-drawer" onClick={e => e.stopPropagation()}>
+              <div className="s2-drawer-hdr">
+                <h3>Your Cart ({cartCount})</h3>
+                <button className="s2-drawer-close" onClick={() => setShowCart(false)}>✕</button>
+              </div>
+              {cart.length === 0
+                ? <div className="s2-cart-empty">Your cart is empty<br/><small>Add some items to get started!</small></div>
+                : <>
+                    <div className="s2-cart-items">
+                      {cart.map(i => (
+                        <div key={i.key} className={`s2-cart-row ${i.isCombo?'s2-cart-combo-row':''}`}>
+                          {i.isCombo
+                            ? <div className="s2-cart-thumb-ph" style={{background:'#eff6ff',fontSize:20}}>🎁</div>
+                            : i.imageUrl
+                              ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
+                              : <div className="s2-cart-thumb-ph">💎</div>}
+                          <div className="s2-cart-info">
+                            <div className="s2-cart-name">{i.name}</div>
+                            {i.isCombo && i.selectedProducts && (
+                              <div style={{fontSize:11,color:'#6b7280',lineHeight:1.4,marginTop:2}}>
+                                {i.selectedProducts.map(sp => sp.name).join(', ')}
+                              </div>
+                            )}
+                            {!i.isCombo && (i.selectedColor || i.selectedSize) && (
+                              <div className="s2-cart-variant">
+                                {i.selectedColor && (
+                                  <span className="s2-cart-color-dot"
+                                    style={{background: COLOR_CSS[i.selectedColor] || '#ccc',
+                                      border: i.selectedColor==='White'?'1px solid #ddd':'none'}} />
+                                )}
+                                {[i.selectedColor, i.selectedSize].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
+                            <div className="s2-cart-price-each">₹{Number(i.price).toFixed(2)}</div>
+                          </div>
+                          <div className="s2-qty-wrap">
+                            <button className="s2-qty-btn" onClick={() => updateCartQty(i.key, -1)}>−</button>
+                            <span className="s2-qty-num">{i.qty}</span>
+                            <button className="s2-qty-btn" onClick={() => updateCartQty(i.key, 1)}>+</button>
+                          </div>
+                          <div className="s2-cart-line">₹{(Number(i.price) * i.qty).toFixed(2)}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="s2-cart-footer">
+                      <div className="s2-cart-subtotal"><span>Subtotal</span><strong>₹{cartTotal.toFixed(2)}</strong></div>
+                      <button className="s2-checkout-btn" onClick={() => { setShowCart(false); setCheckout(true); }}>
+                        Proceed to Checkout →
+                      </button>
+                    </div>
+                  </>
+              }
+            </div>
+          </div>
+        )}
+
+        {/* Checkout Modal */}
+        {checkout && (
+          <div className="s2-overlay s2-center-overlay" onClick={() => setCheckout(false)}>
+            <div className="s2-checkout-modal" onClick={e => e.stopPropagation()}>
+              <div className="s2-drawer-hdr">
+                <h3>Checkout</h3>
+                <button className="s2-drawer-close" onClick={() => setCheckout(false)}>✕</button>
+              </div>
+              <form onSubmit={placeOrder} className="s2-checkout-form">
+                <div className="s2-form-group">
+                  <label>Full Name *</label>
+                  <input placeholder="Your full name" value={orderForm.name} onChange={e => setOrderForm({...orderForm, name: e.target.value})} />
+                </div>
+                <div className="s2-form-group">
+                  <label>Phone Number *</label>
+                  <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile number"
+                    value={orderForm.phone}
+                    onChange={e => setOrderForm({...orderForm, phone: e.target.value.replace(/\D/g, '').slice(0, 10)})} />
+                </div>
+                <div className="s2-addr-section">
+                  <div className="s2-addr-title">Delivery Address *</div>
+                  <input placeholder="House / Flat / Building No. *" value={orderForm.houseNo} onChange={e => setOrderForm({...orderForm, houseNo: e.target.value})} required />
+                  <input placeholder="Street / Area / Locality *" value={orderForm.street} onChange={e => setOrderForm({...orderForm, street: e.target.value})} required />
+                  <div className="s2-form-row">
+                    <input placeholder="City *" value={orderForm.city} onChange={e => setOrderForm({...orderForm, city: e.target.value})} required />
+                    <input placeholder="PIN Code *" value={orderForm.pincode} onChange={e => setOrderForm({...orderForm, pincode: e.target.value})} required />
+                  </div>
+                  <select value={orderForm.state} onChange={e => setOrderForm({...orderForm, state: e.target.value})} required>
+                    <option value="">Select State *</option>
+                    {INDIA_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="s2-order-summary">
+                  <div className="s2-summary-title">Order Summary</div>
+                  {cart.map(i => (
+                    <div key={i.barcode} className="s2-summary-row">
+                      <span>{i.name} × {i.qty}</span><span>₹{(Number(i.price)*i.qty).toFixed(2)}</span>
+                    </div>
+                  ))}
+                  <div className="s2-summary-total"><span>Total</span><strong>₹{cartTotal.toFixed(2)}</strong></div>
+                </div>
+                {orderError && <p className="s2-form-error">{orderError}</p>}
+                <button type="submit" className="s2-place-btn">Place Order</button>
+              </form>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   /* ── Product detail screen ── */
   if (detailProduct) {
@@ -6093,13 +8171,20 @@ function ShopApp() {
               : <>
                   <div className="s2-cart-items">
                     {cart.map(i => (
-                      <div key={i.key} className="s2-cart-row">
-                        {i.imageUrl
-                          ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
-                          : <div className="s2-cart-thumb-ph">💎</div>}
+                      <div key={i.key} className={`s2-cart-row ${i.isCombo?'s2-cart-combo-row':''}`}>
+                        {i.isCombo
+                          ? <div className="s2-cart-thumb-ph" style={{background:'#eff6ff',fontSize:20}}>🎁</div>
+                          : i.imageUrl
+                            ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
+                            : <div className="s2-cart-thumb-ph">💎</div>}
                         <div className="s2-cart-info">
                           <div className="s2-cart-name">{i.name}</div>
-                          {(i.selectedColor || i.selectedSize) && (
+                          {i.isCombo && i.selectedProducts && (
+                            <div style={{fontSize:11,color:'#6b7280',lineHeight:1.4,marginTop:2}}>
+                              {i.selectedProducts.map(sp => sp.name).join(', ')}
+                            </div>
+                          )}
+                          {!i.isCombo && (i.selectedColor || i.selectedSize) && (
                             <div className="s2-cart-variant">
                               {i.selectedColor && (
                                 <span className="s2-cart-color-dot"
@@ -6338,6 +8423,54 @@ function ShopApp() {
           );
         })()}
 
+        {/* ── Offers & Combos section ── */}
+        {publicOffers.length > 0 && (
+          <div className="s2-offers-festive-wrap">
+            <div className="s2-festive-bg" aria-hidden="true"/>
+            <section className="s2-offers-section">
+            <div className="s2-section-hdr" style={{padding:'0 0 8px'}}>
+              <h2 className="s2-section-title" style={{margin:0}}>🎁 Offers &amp; Combos</h2>
+            </div>
+            <div className="s2-offers-grid">
+              {publicOffers.map(offer => {
+                const posterSrc = offer.posterUrl ? `${BACKEND}${offer.posterUrl}` : null;
+                const eligCount = (offer.eligibleProducts||[]).length;
+                const openCombo = () => {
+                  setActiveOffer(offer);
+                  setComboSelection(offer.offerType === 'FIXED_COMBO'
+                    ? (offer.eligibleProducts||[]).flatMap(ep => Array(ep.quantity||1).fill(ep.barcode))
+                    : []);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                };
+                return (
+                  <div key={offer.id} className="s2-offer-card" onClick={openCombo}>
+                    {posterSrc
+                      ? <img src={posterSrc} alt={offer.name} className="s2-offer-poster" loading="lazy" />
+                      : <div className="s2-offer-poster-ph">🎁</div>}
+                    <div className="s2-offer-body">
+                      <div className="s2-offer-title">{offer.name}</div>
+                      {offer.description && <div className="s2-offer-desc">{offer.description}</div>}
+                      <div style={{display:'flex',alignItems:'center',gap:10,marginTop:8,flexWrap:'wrap'}}>
+                        <span className="s2-offer-price">₹{Number(offer.comboPrice).toFixed(0)}</span>
+                        {offer.offerType === 'CUSTOMER_SELECT' && (
+                          <span style={{fontSize:12,color:'#6b7280'}}>Choose {offer.requiredQty} from {eligCount} products</span>
+                        )}
+                        {offer.offerType === 'FIXED_COMBO' && (
+                          <span style={{fontSize:12,color:'#6b7280'}}>{eligCount} item combo</span>
+                        )}
+                      </div>
+                      <button className="s2-offer-btn">
+                        {offer.offerType === 'FIXED_COMBO' ? 'Add Combo to Cart' : 'Build Your Combo →'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            </section>
+          </div>
+        )}
+
         {/* ── Products section ── */}
         <main className="s2-main">
           <div className="s2-section-hdr">
@@ -6349,14 +8482,16 @@ function ShopApp() {
             )}
           </div>
 
-          {displaySource.length === 0
+          {productsLoading
+            ? <div className="s2-grid">{Array.from({length:6}).map((_,i) => <div key={i} className="s2-card-skeleton"/>)}</div>
+            : displaySource.length === 0
             ? <div className="s2-empty">
                 No products found.{' '}
                 <button className="s2-empty-link" onClick={() => { setFilterCat(''); setSearch(''); setShopPage(1); }}>Browse all →</button>
               </div>
             : <>
                 <div className="s2-grid">
-                  {pagedProducts.map(p => {
+                  {pagedProducts.map((p, pIdx) => {
                     const urls = imgUrls(p);
                     const isNew = p.createdAt && (now - new Date(p.createdAt).getTime()) < 60 * 24 * 60 * 60 * 1000;
                     return (
@@ -6369,6 +8504,7 @@ function ShopApp() {
                         {p.featured && <div className="s2-fav-badge">❤</div>}
                         {urls.length > 0
                           ? <img src={imgSrc(urls[0])} alt={p.name} className="s2-card-img"
+                              loading={pIdx < 4 ? 'eager' : 'lazy'}
                               onError={e => { e.currentTarget.style.display='none'; e.currentTarget.nextElementSibling.style.display='flex'; }} />
                           : null}
                         <div className="s2-card-placeholder" style={{display: urls.length > 0 ? 'none' : 'flex'}}><span>💎</span></div>
@@ -6455,13 +8591,20 @@ function ShopApp() {
               : <>
                   <div className="s2-cart-items">
                     {cart.map(i => (
-                      <div key={i.key} className="s2-cart-row">
-                        {i.imageUrl
-                          ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
-                          : <div className="s2-cart-thumb-ph">💎</div>}
+                      <div key={i.key} className={`s2-cart-row ${i.isCombo?'s2-cart-combo-row':''}`}>
+                        {i.isCombo
+                          ? <div className="s2-cart-thumb-ph" style={{background:'#eff6ff',fontSize:20}}>🎁</div>
+                          : i.imageUrl
+                            ? <img src={imgSrc(i.imageUrl.split(',')[0])} alt={i.name} className="s2-cart-thumb" />
+                            : <div className="s2-cart-thumb-ph">💎</div>}
                         <div className="s2-cart-info">
                           <div className="s2-cart-name">{i.name}</div>
-                          {(i.selectedColor || i.selectedSize) && (
+                          {i.isCombo && i.selectedProducts && (
+                            <div style={{fontSize:11,color:'#6b7280',lineHeight:1.4,marginTop:2}}>
+                              {i.selectedProducts.map(sp => sp.name).join(', ')}
+                            </div>
+                          )}
+                          {!i.isCombo && (i.selectedColor || i.selectedSize) && (
                             <div className="s2-cart-variant">
                               {i.selectedColor && (
                                 <span className="s2-cart-color-dot"
@@ -6730,6 +8873,7 @@ function ShopApp() {
         </div>
         <div className="s2-footer-bottom">© {new Date().getFullYear()} {shopName} · All rights reserved</div>
       </footer>
+
     </div>
   );
 }
@@ -7322,7 +9466,7 @@ const isShop = window.location.pathname.startsWith('/shop');
 
 let rootElement;
 if (subdomain === 'www') {
-  rootElement = <LandingPage />;
+  rootElement = <Suspense fallback={null}><LandingPage /></Suspense>;
 } else if (subdomain === 'admin') {
   rootElement = <SuperAdminApp />;
 } else if (isShop) {

@@ -84,11 +84,42 @@ public class DataInitializer implements ApplicationRunner {
         migrateTable("shop_order", tid);
         migrateTable("customer_detail", tid);
         migrateTable("order_detail", tid);
+
+        // Backfill customer_detail from POS bills where a phone was captured.
+        // Idempotent: only inserts records missing for that tenant+phone pair.
+        backfillCustomersFromBills();
     }
 
     private void migrateTable(String table, UUID tenantId) {
         em.createNativeQuery("UPDATE " + table + " SET tenant_id = CAST(:tid AS uuid) WHERE tenant_id IS NULL")
                 .setParameter("tid", tenantId.toString())
                 .executeUpdate();
+    }
+
+    private void backfillCustomersFromBills() {
+        em.createNativeQuery(
+            "INSERT INTO customer_detail (id, tenant_id, first_name, phone, total_spent, total_orders, last_purchase_date) " +
+            "SELECT gen_random_uuid(), bs.tenant_id, bs.first_name, bs.phone, bs.total_spent, bs.total_orders, bs.last_purchase_date " +
+            "FROM ( " +
+            "  SELECT " +
+            "    b.tenant_id, " +
+            "    b.customer_mobile AS phone, " +
+            "    (SELECT b2.customer_name FROM bill b2 " +
+            "     WHERE b2.tenant_id = b.tenant_id AND b2.customer_mobile = b.customer_mobile " +
+            "       AND b2.customer_name IS NOT NULL AND b2.customer_name <> '' " +
+            "       AND LOWER(b2.customer_name) NOT LIKE '%walk%in%' " +
+            "     ORDER BY b2.bill_date DESC LIMIT 1) AS first_name, " +
+            "    SUM(b.grand_total) AS total_spent, " +
+            "    COUNT(*) AS total_orders, " +
+            "    MAX(DATE(b.bill_date)) AS last_purchase_date " +
+            "  FROM bill b " +
+            "  WHERE b.customer_mobile IS NOT NULL AND b.customer_mobile <> '' " +
+            "  GROUP BY b.tenant_id, b.customer_mobile " +
+            ") bs " +
+            "WHERE NOT EXISTS ( " +
+            "  SELECT 1 FROM customer_detail cd " +
+            "  WHERE cd.tenant_id = bs.tenant_id AND cd.phone = bs.phone " +
+            ")"
+        ).executeUpdate();
     }
 }

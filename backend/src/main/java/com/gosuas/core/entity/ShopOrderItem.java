@@ -27,4 +27,15 @@ public class ShopOrderItem {
     private BigDecimal lineTotal;
     private String selectedColor;
     private String selectedSize;
+
+    /** Non-null when this line item represents a combo. */
+    @Column(name = "offer_id")
+    private UUID offerId;
+
+    /**
+     * JSON array of {barcode, productName, qty} for combo items.
+     * Null for regular (non-combo) line items.
+     */
+    @Column(name = "combo_contents", columnDefinition = "TEXT")
+    private String comboContents;
 }
