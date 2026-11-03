@@ -1096,52 +1096,6 @@ function printBulkLabels(items, stickerType, shopName) {
     `Bulk Print — ${items.length} products, ${totalQty} labels (${sticker.label})`, totalQty);
 }
 
-// Renders a scaled CSS preview of one label directly in the React UI.
-// mm-based CSS matches the print output (96dpi: 1mm ≈ 3.78px).
-// Grid types preview one cell; full types preview the complete label.
-// Scale is chosen to fit ~270px wide; tiny stickers are zoomed in (capped at 4×).
-function LabelPreview({ product, stickerType, shopName }) {
-  const cfg = LABEL_CONFIG[stickerType];
-  if (!cfg || !product) return null;
-
-  const html = cfg.isGrid
-    ? buildLabelCellHTML(product, stickerType, shopName || 'GOSUAS')
-    : buildFullLabelHTML(product, stickerType, shopName || 'GOSUAS');
-
-  const mmW = cfg.isGrid ? parseFloat(cfg.cellW) : parseFloat(cfg.pageW);
-  const mmH = cfg.isGrid ? parseFloat(cfg.cellH) : parseFloat(cfg.pageH);
-  const PX_PER_MM = 3.7795;
-  const naturalW = mmW * PX_PER_MM;
-  const naturalH = mmH * PX_PER_MM;
-  const scale = Math.min(270 / naturalW, 4);
-  const displayH = Math.ceil(naturalH * scale) + 2;
-  const dimLabel = cfg.isGrid
-    ? `${cfg.cellW} × ${cfg.cellH} per label`
-    : `${cfg.pageW} × ${cfg.pageH}`;
-
-  return (
-    <div style={{margin:'10px 0 4px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:'6px',padding:'10px 12px'}}>
-      <div style={{fontSize:'11px',color:'#64748b',marginBottom:'8px',fontWeight:500}}>
-        Label preview — {dimLabel}
-      </div>
-      <div style={{overflow:'hidden',height:`${displayH}px`}}>
-        <div
-          style={{
-            transform:`scale(${scale.toFixed(4)})`,
-            transformOrigin:'top left',
-            width:`${naturalW}px`,
-            height:`${naturalH}px`,
-            background:'#fff',
-            border:'0.5px solid #aaa',
-            boxSizing:'border-box',
-          }}
-          dangerouslySetInnerHTML={{__html: html}}
-        />
-      </div>
-    </div>
-  );
-}
-
 function BarChart({ data }) {
   const maxVal = Math.max(...data.map(d => d.value), 1);
   const W = 420, H = 110, pL = 8, pR = 8, pT = 22, pB = 26;
@@ -2267,6 +2221,7 @@ function App() {
     e.preventDefault();
     try {
       const imageUrl = await uploadImages();
+      const variantImagesJson = await uploadVariantImages(form.variants);
       const activeAttrs = catAttrs.filter(a => (form.selectedAttrs[a.name] || []).length > 0);
       const isRental = form.productType === 'RENTAL';
       const pricing = isRental
@@ -4309,14 +4264,6 @@ function App() {
                   🖨 Print {bulkSelectedIds.size > 0 ? `${totalLabelCount} Label${totalLabelCount!==1?'s':''} (${bulkSelectedIds.size} product${bulkSelectedIds.size>1?'s':''})` : 'Labels'}
                 </button>
               </div>
-
-              {/* Label preview — updates when sticker type or selection changes */}
-              {(() => {
-                const previewProduct = selectedProducts[0] || bulkDisplayed[0] || null;
-                return previewProduct ? (
-                  <LabelPreview product={previewProduct} stickerType={bulkStickerType} shopName={tenantInfo?.name} />
-                ) : null;
-              })()}
 
               {/* Table meta */}
               <div className="table-meta" style={{marginBottom:'6px'}}>
@@ -7148,8 +7095,7 @@ function App() {
                 {s.id === 'two-row' && <span className="sticker-suggested">★ Suggested</span>}
               </div>
             ))}
-            <LabelPreview product={labelModal.product} stickerType={labelModal.stickerType} shopName={tenantInfo?.name} />
-            <label className="modal-label" style={{marginTop:'10px'}}>Quantity</label>
+            <label className="modal-label" style={{marginTop:'14px'}}>Quantity</label>
             <input type="number" min="1" max="100" className="modal-qty" value={labelModal.qty}
               onChange={e => setLabelModal(m => ({...m, qty:Math.max(1,Number(e.target.value))}))} />
             <p style={{fontSize:'12px',color:'#666',margin:'12px 0 6px',lineHeight:'1.5',background:'#f8f9fa',padding:'8px 10px',borderRadius:'6px',borderLeft:'3px solid #94a3b8'}}>
