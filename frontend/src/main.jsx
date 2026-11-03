@@ -2219,6 +2219,7 @@ function App() {
     e.preventDefault();
     try {
       const imageUrl = await uploadImages();
+      const variantImagesJson = await uploadVariantImages(form.variants);
       const activeAttrs = catAttrs.filter(a => (form.selectedAttrs[a.name] || []).length > 0);
       const isRental = form.productType === 'RENTAL';
       const pricing = isRental
