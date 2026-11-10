@@ -62,6 +62,7 @@ public class SecurityConfig {
         cfg.setAllowedOriginPatterns(List.of(
                 "http://localhost:5173",
                 "http://localhost:5174",
+                "http://localhost:5175",
                 "https://*.gosuas.com",
                 "https://gosuas.com",
                 "https://*.theshopclaude.com",
