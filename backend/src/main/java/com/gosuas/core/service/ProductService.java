@@ -51,6 +51,9 @@ public class ProductService {
         }
         validatePhotoLimit(request.imageUrl(), tenant != null ? tenant.getPlan() : null, request.variantAttrs());
 
+        if (request.sku() == null || request.sku().isBlank()) {
+            throw new IllegalArgumentException("SKU is required");
+        }
         if (productRepository.findBySkuAndTenantId(request.sku(), tenantId).isPresent()) {
             throw new IllegalArgumentException("SKU '" + request.sku() + "' already exists");
         }
@@ -112,7 +115,7 @@ public class ProductService {
     }
 
     private String generateEan13() {
-        String base = String.format("%012d", System.currentTimeMillis() % 1_000_000_000_000L);
+        String base = String.format("%012d", Math.abs(System.nanoTime()) % 1_000_000_000_000L);
         int sum = 0;
         for (int i = 0; i < 12; i++) {
             int d = base.charAt(i) - '0';

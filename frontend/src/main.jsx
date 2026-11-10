@@ -2283,7 +2283,7 @@ function App() {
       setShowAddForm(false);
       showToast('Product Successfully added');
     } catch (err) {
-      const msg = err.response?.data?.error || '';
+      const msg = err.response?.data?.error || err.message || '';
       showToast(msg.toLowerCase().includes('sku') && msg.toLowerCase().includes('exist')
         ? 'SKU already exist' : (msg || 'Failed to add product.'), 'error');
     }
