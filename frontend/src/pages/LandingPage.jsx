@@ -852,7 +852,7 @@ function StoreSlider() {
 }
 
 /* ── Main Landing Page ── */
-export default function LandingPage() {
+export default function LandingPage({ onSignIn = null }) {
   const [showSignup, setShowSignup] = useState(false);
   const [showSignin, setShowSignin] = useState(false);
   const [heroShopName, setHeroShopName] = useState('');
@@ -860,7 +860,12 @@ export default function LandingPage() {
   const [pricingCycle, setPricingCycle] = useState('monthly');
 
   const openSignup = (name = '', plan = 'STARTER') => { setHeroShopName(name); setSignupPlan(plan); setShowSignup(true); setShowSignin(false); };
-  const openSignin = () => { setShowSignin(true); setShowSignup(false); };
+  // When onSignIn is provided (tenant/localhost context), navigate directly to the
+  // full-page Welcome Back login instead of opening the modal overlay.
+  const openSignin = () => {
+    if (onSignIn) { onSignIn(); return; }
+    setShowSignin(true); setShowSignup(false);
+  };
 
   const handleModalClose = (action) => {
     setShowSignup(false);

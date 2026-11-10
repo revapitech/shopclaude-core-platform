@@ -44,6 +44,12 @@ class SecurityCorsConfigTest {
     }
 
     @Test
+    void corsConfig_allowsLocalhost5175() {
+        assertThat(configFor("/api/public/shop-info").getAllowedOriginPatterns())
+                .contains("http://localhost:5175");
+    }
+
+    @Test
     void corsConfig_allowsProductionDomains() {
         CorsConfiguration cfg = configFor("/api/admin/products");
         assertThat(cfg.getAllowedOriginPatterns())
