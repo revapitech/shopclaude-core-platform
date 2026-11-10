@@ -9407,6 +9407,35 @@ function SuperAdminApp() {
   );
 }
 
+// TenantRoot — entry point for tenant subdomains (e.g. gosuas.theshopclaude.com).
+//
+// On localhost, unauthenticated users see the LandingPage first so the flow is:
+//   Landing → Sign In → Welcome Back (Login) → Dashboard
+//
+// On production subdomains (non-localhost) the existing direct-to-login behaviour
+// is preserved — tenants don't want a marketing page in front of their admin login.
+//
+// Direct hash links (e.g. /#home, /#reports) always skip the landing so bookmarks
+// and shared links continue to work correctly.
+function TenantRoot() {
+  const isLoggedIn = !!localStorage.getItem('gosuas_token');
+  const isLocalhost = window.location.hostname === 'localhost'
+    || window.location.hostname === '127.0.0.1';
+  const hash = window.location.hash.replace('#', '');
+  const hasDirectAdminLink = ADMIN_PAGES.includes(hash);
+
+  // goToLogin starts true whenever we should skip the landing page:
+  //   – already logged in
+  //   – on a production subdomain (non-localhost)
+  //   – URL contains a direct admin-page hash
+  const [goToLogin, setGoToLogin] = useState(
+    isLoggedIn || !isLocalhost || hasDirectAdminLink
+  );
+
+  if (goToLogin) return <App />;
+  return <LandingPage onSignIn={() => setGoToLogin(true)} />;
+}
+
 const subdomain = getSubdomain();
 const isShop = window.location.pathname.startsWith('/shop');
 
@@ -9418,7 +9447,7 @@ if (subdomain === 'www') {
 } else if (isShop) {
   rootElement = <ShopApp />;
 } else {
-  rootElement = <App />;
+  rootElement = <TenantRoot />;
 }
 
 createRoot(document.getElementById('root')).render(rootElement);
