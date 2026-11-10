@@ -9,7 +9,7 @@ const LandingPage = React.lazy(() => import('./pages/LandingPage'));
 const API     = import.meta.env.VITE_API_URL     ?? 'http://localhost:8080/gosuas-core/api';
 const BACKEND = import.meta.env.VITE_BACKEND_URL ?? API.replace(/\/api$/, '');
 
-import { getSubdomain } from './utils/getSubdomain.js';
+import { getSubdomain, isLoopbackHost } from './utils/getSubdomain.js';
 
 function maxPhotosForPlan(plan) {
   return plan === 'PRO' ? 6 : 2; // STARTER (₹999) → 2, PRO (₹1,699) → 6, FREE defaults to 2
@@ -2283,7 +2283,7 @@ function App() {
       setShowAddForm(false);
       showToast('Product Successfully added');
     } catch (err) {
-      const msg = err.response?.data?.error || '';
+      const msg = err.response?.data?.error || err.message || '';
       showToast(msg.toLowerCase().includes('sku') && msg.toLowerCase().includes('exist')
         ? 'SKU already exist' : (msg || 'Failed to add product.'), 'error');
     }
@@ -9419,21 +9419,39 @@ function SuperAdminApp() {
 // and shared links continue to work correctly.
 function TenantRoot() {
   const isLoggedIn = !!localStorage.getItem('gosuas_token');
-  const isLocalhost = window.location.hostname === 'localhost'
-    || window.location.hostname === '127.0.0.1';
-  const hash = window.location.hash.replace('#', '');
+  const isLocalhost = isLoopbackHost(window.location.hostname);
+  const hash = window.location.hash.replace(/^#\/?/, '');
   const hasDirectAdminLink = ADMIN_PAGES.includes(hash);
+  // An explicit /?tenant=<sub> link (e.g. "Go to My Store" after signup) targets
+  // that store's login directly.
+  const hasTenantLink = new URLSearchParams(window.location.search).has('tenant');
 
   // goToLogin starts true whenever we should skip the landing page:
   //   – already logged in
   //   – on a production subdomain (non-localhost)
-  //   – URL contains a direct admin-page hash
+  //   – URL contains a direct admin-page hash or an explicit tenant link
   const [goToLogin, setGoToLogin] = useState(
-    isLoggedIn || !isLocalhost || hasDirectAdminLink
+    isLoggedIn || !isLocalhost || hasDirectAdminLink || hasTenantLink
   );
 
+  // Sign In pushes a history entry so the browser Back button returns from the
+  // Welcome Back page to the landing page (URL stays "/").
+  useEffect(() => {
+    const onPop = (e) => {
+      if (!localStorage.getItem('gosuas_token') && !e.state?.scLogin) setGoToLogin(false);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const handleSignIn = () => {
+    window.history.pushState({ scLogin: true }, '');
+    setGoToLogin(true);
+  };
+
   if (goToLogin) return <App />;
-  return <LandingPage onSignIn={() => setGoToLogin(true)} />;
+  // LandingPage is lazy-loaded — it must render inside a Suspense boundary.
+  return <Suspense fallback={null}><LandingPage onSignIn={handleSignIn} /></Suspense>;
 }
 
 const subdomain = getSubdomain();

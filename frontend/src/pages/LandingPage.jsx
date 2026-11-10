@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './landing.css';
+import { tenantHomeUrl } from '../utils/getSubdomain.js';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8080/gosuas-core/api';
 
@@ -403,7 +404,7 @@ function SignupModal({ initialShopName = '', initialPlan = 'STARTER', onClose, o
             <p style={{ fontSize: 13, color: '#6B7280', marginTop: 8 }}>
               Start adding products and go live instantly.
             </p>
-            <a href={`https://${createdSubdomain}.theshopclaude.com`} style={{ display: 'block', marginTop: 20 }}>
+            <a href={tenantHomeUrl(createdSubdomain)} style={{ display: 'block', marginTop: 20 }}>
               <button className="sc-btn-purple" style={{ width: '100%', padding: '14px', fontSize: 15 }}>
                 Go to My Store →
               </button>
@@ -437,7 +438,7 @@ function SigninModal({ onClose }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return; }
       localStorage.setItem('gosuas_token', data.token);
-      window.location.href = `https://${data.subdomain}.theshopclaude.com`;
+      window.location.href = tenantHomeUrl(data.subdomain);
     } catch { setError('Network error. Please try again.'); }
     finally { setLoading(false); }
   };

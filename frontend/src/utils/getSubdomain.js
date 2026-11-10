@@ -63,7 +63,63 @@ export function resolveSubdomain(hostname) {
   return 'www';
 }
 
+// ── Local-dev tenant override ────────────────────────────────────────────────
+// On localhost every request resolves to 'gosuas', so other tenants (and the
+// super-admin console via ?tenant=admin) cannot be reached locally. Visiting
+// /?tenant=<sub> on a loopback host selects that tenant for this browser;
+// /?tenant= clears it. Never consulted on real domains — production routing
+// is unaffected.
+const DEV_TENANT_KEY = 'sc_dev_tenant';
+
+export function isLoopbackHost(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+}
+
+/**
+ * Pure core of the dev override.
+ * @param {string} search       location.search, e.g. '?tenant=kakli'
+ * @param {string|null} stored  previously stored override
+ * @returns {{ tenant: string|null, changed: boolean }}
+ */
+export function resolveDevTenant(search, stored) {
+  const storedValid = stored && SUBDOMAIN_RE.test(stored) ? stored : null;
+  const params = new URLSearchParams(search || '');
+  if (!params.has('tenant')) return { tenant: storedValid, changed: false };
+  const raw = (params.get('tenant') || '').trim().toLowerCase();
+  const tenant = raw && SUBDOMAIN_RE.test(raw) ? raw : null;
+  return { tenant, changed: tenant !== storedValid };
+}
+
+function readDevTenant() {
+  let stored = null;
+  try { stored = localStorage.getItem(DEV_TENANT_KEY); } catch { /* storage blocked */ }
+  const { tenant, changed } = resolveDevTenant(window.location.search, stored);
+  if (changed) {
+    try {
+      if (tenant) localStorage.setItem(DEV_TENANT_KEY, tenant);
+      else localStorage.removeItem(DEV_TENANT_KEY);
+      // A token issued for another tenant must not carry over to the new one.
+      localStorage.removeItem('gosuas_token');
+    } catch { /* storage blocked */ }
+  }
+  return tenant;
+}
+
 /** Returns the tenant subdomain for the current browser tab. */
 export function getSubdomain() {
-  return resolveSubdomain(window.location.hostname);
+  const host = window.location.hostname;
+  if (isLoopbackHost(host)) {
+    const devTenant = readDevTenant();
+    if (devTenant) return devTenant;
+  }
+  return resolveSubdomain(host);
+}
+
+/** A tenant's store URL — the local override on localhost, the real subdomain otherwise. */
+export function tenantHomeUrl(sub) {
+  if (isLoopbackHost(window.location.hostname)) {
+    return `${window.location.origin}/?tenant=${encodeURIComponent(sub)}`;
+  }
+  return `https://${sub}.theshopclaude.com`;
 }
