@@ -1,5 +1,6 @@
 package com.gosuas.core.controller;
 
+import com.gosuas.core.dto.PublicProductDTO;
 import com.gosuas.core.entity.Product;
 import com.gosuas.core.entity.ShopOrder;
 import com.gosuas.core.entity.ShopOrderItem;
@@ -12,8 +13,11 @@ import com.gosuas.core.repository.TenantRepository;
 import com.gosuas.core.service.OfferService;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,6 +43,10 @@ public class PublicShopController {
     private final OfferRepository offerRepository;
     private final OfferProductRepository offerProductRepository;
 
+    private static final CacheControl SHOP_INFO_CACHE  = CacheControl.maxAge(5, TimeUnit.MINUTES).cachePublic().staleWhileRevalidate(10, TimeUnit.MINUTES);
+    private static final CacheControl PRODUCTS_CACHE   = CacheControl.maxAge(60, TimeUnit.SECONDS).cachePublic().staleWhileRevalidate(5, TimeUnit.MINUTES);
+    private static final CacheControl OFFERS_CACHE     = CacheControl.maxAge(2, TimeUnit.MINUTES).cachePublic().staleWhileRevalidate(10, TimeUnit.MINUTES);
+
     @GetMapping("/shop-info")
     public ResponseEntity<Map<String, Object>> getShopInfo(@RequestParam String subdomain) {
         return tenantRepository.findBySubdomain(subdomain.toLowerCase())
@@ -49,24 +57,29 @@ public class PublicShopController {
                     info.put("logoUrl", t.getLogoUrl());
                     info.put("bannerUrl", t.getBannerUrl());
                     info.put("phoneNumber", t.getPhoneNumber());
-                    return ResponseEntity.ok(info);
+                    return ResponseEntity.ok().cacheControl(SHOP_INFO_CACHE).body(info);
                 })
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/products")
-    public List<Product> listPublicProducts(@RequestParam(required = false) String subdomain) {
+    public ResponseEntity<List<PublicProductDTO>> listPublicProducts(@RequestParam(required = false) String subdomain) {
+        List<PublicProductDTO> result;
         if (subdomain != null && !subdomain.isBlank()) {
-            return tenantRepository.findBySubdomain(subdomain.toLowerCase())
+            result = tenantRepository.findBySubdomain(subdomain.toLowerCase())
                     .map(t -> productRepository.findAllByTenantId(t.getId()).stream()
                             .filter(p -> Boolean.TRUE.equals(p.getActive()))
+                            .map(PublicProductDTO::new)
                             .toList())
                     .orElse(List.of());
+        } else {
+            // Backward-compat fallback: all active products
+            result = productRepository.findAll().stream()
+                    .filter(p -> Boolean.TRUE.equals(p.getActive()))
+                    .map(PublicProductDTO::new)
+                    .toList();
         }
-        // Backward-compat fallback: all active products
-        return productRepository.findAll().stream()
-                .filter(p -> Boolean.TRUE.equals(p.getActive()))
-                .toList();
+        return ResponseEntity.ok().cacheControl(PRODUCTS_CACHE).body(result);
     }
 
     @PostMapping("/orders")

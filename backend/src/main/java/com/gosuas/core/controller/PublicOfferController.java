@@ -3,14 +3,15 @@ package com.gosuas.core.controller;
 import com.gosuas.core.dto.OfferResponse;
 import com.gosuas.core.entity.Tenant;
 import com.gosuas.core.repository.TenantRepository;
-import java.util.Optional;
 import com.gosuas.core.service.OfferService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/api/public/offers")
@@ -20,11 +21,15 @@ public class PublicOfferController {
     private final OfferService       offerService;
     private final TenantRepository   tenantRepository;
 
+    private static final CacheControl OFFERS_CACHE = CacheControl.maxAge(2, TimeUnit.MINUTES).cachePublic().staleWhileRevalidate(10, TimeUnit.MINUTES);
+
     /** Active, visible offers for the given subdomain — used on the storefront home page. */
     @GetMapping
     public ResponseEntity<List<OfferResponse>> listActive(@RequestParam String subdomain) {
         return tenantRepository.findBySubdomain(subdomain.toLowerCase())
-                .map(t -> ResponseEntity.ok(offerService.listPublicOffers(t.getId())))
+                .map(t -> ResponseEntity.ok()
+                        .cacheControl(OFFERS_CACHE)
+                        .body(offerService.listPublicOffers(t.getId())))
                 .orElse(ResponseEntity.ok(List.of()));
     }
 

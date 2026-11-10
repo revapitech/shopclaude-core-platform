@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import axios from 'axios';
 import './style.css';
-import LandingPage from './pages/LandingPage';
+
+// Lazy-load LandingPage so storefront/admin visitors don't download its code.
+const LandingPage = React.lazy(() => import('./pages/LandingPage'));
 
 const API     = import.meta.env.VITE_API_URL     ?? 'http://localhost:8080/gosuas-core/api';
 const BACKEND = import.meta.env.VITE_BACKEND_URL ?? API.replace(/\/api$/, '');
@@ -150,6 +152,49 @@ const STICKER_TYPES = [
 ];
 
 // CATEGORY_STICKER removed — sticker type defaults to 'two-row'
+
+// Centralized layout config — single source of truth for every sticker format.
+// pageW/pageH  : full print-media dimensions sent to @page (all columns combined).
+// cellW/cellH  : individual sticker size (grid types only).
+// cols         : labels per row (grid types only).
+// offsetLeft   : left margin of the row block (physical sheet offset).
+// gapH         : horizontal gap between cells in the same row.
+// itemGap      : CSS gap between flex children inside one cell.
+// barcodeW/H   : barcode image dimensions inside the label.
+// padV/padH    : cell content padding (vertical / horizontal).
+const LABEL_CONFIG = {
+  'butterfly': {
+    pageW: '75mm',  pageH: '24mm',  isGrid: false,
+    barcodeW: '20mm', barcodeH: '5mm',
+    padV: '1.5mm',  padH: '1mm',
+  },
+  'two-row': {
+    pageW: '76mm',  pageH: '25mm',  isGrid: true,
+    cols: 2,        cellW: '38mm',  cellH: '25mm',
+    offsetLeft: '0mm',  gapH: '0mm',  itemGap: '0.5mm',
+    barcodeW: '34mm',   barcodeH: '8mm',
+    padV: '1.5mm',  padH: '2mm',
+  },
+  'three-row': {
+    pageW: '90mm',  pageH: '20mm',  isGrid: true,
+    cols: 3,        cellW: '27mm',  cellH: '20mm',
+    offsetLeft: '7mm',  gapH: '1mm',  itemGap: '0.3mm',
+    barcodeW: '25mm',   barcodeH: '8mm',
+    padV: '1mm',    padH: '1mm',
+  },
+  'four-row': {
+    pageW: '80mm',  pageH: '15mm',  isGrid: true,
+    cols: 4,        cellW: '20mm',  cellH: '15mm',
+    offsetLeft: '0mm',  gapH: '0mm',  itemGap: '0.3mm',
+    barcodeW: '18mm',   barcodeH: '3.5mm',
+    padV: '0.8mm',  padH: '1mm',
+  },
+  'single-row': {
+    pageW: '50mm',  pageH: '15mm',  isGrid: false,
+    barcodeW: '28mm', barcodeH: '12mm',
+    padV: '1mm',    padH: '1.5mm',
+  },
+};
 
 function ChipGroup({ label, options, selected, onToggle, onSelectAll, onClear }) {
   const [customVal, setCustomVal] = useState('');
@@ -775,32 +820,39 @@ function printRentalReturnReceipt(rental, shopName = 'GOSUAS') {
 
 // Inner HTML for one label cell of a grid sticker type (four-row / three-row / two-row).
 // Shared by single-product and bulk printing so multiple products' cells can pack into the same physical rows.
+// All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
 function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || !cfg.isGrid) return '';
+  const { cellW, cellH, barcodeW, barcodeH, padV, padH, itemGap } = cfg;
   const name    = product.name || '';
   const sku     = product.sku  || '';
-  const barUrl  = `${API}/barcodes/${product.barcode}`;
+  const barUrl  = product.barcode
+    ? `${API}/barcodes/${product.barcode}`
+    : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const details = variantLabel(product);
   const F = 'font-family:Arial,sans-serif;font-weight:600;color:#000;';
   const p = product.productType === 'RENTAL'
     ? Number(product.depositAmount || 0) + Number(product.rentAmount || 0)
     : Number(product.sellingPrice);
   const priceStr = p % 1 === 0 ? String(Math.round(p)) : p.toFixed(2);
+  const base = `width:${cellW};height:${cellH};padding:${padV} ${padH};display:flex;flex-direction:column;gap:${itemGap};justify-content:flex-start;box-sizing:border-box;overflow:hidden;`;
 
   if (stickerType === 'four-row') {
     return `
-    <div style="width:100%;height:100%;padding:0.8mm 1mm;display:flex;flex-direction:column;gap:0.3mm;justify-content:flex-start;border-right:0.3mm solid #ddd;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}border-right:0.3mm solid #ddd;">
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">${shopName}</div>
       <div style="${F}font-size:4.5pt;line-height:1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
-      <img src="${barUrl}" style="width:18mm;height:3.5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:5.5pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
     </div>`;
   }
   if (stickerType === 'three-row') {
     return `
-    <div style="width:27mm;height:20mm;padding:1mm;display:flex;flex-direction:column;gap:0.3mm;justify-content:flex-start;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}">
       <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${shopName}</div>
-      <img src="${barUrl}" style="width:25mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:5pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:5.5pt;line-height:1.1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
       <div style="${F}font-size:8pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
@@ -808,9 +860,9 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
   }
   if (stickerType === 'two-row') {
     return `
-    <div style="width:38mm;height:25mm;padding:1.5mm 2mm;display:flex;flex-direction:column;gap:0.5mm;justify-content:flex-start;border-right:0.3mm solid #ddd;box-sizing:border-box;overflow:hidden;">
+    <div style="${base}border-right:0.3mm solid #ddd;">
       <div style="${F}font-size:7pt;line-height:1;flex-shrink:0;">${shopName}</div>
-      <img src="${barUrl}" style="width:34mm;height:8mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+      <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
       <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${sku}</div>
       <div style="${F}font-size:6pt;line-height:1.1;overflow:hidden;white-space:nowrap;flex-shrink:0;">${name}${details ? ' '+details : ''}</div>
       <div style="${F}font-size:9pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
@@ -820,10 +872,16 @@ function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
 }
 
 // Full standalone label (butterfly / single-row) — one label = one physical page, never shared across products.
+// All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
 function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || cfg.isGrid) return '';
+  const { pageW, pageH, barcodeW, barcodeH, padV, padH } = cfg;
   const name    = product.name || '';
   const sku     = product.sku  || '';
-  const barUrl  = `${API}/barcodes/${product.barcode}`;
+  const barUrl  = product.barcode
+    ? `${API}/barcodes/${product.barcode}`
+    : 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const details = variantLabel(product);
   const F = 'font-family:Arial,sans-serif;font-weight:600;color:#000;';
   const p = product.productType === 'RENTAL'
@@ -832,11 +890,14 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
   const priceStr = p % 1 === 0 ? String(Math.round(p)) : p.toFixed(2);
 
   if (stickerType === 'butterfly') {
+    // Butterfly: two wings on one 75×24mm label, separated by a centre fold zone.
+    // Each wing is 22mm wide; 4.5mm left spacer + wing + 26.5mm fold gap + wing = 75mm.
+    const wingW = '22mm';
     const butterflyWing = `
-      <div style="width:22mm;height:24mm;padding:1.5mm 1mm 0.8mm;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden;">
+      <div style="width:${wingW};height:${pageH};padding:1.5mm 1mm 0.8mm;display:flex;flex-direction:column;box-sizing:border-box;overflow:hidden;">
         <div style="${F}font-size:6pt;line-height:1;flex-shrink:0;">${shopName}</div>
         <div style="height:0.5mm;flex-shrink:0;"></div>
-        <img src="${barUrl}" style="width:20mm;height:5mm;object-fit:contain;object-position:left;display:block;flex-shrink:0;">
+        <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;display:block;flex-shrink:0;">
         <div style="height:0.5mm;flex-shrink:0;"></div>
         <div style="${F}font-size:5pt;line-height:1;flex-shrink:0;">${sku}</div>
         <div style="height:2mm;flex-shrink:0;"></div>
@@ -845,17 +906,17 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
         <div style="${F}font-size:10pt;line-height:1;flex-shrink:0;">RS: ${priceStr}/-</div>
       </div>`;
     return `
-      <div class="label" style="width:75mm;height:24mm;display:flex;flex-direction:row;box-sizing:border-box;overflow:hidden;">
+      <div class="label" style="width:${pageW};height:${pageH};display:flex;flex-direction:row;box-sizing:border-box;overflow:hidden;">
         <div style="width:4.5mm;flex-shrink:0;"></div>
         ${butterflyWing}
-        <div style="width:26.5mm;height:24mm;flex-shrink:0;"></div>
+        <div style="width:26.5mm;height:${pageH};flex-shrink:0;"></div>
         ${butterflyWing}
       </div>`;
   }
   // single-row
   return `
-      <div class="label" style="width:50mm;height:15mm;padding:1mm 1.5mm;display:flex;align-items:center;gap:2mm;border:0.3mm solid #bbb;box-sizing:border-box;overflow:hidden;">
-        <img src="${barUrl}" style="width:28mm;height:12mm;object-fit:contain;object-position:left;flex-shrink:0;display:block;">
+      <div class="label" style="width:${pageW};height:${pageH};padding:${padV} ${padH};display:flex;align-items:center;gap:2mm;border:0.3mm solid #bbb;box-sizing:border-box;overflow:hidden;">
+        <img src="${barUrl}" style="width:${barcodeW};height:${barcodeH};object-fit:contain;object-position:left;flex-shrink:0;display:block;">
         <div style="display:flex;flex-direction:column;gap:0.4mm;overflow:hidden;">
           <span style="${F}font-size:5pt;line-height:1;white-space:nowrap;overflow:hidden;">${shopName}</span>
           <span style="${F}font-size:5pt;line-height:1;white-space:nowrap;overflow:hidden;">${sku}</span>
@@ -865,115 +926,63 @@ function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
       </div>`;
 }
 
-function buildGrid(cellsHTML, cols, cellW, cellH, stretch = false) {
+// Packs a flat list of already-built cell HTML into grid rows using LABEL_CONFIG.
+// All dimensions come from config — no magic numbers, no stretch-percentage hacks.
+// Fixed mm cell widths prevent the progressive alignment drift that percentage widths cause.
+function buildGridRowsHTML(cellsHTML, stickerType) {
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!cfg || !cfg.isGrid) return { html: '', pageW: '0mm', pageH: '0mm' };
+  const { cols, cellW, cellH, offsetLeft, gapH, pageW, pageH } = cfg;
+
   let html = '';
   const rows = Math.ceil(cellsHTML.length / cols);
-  const totalW = `${cols * parseInt(cellW)}mm`;
-  // stretch: size the row/cells as percentages of the actual printed page instead of fixed mm,
-  // so if the printer's real page ends up wider than requested, cells fill it exactly with no
-  // leftover blank space on the right — instead of relying on the page matching totalW exactly.
-  const rowW  = stretch ? '100%' : totalW;
-  const cellW_ = stretch ? `${100 / cols}%` : cellW;
   for (let r = 0; r < rows; r++) {
     const pb = r < rows - 1 ? 'always' : 'auto';
-    html += `<div class="label" style="font-size:0;white-space:nowrap;width:${rowW};height:${cellH};overflow:hidden;page-break-after:${pb};break-after:${pb === 'always' ? 'page' : 'auto'};">`;
+    const rowParts = [
+      `font-size:0`, `white-space:nowrap`, `height:${cellH}`, `overflow:hidden`,
+      `page-break-after:${pb}`, `break-after:${pb === 'always' ? 'page' : 'auto'}`,
+      offsetLeft !== '0mm' ? `margin-left:${offsetLeft}` : null,
+    ].filter(Boolean).join(';') + ';';
+    html += `<div class="label" style="${rowParts}">`;
     for (let c = 0; c < cols; c++) {
-      const idx = r * cols + c;
-      if (idx < cellsHTML.length) {
-        html += `<div style="display:inline-block;vertical-align:top;width:${cellW_};height:${cellH};overflow:hidden;box-sizing:border-box;">${cellsHTML[idx]}</div>`;
-      } else {
-        html += `<div style="display:inline-block;vertical-align:top;width:${cellW_};height:${cellH};box-sizing:border-box;"></div>`;
+      if (c > 0 && gapH !== '0mm') {
+        html += `<div style="display:inline-block;vertical-align:top;width:${gapH};height:${cellH};"></div>`;
       }
+      const idx = r * cols + c;
+      html += `<div style="display:inline-block;vertical-align:top;width:${cellW};height:${cellH};overflow:hidden;box-sizing:border-box;">`;
+      html += idx < cellsHTML.length ? cellsHTML[idx] : '';
+      html += `</div>`;
     }
     html += `</div>`;
   }
-  return { html, pageW: totalW, pageH: cellH };
+  return { html, pageW, pageH };
 }
-
-// Packs a flat list of already-built cell HTML (which may span several different products) into
-// full grid rows, so bulk-printing multiple products never leaves a wasted blank row between them.
-function buildGridRowsHTML(cellsHTML, stickerType) {
-  if (stickerType === 'four-row') return buildGrid(cellsHTML, 4, '20mm', '15mm', true);
-  if (stickerType === 'two-row')  return buildGrid(cellsHTML, 2, '38mm', '25mm');
-  if (stickerType === 'three-row') {
-    // 7mm left sheet margin + 3×27mm cells + 2×1mm gaps = 90mm sheet width
-    const TR_COLS = 3, TR_CELL = '27mm', TR_H = '20mm', TR_GAP = '1mm', TR_OFF = '7mm';
-    let html = '';
-    const rows = Math.ceil(cellsHTML.length / TR_COLS);
-    for (let r = 0; r < rows; r++) {
-      const pb = r < rows - 1 ? 'always' : 'auto';
-      html += `<div class="label" style="margin-left:${TR_OFF};font-size:0;white-space:nowrap;height:${TR_H};overflow:hidden;page-break-after:${pb};break-after:${pb === 'always' ? 'page' : 'auto'};">`;
-      for (let c = 0; c < TR_COLS; c++) {
-        if (c > 0) html += `<div style="display:inline-block;vertical-align:top;width:${TR_GAP};height:${TR_H};"></div>`;
-        const idx = r * TR_COLS + c;
-        html += `<div style="display:inline-block;vertical-align:top;width:${TR_CELL};height:${TR_H};overflow:hidden;box-sizing:border-box;">`;
-        html += idx < cellsHTML.length ? cellsHTML[idx] : '';
-        html += `</div>`;
-      }
-      html += `</div>`;
-    }
-    return { html, pageW: '90mm', pageH: TR_H };
-  }
-  return { html: '', pageW: '0mm', pageH: '0mm' };
-}
-
-const GRID_STICKER_TYPES = ['four-row', 'three-row', 'two-row'];
 
 function buildProductLabels(product, stickerType, qty, shopName = 'GOSUAS') {
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
-  if (!sticker) return { labelsHTML: '', pageW: '50mm', pageH: '25mm' };
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!sticker || !cfg) return { labelsHTML: '', stickerType, sticker: null };
 
-  let labelsHTML, pageW, pageH;
-
-  if (GRID_STICKER_TYPES.includes(stickerType)) {
+  let labelsHTML;
+  if (cfg.isGrid) {
     const cellHTML = buildLabelCellHTML(product, stickerType, shopName);
-    const g = buildGridRowsHTML(Array.from({length: qty}, () => cellHTML), stickerType);
-    labelsHTML = g.html; pageW = g.pageW; pageH = g.pageH;
+    labelsHTML = buildGridRowsHTML(Array.from({length: qty}, () => cellHTML), stickerType).html;
   } else {
     const labelHTML = buildFullLabelHTML(product, stickerType, shopName);
     labelsHTML = Array.from({length: qty}, (_, i) =>
       `<div style="page-break-after:${i < qty - 1 ? 'always' : 'auto'};">${labelHTML}</div>`
     ).join('');
-    pageW = sticker.w; pageH = sticker.h;
   }
-
-  return {
-    labelsHTML,
-    pageW,
-    pageH,
-    isFourRow: stickerType === 'four-row',
-    sticker,
-  };
+  return { labelsHTML, stickerType, sticker };
 }
 
-function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty) {
-  const isButterfly  = pageW === '75mm';
-  const isTwoRow     = pageW === '76mm';   // 2 × 38mm grid
-  const isThreeRow   = pageW === '90mm';   // 3 × 30mm grid
-  const isSingleRow  = pageW === '50mm';
-  const isGrid = isFourRow || isTwoRow || isThreeRow;
-  const previewW = isButterfly ? 520 : isGrid ? 500 : 360;
-
-  const paperName = isFourRow   ? 'Row Label'
-    : isButterfly  ? 'Butterfly'
-    : isThreeRow   ? 'Three Row'
-    : isTwoRow     ? 'Two Row'
-    : isSingleRow  ? 'Single Row'
-    : pageW + ' × ' + pageH;
-
-  const paperW_in = isFourRow   ? '3.15 in'
-    : isButterfly  ? '2.953 in'
-    : isThreeRow   ? '3.54 in'
-    : isTwoRow     ? '2.99 in'
-    : isSingleRow  ? '1.97 in'
-    : pageW;
-
-  const paperH_in = isFourRow   ? '0.59 in'
-    : isButterfly  ? '0.945 in'
-    : isThreeRow   ? '0.79 in'
-    : isTwoRow     ? '0.98 in'
-    : isSingleRow  ? '0.59 in'
-    : pageH;
+// Opens a hidden iframe and triggers the browser print dialog.
+// stickerType is used to look up @page dimensions from LABEL_CONFIG so there is
+// one source of truth and no fragile pageW string comparisons.
+function openPrintWindow(labelsHTML, stickerType, title, totalQty) {
+  const cfg = LABEL_CONFIG[stickerType] || {};
+  const pageW = cfg.pageW || '50mm';
+  const pageH = cfg.pageH || '15mm';
 
   // Reuse hidden iframe so Chrome remembers printer settings across prints
   let iframe = document.getElementById('__label_print_frame__');
@@ -1002,8 +1011,37 @@ function openPrintWindow(labelsHTML, pageW, pageH, isFourRow, title, totalQty) {
 </body></html>`);
   labelDoc.close();
 
-  // Delay to allow barcode images to load, then print
-  setTimeout(() => { iframe.contentWindow.print(); }, 600);
+  // Wait for every barcode <img> inside the iframe to finish loading (or fail)
+  // before triggering print.  A fixed delay is unreliable — a cold JVM or multiple
+  // labels can easily exceed 600 ms and print blank/broken barcodes.
+  const imgs = Array.from(labelDoc.querySelectorAll('img'));
+  let remaining = imgs.length;
+  let printFired = false;
+
+  const doPrint = () => {
+    if (printFired) return;
+    printFired = true;
+    try { iframe.contentWindow.print(); }
+    catch (e) { console.error('[ShopClaude] label print error:', e); }
+  };
+
+  if (!remaining) {
+    // No images — fire immediately (small tick so the DOM fully settles)
+    setTimeout(doPrint, 50);
+  } else {
+    // Give up waiting and print anyway after 8 s (handles very slow networks /
+    // unreachable backends — at least the text content will print)
+    const fallback = setTimeout(doPrint, 8000);
+    const onDone = () => { if (--remaining <= 0) { clearTimeout(fallback); doPrint(); } };
+    imgs.forEach(img => {
+      if (img.complete) {
+        onDone(); // already cached / failed synchronously
+      } else {
+        img.addEventListener('load',  onDone, { once: true });
+        img.addEventListener('error', onDone, { once: true });
+      }
+    });
+  }
 }
 
 // Four-row is the tightest layout (4×20mm columns) — any drift in the printer driver's
@@ -1019,47 +1057,42 @@ function confirmFourRowStock() {
 }
 
 function printLabels(product, stickerType, qty, shopName) {
-  const { labelsHTML, pageW, pageH, isFourRow, sticker } = buildProductLabels(product, stickerType, qty, shopName);
+  const { labelsHTML, sticker } = buildProductLabels(product, stickerType, qty, shopName);
   if (!sticker) return;
-  openPrintWindow(labelsHTML, pageW, pageH, isFourRow,
-    `Preview — ${qty} label${qty !== 1 ? 's' : ''} (${sticker.label} ${sticker.size})`, qty);
+  openPrintWindow(labelsHTML, stickerType,
+    `Print — ${qty} label${qty !== 1 ? 's' : ''} (${sticker.label} ${sticker.size})`, qty);
 }
 
 function printBulkLabels(items, stickerType, shopName) {
   if (!items.length) return;
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
-  if (!sticker) return;
-  const isFourRow = stickerType === 'four-row';
+  const cfg = LABEL_CONFIG[stickerType];
+  if (!sticker || !cfg) return;
 
-  let allHTML, pageW, pageH;
+  let allHTML = '';
   let totalQty = 0;
 
-  if (GRID_STICKER_TYPES.includes(stickerType)) {
-    // Pack every product's cells into one continuous stream of grid rows, instead of forcing
-    // a fresh page per product — that used to leave a wasted blank row between products
-    // whenever a product's own label count didn't exactly fill a row.
+  if (cfg.isGrid) {
+    // Pack every product's cells into one continuous stream of grid rows so bulk jobs
+    // never leave a wasted blank row between products.
     const allCells = [];
     items.forEach(({ product, qty }) => {
       const cellHTML = buildLabelCellHTML(product, stickerType, shopName);
       for (let i = 0; i < qty; i++) allCells.push(cellHTML);
       totalQty += qty;
     });
-    const g = buildGridRowsHTML(allCells, stickerType);
-    allHTML = g.html; pageW = g.pageW; pageH = g.pageH;
+    allHTML = buildGridRowsHTML(allCells, stickerType).html;
   } else {
-    // butterfly / single-row: each label is already its own full page, so per-product
-    // forced breaks are harmless — just concatenate each product's labels in sequence.
-    let html = '';
+    // butterfly / single-row: each label = its own page; concatenate in sequence.
     items.forEach(({ product, qty }, idx) => {
       const { labelsHTML } = buildProductLabels(product, stickerType, qty, shopName);
       const isLast = idx === items.length - 1;
-      html += `<div style="page-break-after:${isLast ? 'auto' : 'always'};">${labelsHTML}</div>`;
+      allHTML += `<div style="page-break-after:${isLast ? 'auto' : 'always'};">${labelsHTML}</div>`;
       totalQty += qty;
     });
-    allHTML = html; pageW = sticker.w; pageH = sticker.h;
   }
 
-  openPrintWindow(allHTML, pageW, pageH, isFourRow,
+  openPrintWindow(allHTML, stickerType,
     `Bulk Print — ${items.length} products, ${totalQty} labels (${sticker.label})`, totalQty);
 }
 
@@ -1466,6 +1499,7 @@ function App() {
   const [orderSourceFilter, setOrderSourceFilter] = useState('ALL');
   const [custPage, setCustPage] = useState(1);
   const [orderPage, setOrderPage] = useState(1);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const PAGE_ROWS = 25;
   const [tenantInfo, setTenantInfo] = useState(null);
   const [upgradingPlan, setUpgradingPlan] = useState(false);
@@ -1856,8 +1890,10 @@ function App() {
     if (isLoggedIn && activePage === 'reports') { loadBills(); if (!rptStats) loadReports('', ''); }
     if (isLoggedIn && activePage === 'customers')
       axios.get(`${API}/admin/customers`).then(r => setCustomers(r.data)).catch(e => console.error('Failed to load customers:', e));
-    if (isLoggedIn && activePage === 'orders' && orders.length === 0)
-      axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {});
+    if (isLoggedIn && activePage === 'orders') {
+      setOrdersLoading(true);
+      axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {}).finally(() => setOrdersLoading(false));
+    }
     if (isLoggedIn && activePage === 'rental')
       axios.get(`${API}/rentals`).then(r => setRentals(r.data)).catch(() => {});
     if (isLoggedIn && activePage === 'returns') loadSalesReturns();
@@ -1899,6 +1935,11 @@ function App() {
         }
       }
     });
+  };
+
+  const refreshOrders = () => {
+    setOrdersLoading(true);
+    axios.get(`${API}/admin/orders`).then(r => setOrders(r.data)).catch(() => {}).finally(() => setOrdersLoading(false));
   };
 
   // ── Rental register handlers ──
@@ -2180,6 +2221,7 @@ function App() {
     e.preventDefault();
     try {
       const imageUrl = await uploadImages();
+      const variantImagesJson = await uploadVariantImages(form.variants);
       const activeAttrs = catAttrs.filter(a => (form.selectedAttrs[a.name] || []).length > 0);
       const isRental = form.productType === 'RENTAL';
       const pricing = isRental
@@ -4550,22 +4592,76 @@ function App() {
           const safeOrdPage = Math.min(orderPage, totalOrdPages);
           const ordSlice = filtered.slice((safeOrdPage-1)*PAGE_ROWS, safeOrdPage*PAGE_ROWS);
           const sourceCounts = { ALL: orders.length, SHOPIFY: orders.filter(o=>o.source==='SHOPIFY').length, POS: orders.filter(o=>o.source==='POS').length, ONLINE: orders.filter(o=>o.source==='ONLINE').length };
+
+          // Online order stats
+          const onlineOrders = orders.filter(o => o.source === 'ONLINE');
+          const onlineCounts = { pending: 0, confirmed: 0, shipped: 0, delivered: 0, cancelled: 0 };
+          let onlineRevenue = 0;
+          onlineOrders.forEach(o => {
+            const s = (o.fulfillmentStatus||'pending').toLowerCase();
+            if (onlineCounts[s] !== undefined) onlineCounts[s]++;
+            onlineRevenue += Number(o.total||0);
+          });
+
+          const statusSelectClass = (st) => {
+            const s = (st||'pending').toLowerCase();
+            return `ord-status-select st-${['pending','confirmed','shipped','delivered','cancelled'].includes(s) ? s : 'pending'}`;
+          };
+
           return (
           <div className="page-content">
+            {/* Online order stats cards */}
+            {(orderSourceFilter === 'ALL' || orderSourceFilter === 'ONLINE') && onlineOrders.length > 0 && (
+              <div className="ord-stats-row">
+                <div className="ord-stat-card ord-stat-pending">
+                  <div className="osc-label">Pending</div>
+                  <div className="osc-val">{onlineCounts.pending}</div>
+                  <div className="osc-sub">awaiting confirmation</div>
+                </div>
+                <div className="ord-stat-card ord-stat-confirmed">
+                  <div className="osc-label">Confirmed</div>
+                  <div className="osc-val">{onlineCounts.confirmed}</div>
+                  <div className="osc-sub">being prepared</div>
+                </div>
+                <div className="ord-stat-card ord-stat-shipped">
+                  <div className="osc-label">Shipped</div>
+                  <div className="osc-val">{onlineCounts.shipped}</div>
+                  <div className="osc-sub">in transit</div>
+                </div>
+                <div className="ord-stat-card ord-stat-delivered">
+                  <div className="osc-label">Delivered</div>
+                  <div className="osc-val">{onlineCounts.delivered}</div>
+                  <div className="osc-sub">completed</div>
+                </div>
+                <div className="ord-stat-card">
+                  <div className="osc-label">Online Revenue</div>
+                  <div className="osc-val" style={{fontSize:18}}>₹{onlineRevenue.toLocaleString('en-IN',{maximumFractionDigits:0})}</div>
+                  <div className="osc-sub">{onlineOrders.length} web orders</div>
+                </div>
+              </div>
+            )}
+
             <div className="cust-toolbar">
-              <input className="cust-search" placeholder="🔍 Search order #, customer, city…"
+              <input className="cust-search" placeholder="Search order #, customer, city..."
                 value={orderSearch} onChange={e => { setOrderSearch(e.target.value); setOrderPage(1); }} />
               <div className="order-src-filters">
                 {['ALL','SHOPIFY','POS','ONLINE'].map(src => (
                   <button key={src} className={`src-filter-btn ${orderSourceFilter===src?'src-active':''}`}
                     onClick={() => { setOrderSourceFilter(src); setOrderPage(1); }}>
-                    {src==='ALL'?'All':src==='SHOPIFY'?'Shopify':src==='POS'?'Offline Billing':'Online Shop'}
+                    {src==='ALL'?'All':src==='SHOPIFY'?'Shopify':src==='POS'?'Offline':'Online Shop'}
                     <span className="src-count">{sourceCounts[src]}</span>
                   </button>
                 ))}
               </div>
               <span className="cust-count">{filtered.length} orders</span>
+              <button onClick={refreshOrders} className="export-csv-btn" disabled={ordersLoading} style={{marginLeft:'auto'}}>
+                {ordersLoading ? '...' : '↻ Refresh'}
+              </button>
             </div>
+
+            {ordersLoading ? (
+              <div style={{textAlign:'center',padding:'56px 0',color:'var(--text-muted)',fontSize:15}}>Loading orders…</div>
+            ) : (
             <div className="data-table-wrap">
               <table className="data-table">
                 <thead><tr><th>Source</th><th>Order #</th><th>Customer</th><th>Date</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th></th><th></th></tr></thead>
@@ -4577,18 +4673,31 @@ function App() {
                         style={{cursor:'pointer'}}>
                         <td><span className={`src-badge src-${o.source}`}>{o.source==='SHOPIFY'?'Shopify':o.source==='POS'?'POS':'Online'}</span></td>
                         <td className="td-ordnum">{o.orderNumber}</td>
-                        <td className="td-name">{o.source === 'POS' ? 'Walk-in Customer' : (o.customerName || o.customerContact || '—')}</td>
+                        <td className="td-name">{o.source==='POS' ? 'Walk-in' : (o.customerName || o.customerContact || '—')}</td>
                         <td className="td-date">{o.orderedAt ? o.orderedAt.slice(0,10) : '—'}</td>
                         <td className="td-center">{o.items?.length || 0}</td>
-                        <td className="td-amt">₹{Number(o.total||0).toFixed(2)}</td>
+                        <td className="td-amt">₹{Number(o.total||0).toLocaleString('en-IN',{maximumFractionDigits:2})}</td>
                         <td><span className="pay-badge">{o.paymentMethod || '—'}</span></td>
-                        <td>
-                          <span className={`status-badge status-${o.financialStatus}`}>{o.financialStatus}</span>
-                          {o.fulfillmentStatus && <span className={`status-badge status-${o.fulfillmentStatus}`} style={{marginLeft:4}}>{o.fulfillmentStatus}</span>}
+                        <td onClick={e => e.stopPropagation()}>
+                          {o.source === 'ONLINE' ? (
+                            <select
+                              value={(o.fulfillmentStatus||'pending').toUpperCase()}
+                              onChange={e => updateOrderStatus(o.id, e.target.value)}
+                              className={statusSelectClass(o.fulfillmentStatus)}>
+                              {['PENDING','CONFIRMED','SHIPPED','DELIVERED','CANCELLED'].map(s => (
+                                <option key={s} value={s}>{s.charAt(0)+s.slice(1).toLowerCase()}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            <>
+                              <span className={`status-badge status-${(o.financialStatus||'').toLowerCase()}`}>{o.financialStatus}</span>
+                              {o.fulfillmentStatus && <span className={`status-badge status-${(o.fulfillmentStatus||'').toLowerCase()}`} style={{marginLeft:4}}>{o.fulfillmentStatus}</span>}
+                            </>
+                          )}
                         </td>
                         <td className="td-expand">{expandedOrder===o.id?'▲':'▼'}</td>
                         <td>
-                          <button className="delete-btn" onClick={e => { e.stopPropagation(); deleteOrder(o); }}>🗑</button>
+                          <button className="delete-btn" onClick={e => { e.stopPropagation(); deleteOrder(o); }}>Delete</button>
                         </td>
                       </tr>
                       {expandedOrder===o.id && (
@@ -4605,7 +4714,7 @@ function App() {
                                 return (
                                   <div style={{ display:'flex', gap:24, flexWrap:'wrap', marginBottom:10, padding:'12px 16px', background:'#F0F6FF', borderRadius:8, border:'1px solid #A8C4E0' }}>
                                     <div style={{ minWidth:220 }}>
-                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>📦 DELIVERY ADDRESS</div>
+                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>DELIVERY ADDRESS</div>
                                       {o.source === 'ONLINE' ? (
                                         <div style={{ fontSize:13, color:'#1f2937', lineHeight:2 }}>
                                           {o.houseNo && <div><span style={{color:'#6B7280',fontSize:11}}>House/Flat:</span> {o.houseNo}</div>}
@@ -4623,34 +4732,22 @@ function App() {
                                       )}
                                     </div>
                                     <div>
-                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>📞 CONTACT</div>
+                                      <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>CONTACT</div>
                                       <div style={{ fontSize:13, color:'#1f2937' }}>
                                         {o.phone || o.customerContact || <span style={{color:'#9CA3AF'}}>—</span>}
                                       </div>
                                     </div>
                                     {o.customerName && (
                                       <div>
-                                        <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>👤 CUSTOMER</div>
+                                        <div style={{ fontSize:11, fontWeight:700, color:'#1E3A5F', letterSpacing:0.5, marginBottom:6 }}>CUSTOMER</div>
                                         <div style={{ fontSize:13, color:'#1f2937' }}>{o.customerName}</div>
                                       </div>
                                     )}
-                                    <div style={{marginLeft:'auto',alignSelf:'flex-start',display:'flex',flexDirection:'column',alignItems:'flex-end',gap:8}}>
-                                      {o.source === 'ONLINE' && (
-                                        <div style={{display:'flex',alignItems:'center',gap:6}} onClick={e => e.stopPropagation()}>
-                                          <span style={{fontSize:11,fontWeight:700,color:'#1E3A5F',letterSpacing:0.5}}>STATUS:</span>
-                                          <select value={(o.fulfillmentStatus || 'pending').toUpperCase()}
-                                            onChange={e => updateOrderStatus(o.id, e.target.value)}
-                                            style={{fontSize:12,fontWeight:600,padding:'5px 8px',borderRadius:6,border:'1.5px solid #A8C4E0',background:'#fff',cursor:'pointer'}}>
-                                            {['PENDING','CONFIRMED','SHIPPED','DELIVERED','CANCELLED'].map(s => (
-                                              <option key={s} value={s}>{s.charAt(0)+s.slice(1).toLowerCase()}</option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                      )}
+                                    <div style={{marginLeft:'auto',alignSelf:'flex-start'}}>
                                       <button onClick={e => { e.stopPropagation(); printOrderShippingLabel(o, tenantInfo?.name, tenantInfo?.shopAddress); }}
                                         title="Print Shipping Label"
                                         style={{background:'#1E3A5F',color:'#fff',border:'none',borderRadius:8,padding:'7px 14px',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
-                                        🖨 Print Label
+                                        Print Label
                                       </button>
                                     </div>
                                   </div>
@@ -4659,16 +4756,31 @@ function App() {
                               <table className="order-items-table">
                                 <thead><tr><th>Product</th><th>SKU / Barcode</th><th>Variant</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr></thead>
                                 <tbody>
-                                  {(o.items||[]).map((item,idx) => (
-                                    <tr key={idx}>
-                                      <td>{item.productName}</td>
-                                      <td className="td-sku">{item.sku||'—'}</td>
-                                      <td className="td-sku">{variantLabel(item)||'—'}</td>
-                                      <td className="td-center">{item.quantity}</td>
-                                      <td className="td-amt">₹{Number(item.price||0).toFixed(2)}</td>
-                                      <td className="td-amt">₹{(Number(item.quantity||0)*Number(item.price||0)).toFixed(2)}</td>
-                                    </tr>
-                                  ))}
+                                  {(o.items||[]).map((item,idx) => {
+                                    let comboDetail = null;
+                                    if (item.comboContents) {
+                                      try {
+                                        const parts = JSON.parse(item.comboContents);
+                                        comboDetail = (
+                                          <ul className="combo-item-list">
+                                            {parts.map((p,pi) => (
+                                              <li key={pi}>{p.productName} ({p.barcode}) x{p.qty}</li>
+                                            ))}
+                                          </ul>
+                                        );
+                                      } catch {}
+                                    }
+                                    return (
+                                      <tr key={idx}>
+                                        <td>{item.productName}{comboDetail}</td>
+                                        <td className="td-sku">{item.sku||'—'}</td>
+                                        <td className="td-sku">{variantLabel(item)||'—'}</td>
+                                        <td className="td-center">{item.quantity}</td>
+                                        <td className="td-amt">₹{Number(item.price||0).toFixed(2)}</td>
+                                        <td className="td-amt">₹{(Number(item.quantity||0)*Number(item.price||0)).toFixed(2)}</td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                               {/* Order-level discount totals — POS bills only */}
@@ -4683,7 +4795,7 @@ function App() {
                                         </div>
                                         <div style={{display:'flex',justifyContent:'space-between',padding:'3px 0',color:'#dc2626',fontWeight:600}}>
                                           <span>Discount</span>
-                                          <span>− ₹{Number(o.discountAmount||0).toFixed(2)}</span>
+                                          <span>- ₹{Number(o.discountAmount||0).toFixed(2)}</span>
                                         </div>
                                       </>
                                     )}
@@ -4717,11 +4829,12 @@ function App() {
                 </tbody>
               </table>
             </div>
-            {totalOrdPages > 1 && (
+            )}
+            {totalOrdPages > 1 && !ordersLoading && (
               <div className="tbl-pagination">
-                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.max(1,p-1))} disabled={safeOrdPage===1}>‹ Prev</button>
+                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.max(1,p-1))} disabled={safeOrdPage===1}>Prev</button>
                 <span className="tbl-pg-info">Page {safeOrdPage} of {totalOrdPages}</span>
-                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.min(totalOrdPages,p+1))} disabled={safeOrdPage===totalOrdPages}>Next ›</button>
+                <button className="tbl-pg-btn" onClick={() => setOrderPage(p=>Math.min(totalOrdPages,p+1))} disabled={safeOrdPage===totalOrdPages}>Next</button>
               </div>
             )}
           </div>
@@ -6985,6 +7098,9 @@ function App() {
             <label className="modal-label" style={{marginTop:'14px'}}>Quantity</label>
             <input type="number" min="1" max="100" className="modal-qty" value={labelModal.qty}
               onChange={e => setLabelModal(m => ({...m, qty:Math.max(1,Number(e.target.value))}))} />
+            <p style={{fontSize:'12px',color:'#666',margin:'12px 0 6px',lineHeight:'1.5',background:'#f8f9fa',padding:'8px 10px',borderRadius:'6px',borderLeft:'3px solid #94a3b8'}}>
+              <strong>Print dialog:</strong> set Scale to <strong>100%</strong> (not "Fit to page"), Margins to <strong>None</strong>, and select your thermal printer.
+            </p>
             <div className="modal-actions">
               <button className="modal-cancel" onClick={() => setLabelModal(null)}>Cancel</button>
               <button className="modal-print" onClick={() => {
@@ -7314,11 +7430,18 @@ function ShopApp() {
   const [publicOffers, setPublicOffers] = useState([]);
   const [activeOffer, setActiveOffer]   = useState(null); // offer being viewed as bundle page
   const [comboSelection, setComboSelection] = useState([]); // selected barcodes for CUSTOMER_SELECT
+  const [productsLoading, setProductsLoading] = useState(true);
 
   useEffect(() => {
     const sub = getSubdomain();
-    axios.get(`${API}/public/products?subdomain=${sub}`).then(r => setProducts(r.data)).catch(() => {});
+    // Stage 1: shop branding loads first so the header/hero renders immediately.
     axios.get(`${API}/public/shop-info?subdomain=${sub}`).then(r => setShopInfo(r.data)).catch(() => {});
+    // Stage 2: products, digital products, and offers load in parallel.
+    setProductsLoading(true);
+    axios.get(`${API}/public/products?subdomain=${sub}`)
+      .then(r => setProducts(r.data))
+      .catch(() => {})
+      .finally(() => setProductsLoading(false));
     axios.get(`${API}/public/digital/products?subdomain=${sub}`).then(r => setDigitalProducts(r.data)).catch(() => {});
     axios.get(`${API}/public/offers?subdomain=${sub}`).then(r => setPublicOffers(r.data)).catch(() => {});
   }, []);
@@ -7579,7 +7702,6 @@ function ShopApp() {
 
           {/* Promotional banner */}
           <div className={`s2-bundle-banner s2-bundle-banner-festive${posterSrc ? ' s2-bundle-banner-has-poster' : ''}`}>
-            {/* Ambient glow layer — pure CSS, no DOM decorations */}
             <div className="s2-festive-bg" aria-hidden="true"/>
             {posterSrc && <img src={posterSrc} alt={offer.name} className="s2-bundle-banner-poster" />}
             <div className="s2-bundle-banner-info">
@@ -8250,7 +8372,6 @@ function ShopApp() {
         {/* ── Offers & Combos section ── */}
         {publicOffers.length > 0 && (
           <div className="s2-offers-festive-wrap">
-            {/* Ambient glow layer — pure CSS pseudo-elements, no heavy DOM */}
             <div className="s2-festive-bg" aria-hidden="true"/>
             <section className="s2-offers-section">
             <div className="s2-section-hdr" style={{padding:'0 0 8px'}}>
@@ -8270,7 +8391,7 @@ function ShopApp() {
                 return (
                   <div key={offer.id} className="s2-offer-card" onClick={openCombo}>
                     {posterSrc
-                      ? <img src={posterSrc} alt={offer.name} className="s2-offer-poster" />
+                      ? <img src={posterSrc} alt={offer.name} className="s2-offer-poster" loading="lazy" />
                       : <div className="s2-offer-poster-ph">🎁</div>}
                     <div className="s2-offer-body">
                       <div className="s2-offer-title">{offer.name}</div>
@@ -8307,14 +8428,16 @@ function ShopApp() {
             )}
           </div>
 
-          {displaySource.length === 0
+          {productsLoading
+            ? <div className="s2-grid">{Array.from({length:6}).map((_,i) => <div key={i} className="s2-card-skeleton"/>)}</div>
+            : displaySource.length === 0
             ? <div className="s2-empty">
                 No products found.{' '}
                 <button className="s2-empty-link" onClick={() => { setFilterCat(''); setSearch(''); setShopPage(1); }}>Browse all →</button>
               </div>
             : <>
                 <div className="s2-grid">
-                  {pagedProducts.map(p => {
+                  {pagedProducts.map((p, pIdx) => {
                     const urls = imgUrls(p);
                     const isNew = p.createdAt && (now - new Date(p.createdAt).getTime()) < 60 * 24 * 60 * 60 * 1000;
                     return (
@@ -8327,6 +8450,7 @@ function ShopApp() {
                         {p.featured && <div className="s2-fav-badge">❤</div>}
                         {urls.length > 0
                           ? <img src={imgSrc(urls[0])} alt={p.name} className="s2-card-img"
+                              loading={pIdx < 4 ? 'eager' : 'lazy'}
                               onError={e => { e.currentTarget.style.display='none'; e.currentTarget.nextElementSibling.style.display='flex'; }} />
                           : null}
                         <div className="s2-card-placeholder" style={{display: urls.length > 0 ? 'none' : 'flex'}}><span>💎</span></div>
@@ -9288,7 +9412,7 @@ const isShop = window.location.pathname.startsWith('/shop');
 
 let rootElement;
 if (subdomain === 'www') {
-  rootElement = <LandingPage />;
+  rootElement = <Suspense fallback={null}><LandingPage /></Suspense>;
 } else if (subdomain === 'admin') {
   rootElement = <SuperAdminApp />;
 } else if (isShop) {
