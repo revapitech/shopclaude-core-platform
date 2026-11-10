@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveSubdomain } from './getSubdomain.js';
+import { resolveSubdomain, resolveDevTenant, isLoopbackHost } from './getSubdomain.js';
 
 // Helper: assert resolveSubdomain(host) === expected
 const eq = (host, expected) =>
@@ -120,4 +120,32 @@ describe('backward-compatibility (all expected values from spec)', () => {
   eq('shop1.theshopclaude.com',     'shop1');
   eq('theshopclaude.com',           'www');
   eq('www.theshopclaude.com',       'www');
+});
+// ── Local-dev tenant override (?tenant=<sub>, loopback hosts only) ───────────
+describe('isLoopbackHost', () => {
+  it('accepts loopback hosts', () => {
+    ['localhost', '127.0.0.1', '[::1]', '::1', 'LOCALHOST'].forEach(h =>
+      expect(isLoopbackHost(h)).toBe(true));
+  });
+  it('rejects real domains', () => {
+    ['theshopclaude.com', 'kakli.theshopclaude.com', 'localhost.evil.com', ''].forEach(h =>
+      expect(isLoopbackHost(h)).toBe(false));
+  });
+});
+
+describe('resolveDevTenant', () => {
+  it('no param, nothing stored → null', () =>
+    expect(resolveDevTenant('', null)).toEqual({ tenant: null, changed: false }));
+  it('no param → keeps stored tenant', () =>
+    expect(resolveDevTenant('', 'kakli')).toEqual({ tenant: 'kakli', changed: false }));
+  it('new param → selects and flags change', () =>
+    expect(resolveDevTenant('?tenant=Kakli', null)).toEqual({ tenant: 'kakli', changed: true }));
+  it('same param as stored → no change', () =>
+    expect(resolveDevTenant('?tenant=kakli', 'kakli')).toEqual({ tenant: 'kakli', changed: false }));
+  it('empty param clears the override', () =>
+    expect(resolveDevTenant('?tenant=', 'kakli')).toEqual({ tenant: null, changed: true }));
+  it('invalid param is rejected', () =>
+    expect(resolveDevTenant('?tenant=../evil', 'kakli')).toEqual({ tenant: null, changed: true }));
+  it('admin is allowed (super-admin console)', () =>
+    expect(resolveDevTenant('?tenant=admin', null).tenant).toBe('admin'));
 });
