@@ -43,7 +43,7 @@ public class PublicShopController {
     private final OfferRepository offerRepository;
     private final OfferProductRepository offerProductRepository;
 
-    private static final CacheControl SHOP_INFO_CACHE  = CacheControl.maxAge(5, TimeUnit.MINUTES).cachePublic().staleWhileRevalidate(10, TimeUnit.MINUTES);
+    private static final CacheControl SHOP_INFO_CACHE  = CacheControl.noCache().cachePublic();
     private static final CacheControl PRODUCTS_CACHE   = CacheControl.maxAge(60, TimeUnit.SECONDS).cachePublic().staleWhileRevalidate(5, TimeUnit.MINUTES);
     private static final CacheControl OFFERS_CACHE     = CacheControl.maxAge(2, TimeUnit.MINUTES).cachePublic().staleWhileRevalidate(10, TimeUnit.MINUTES);
 
