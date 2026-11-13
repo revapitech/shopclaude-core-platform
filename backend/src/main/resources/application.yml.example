@@ -35,6 +35,10 @@ server:
     context-path: /gosuas-core
 
 upload:
+  # Keep this an absolute path in your local application.yml. A relative path is resolved
+  # against the process's working directory, which varies between IDE run configs and
+  # `mvn`/`java -jar` invocations — uploads silently split across directories and files
+  # "disappear" depending on how the app happens to be launched.
   dir: ${UPLOAD_DIR:./uploads}
 
 razorpay:
