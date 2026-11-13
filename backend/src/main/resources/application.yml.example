@@ -38,6 +38,8 @@ upload:
   dir: ${UPLOAD_DIR:./uploads}
 
 razorpay:
+  # TEST keeps local/staging from charging real cards. Set to LIVE in production.
+  mode: ${RAZORPAY_MODE:TEST}
   key:
     id: ${RAZORPAY_KEY_ID:}
     secret: ${RAZORPAY_KEY_SECRET:}
@@ -48,6 +50,9 @@ jwt:
 
 gosuas:
   init:
+    # Set to false on fresh deployments that do not need the legacy Gosuas seed tenant.
+    # The super-admin account is always created regardless of this flag.
+    create-seed-tenant: ${SEED_GOSUAS_TENANT:true}
     admin-email: ${ADMIN_EMAIL:admin@example.com}
     admin-password: ${ADMIN_PASSWORD:}
     superadmin-email: ${SUPERADMIN_EMAIL:owner@example.com}

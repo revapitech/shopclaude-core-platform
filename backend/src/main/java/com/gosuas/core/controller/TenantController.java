@@ -127,11 +127,22 @@ public class TenantController {
                 tenant.setBankBranchName(body.get("bankBranchName"));
             if (body.containsKey("razorpayMerchantKeyId"))
                 tenant.setRazorpayMerchantKeyId(body.get("razorpayMerchantKeyId"));
-            // Secret is write-only and never sent back to the client, so only overwrite it when
-            // a new non-blank value is actually submitted — an empty field means "leave as-is".
+            // Secrets are write-only: only overwrite when a new non-blank value is submitted.
             if (body.containsKey("razorpayMerchantKeySecret") && body.get("razorpayMerchantKeySecret") != null
                     && !body.get("razorpayMerchantKeySecret").isBlank())
                 tenant.setRazorpayMerchantKeySecret(body.get("razorpayMerchantKeySecret"));
+            // Test-mode Razorpay credentials (separate from live credentials above)
+            if (body.containsKey("razorpayTestKeyId"))
+                tenant.setRazorpayTestKeyId(body.get("razorpayTestKeyId"));
+            if (body.containsKey("razorpayTestKeySecret") && body.get("razorpayTestKeySecret") != null
+                    && !body.get("razorpayTestKeySecret").isBlank())
+                tenant.setRazorpayTestKeySecret(body.get("razorpayTestKeySecret"));
+            // Payment mode: "TEST" or "LIVE" only
+            if (body.containsKey("razorpayMode")) {
+                String mode = body.get("razorpayMode");
+                if ("TEST".equalsIgnoreCase(mode) || "LIVE".equalsIgnoreCase(mode))
+                    tenant.setRazorpayMode(mode.toUpperCase());
+            }
             if (body.containsKey("gstin"))
                 tenant.setGstin(body.get("gstin"));
             if (body.containsKey("gstRegistered"))

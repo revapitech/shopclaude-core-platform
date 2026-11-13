@@ -39,9 +39,31 @@ public class DataInitializer implements ApplicationRunner {
     @Value("${gosuas.init.superadmin-password:Sc@Admin2026#}")
     private String superadminPassword;
 
+    // Set SEED_GOSUAS_TENANT=false on fresh deployments that don't need the legacy Gosuas
+    // seed tenant. When false, the data-migration step is also skipped (no existing data
+    // to migrate). The super-admin account is always created regardless of this flag.
+    @Value("${gosuas.init.create-seed-tenant:true}")
+    private boolean createSeedTenant;
+
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        // Super-admin platform owner — always created, independent of seed tenant.
+        if (!userRepository.existsByEmail(superadminEmail)) {
+            User superadmin = User.builder()
+                    .tenantId(null)
+                    .email(superadminEmail)
+                    .passwordHash(passwordEncoder.encode(superadminPassword))
+                    .role("SUPERADMIN")
+                    .name("Platform Admin")
+                    .build();
+            userRepository.save(superadmin);
+        }
+
+        if (!createSeedTenant) {
+            return; // Skip Gosuas seed tenant and legacy migration on fresh deployments
+        }
+
         Tenant tenant;
         if (!tenantRepository.existsBySubdomain("gosuas")) {
             tenant = Tenant.builder()
@@ -63,18 +85,6 @@ public class DataInitializer implements ApplicationRunner {
             userRepository.save(user);
         } else {
             tenant = tenantRepository.findBySubdomain("gosuas").orElseThrow();
-        }
-
-        // Create super-admin platform owner (no tenant)
-        if (!userRepository.existsByEmail(superadminEmail)) {
-            User superadmin = User.builder()
-                    .tenantId(null)
-                    .email(superadminEmail)
-                    .passwordHash(passwordEncoder.encode(superadminPassword))
-                    .role("SUPERADMIN")
-                    .name("Platform Admin")
-                    .build();
-            userRepository.save(superadmin);
         }
 
         // Migrate any existing data that has no tenant assigned (idempotent)

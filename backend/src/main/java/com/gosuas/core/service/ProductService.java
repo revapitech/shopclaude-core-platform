@@ -165,7 +165,8 @@ public class ProductService {
         if (request.category() != null) product.setCategory(request.category());
         if (request.sku() != null) product.setSku(request.sku());
         if (request.barcode() != null && !request.barcode().isBlank() && !request.barcode().equals(product.getBarcode())) {
-            productRepository.findByBarcode(request.barcode()).ifPresent(existing -> {
+            // Uniqueness check is tenant-scoped: a barcode used by another tenant is not a conflict.
+            productRepository.findByBarcodeAndTenantId(request.barcode(), tenantId).ifPresent(existing -> {
                 if (!existing.getId().equals(productId)) {
                     throw new IllegalArgumentException("Barcode '" + request.barcode() + "' is already in use.");
                 }
