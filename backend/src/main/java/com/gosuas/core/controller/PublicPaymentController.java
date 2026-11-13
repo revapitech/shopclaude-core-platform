@@ -50,7 +50,7 @@ public class PublicPaymentController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Amount must be at least ₹1 (100 paise)"));
             }
 
-            RazorpayClient client = new RazorpayClient(tenant.getRazorpayMerchantKeyId(), tenant.getRazorpayMerchantKeySecret());
+            RazorpayClient client = new RazorpayClient(tenant.getActiveKeyId(), tenant.getActiveKeySecret());
 
             JSONObject options = new JSONObject();
             options.put("amount", amountPaise);
@@ -64,7 +64,8 @@ public class PublicPaymentController {
             res.put("razorpayOrderId", order.get("id").toString());
             res.put("amount", amountPaise);
             res.put("currency", "INR");
-            res.put("keyId", tenant.getRazorpayMerchantKeyId());   // public key — safe to send to frontend
+            res.put("keyId", tenant.getActiveKeyId());   // public key — safe to send to frontend
+            res.put("testMode", tenant.isRazorpayTestMode()); // so frontend can display test-mode banner
             return ResponseEntity.ok(res);
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
@@ -95,7 +96,9 @@ public class PublicPaymentController {
     public static boolean verifySignature(Tenant tenant, String orderId, String paymentId, String signature) throws Exception {
         if (orderId == null || paymentId == null || signature == null) return false;
         String payload = orderId + "|" + paymentId;
-        String expected = Utils.getHash(payload, tenant.getRazorpayMerchantKeySecret());
+        // Uses the active secret (test or live) so test-mode orders can't be accepted
+        // as valid live-mode payments and vice versa.
+        String expected = Utils.getHash(payload, tenant.getActiveKeySecret());
         return expected.equals(signature);
     }
 }
