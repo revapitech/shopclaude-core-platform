@@ -283,8 +283,16 @@ public class BillService {
     // a past race, etc.) and leaves a gap — count stays the same forever, so "count+1" keeps
     // recomputing the same already-used number. MAX-based is immune to gaps: it always picks
     // the number one past whatever's actually the highest, regardless of what's missing below it.
+    //
+    // The prefix is derived from the first 3 characters of the tenant's subdomain (uppercased)
+    // so each shop gets its own bill number series. The "gosuas" tenant gets "GOS-" which is
+    // backward-compatible with all existing bills in the database.
     private String generateBillNo(UUID tenantId) {
-        String prefix = "GOS-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
+        String subdomain = tenantRepository.findById(tenantId)
+                .map(Tenant::getSubdomain)
+                .orElse("shop");
+        String pfx = subdomain.substring(0, Math.min(3, subdomain.length())).toUpperCase();
+        String prefix = pfx + "-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
         int maxSeq = billRepository.findAllByTenantIdAndBillNoStartingWith(tenantId, prefix).stream()
                 .mapToInt(b -> {
                     try { return Integer.parseInt(b.getBillNo().substring(prefix.length())); }

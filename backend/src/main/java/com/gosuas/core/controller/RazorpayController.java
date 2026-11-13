@@ -24,6 +24,15 @@ public class RazorpayController {
     @Value("${razorpay.key.secret}")
     private String keySecret;
 
+    // "TEST" or "LIVE" — set via RAZORPAY_MODE env var. Defaults to TEST so local/staging
+    // environments can't accidentally charge real cards. Must be set to LIVE in production.
+    @Value("${razorpay.mode:TEST}")
+    private String razorpayMode;
+
+    private boolean isTestMode() {
+        return !"LIVE".equalsIgnoreCase(razorpayMode);
+    }
+
     /** POST /api/payment/create-order  { amount: rupees (e.g. 299.0) } */
     @PostMapping("/create-order")
     public ResponseEntity<Map<String, Object>> createOrder(@RequestBody Map<String, Object> body) {
@@ -55,6 +64,7 @@ public class RazorpayController {
             res.put("amount", amountPaise);
             res.put("currency", "INR");
             res.put("keyId", keyId);   // PUBLIC key — safe to send to frontend
+            res.put("testMode", isTestMode()); // frontend can show a test-mode banner
             return ResponseEntity.ok(res);
 
         } catch (Exception e) {
@@ -104,6 +114,7 @@ public class RazorpayController {
             res.put("planId", planId);
             res.put("amount", amountPaise);
             res.put("keyId", keyId);
+            res.put("testMode", isTestMode());
             return ResponseEntity.ok(res);
 
         } catch (Exception e) {
