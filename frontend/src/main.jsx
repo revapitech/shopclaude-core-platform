@@ -481,12 +481,16 @@ function Login({ onLogin }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || 'Invalid email or password');
+        if (res.status >= 500) {
+          setError('Server error. Please try again in a moment.');
+        } else {
+          setError(data.error || 'Invalid email or password');
+        }
         return;
       }
       onLogin(data.token);
     } catch {
-      setError('Could not connect to server. Please try again.');
+      setError('Could not reach the server. Check your connection, or that the backend is running.');
     } finally {
       setLoading(false);
     }
