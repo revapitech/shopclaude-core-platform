@@ -83,7 +83,7 @@ public class TenantController {
                 try (InputStream in = file.getInputStream()) {
                     Files.copy(in, uploadPath.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
                 }
-                tenant.setLogoUrl("/uploads/" + filename);
+                tenant.setLogoUrl("/uploads/" + filename + "?v=" + System.currentTimeMillis());
                 return ResponseEntity.ok(tenantRepository.save(tenant));
             } catch (IOException e) { throw new RuntimeException(e); }
         }).orElse(ResponseEntity.notFound().build());
@@ -102,7 +102,7 @@ public class TenantController {
                 try (InputStream in = file.getInputStream()) {
                     Files.copy(in, uploadPath.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
                 }
-                tenant.setBannerUrl("/uploads/" + filename);
+                tenant.setBannerUrl("/uploads/" + filename + "?v=" + System.currentTimeMillis());
                 return ResponseEntity.ok(tenantRepository.save(tenant));
             } catch (IOException e) { throw new RuntimeException(e); }
         }).orElse(ResponseEntity.notFound().build());
