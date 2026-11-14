@@ -7432,6 +7432,7 @@ function ShopApp() {
   const [detailSize, setDetailSize] = useState('');
 
   const [shopInfo, setShopInfo] = useState({ name: '', logoUrl: null });
+  const [shopNotFound, setShopNotFound] = useState(false);
   const [digitalProducts, setDigitalProducts] = useState([]);
   const [pdfBuyModal, setPdfBuyModal] = useState(null); // DigitalProduct being purchased
   const [pdfForm, setPdfForm] = useState({ name: '', email: '', address: '', phone: '' });
@@ -7451,7 +7452,7 @@ function ShopApp() {
   useEffect(() => {
     const sub = getSubdomain();
     // Stage 1: shop branding loads first so the header/hero renders immediately.
-    axios.get(`${API}/public/shop-info?subdomain=${sub}`).then(r => setShopInfo(r.data)).catch(() => {});
+    axios.get(`${API}/public/shop-info?subdomain=${sub}`).then(r => setShopInfo(r.data)).catch(e => { if (e.response?.status === 404) setShopNotFound(true); });
     // Stage 2: products, digital products, and offers load in parallel.
     setProductsLoading(true);
     axios.get(`${API}/public/products?subdomain=${sub}`)
@@ -7653,6 +7654,21 @@ function ShopApp() {
   const pagedProducts  = displaySource.slice((shopPageSafe - 1) * SHOP_PAGE_SIZE, shopPageSafe * SHOP_PAGE_SIZE);
 
   useEffect(() => { setShopPage(1); }, [filterCat, search, shopTab]);
+
+  /* ── Shop not found ── */
+  if (shopNotFound) {
+    const sub = getSubdomain();
+    return (
+      <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'#f8fafc',padding:'40px 20px',textAlign:'center'}}>
+        <div style={{fontSize:48,marginBottom:16}}>🏪</div>
+        <h1 style={{fontSize:24,fontWeight:700,color:'#1e293b',marginBottom:8}}>Shop not found</h1>
+        <p style={{color:'#64748b',fontSize:15,maxWidth:360}}>
+          The shop <strong>{sub}</strong> hasn't been registered yet.
+          Visit <a href="https://theshopclaude.com" style={{color:'#2563eb'}}>theshopclaude.com</a> to create your store.
+        </p>
+      </div>
+    );
+  }
 
   /* ── Bundle / Offer page ── */
   if (activeOffer) {
