@@ -1426,6 +1426,11 @@ function PdfStorePage({ tenantInfo }) {
 }
 
 function App() {
+  // True when the admin is running on localhost with a non-default tenant override
+  // (e.g. localhost:5174/?tenant=ismart). All API writes go to the LOCAL dev database --
+  // changes will NOT appear on the production storefront.
+  const isLocalDev = isLoopbackHost(window.location.hostname) && getSubdomain() !== 'gosuas';
+
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sc_sidebar') === '1');
@@ -2733,6 +2738,17 @@ function App() {
             {tenantInfo?.plan && <div className="sidebar-sub">{tenantInfo.plan} Plan</div>}
           </div>
         </div>
+
+        {isLocalDev && (
+          <div style={{margin:'8px 12px 0',padding:'9px 11px',background:'#FEF9C3',border:'1.5px solid #FCD34D',borderRadius:8,fontSize:11.5,lineHeight:1.4}}>
+            <div style={{fontWeight:700,color:'#78350F',marginBottom:3}}>⚠ Local dev environment</div>
+            <div style={{color:'#92400E',marginBottom:6}}>Products saved here go to your <strong>local database</strong> and will <strong>not</strong> appear on your live storefront.</div>
+            <a href={'https://' + getSubdomain() + '.theshopclaude.com'} target="_blank" rel="noreferrer"
+              style={{color:'#1D4ED8',fontWeight:600,textDecoration:'none',fontSize:11.5}}>
+              → Manage production store
+            </a>
+          </div>
+        )}
 
         <div className="sidebar-nav">
           <button className={`nav-item ${activePage==='home'?'nav-active':''}`} onClick={() => { setActivePage('home'); setSidebarOpen(false); }} data-label="Home" title="Home">
