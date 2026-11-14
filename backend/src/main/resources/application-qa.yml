@@ -1,0 +1,66 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  QA / Staging profile  (spring.profiles.active=qa)
+#
+#  Activate:
+#    mvn spring-boot:run -Dspring-boot.run.profiles=qa
+#  or:
+#    java -jar target/gosuas-core-backend-*.jar --spring.profiles.active=qa
+#
+#  Prerequisites (run once):
+#    psql -U postgres -h localhost -p 5434 -c "CREATE DATABASE gosuas_qa_db;"
+#
+#  This profile is ISOLATED from local-dev (port 8082 / gosuas_core_db)
+#  and production (port 8081 / gosuas_core_db on 5432).
+# ─────────────────────────────────────────────────────────────────────────────
+spring:
+  datasource:
+    driverClassName: org.postgresql.Driver
+    url: ${QA_DB_URL:jdbc:postgresql://localhost:5434/gosuas_qa_db}
+    username: ${QA_DB_USERNAME:postgres}
+    password: ${QA_DB_PASSWORD:postgres123}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:noreply@theshopclaude.com}
+    password: ${MAIL_PASSWORD:dummy}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+server:
+  port: ${QA_SERVER_PORT:8083}
+  servlet:
+    context-path: /gosuas-core
+
+upload:
+  dir: ./uploads-qa
+
+razorpay:
+  mode: TEST
+  key:
+    id: ${RAZORPAY_KEY_ID:rzp_test_T1DLy98ruFoOhH}
+    secret: ${RAZORPAY_KEY_SECRET:Zlv5OofDcpQ7ClQNUCpe943O}
+
+jwt:
+  secret: ${JWT_SECRET:gosuas-qa-jwt-secret-not-for-production-2026}
+  expiration-ms: 86400000
+
+gosuas:
+  init:
+    create-seed-tenant: true
+    admin-email: ${GOSUAS_ADMIN_EMAIL:qa-admin@gosuas.com}
+    admin-password: ${GOSUAS_ADMIN_PASSWORD:QaAdmin@123}
+    superadmin-email: ${SC_SUPERADMIN_EMAIL:qa-owner@theshopclaude.com}
+    superadmin-password: ${SC_SUPERADMIN_PASSWORD:QaSuperAdmin@2026}
