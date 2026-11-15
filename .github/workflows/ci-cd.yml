@@ -70,7 +70,7 @@ jobs:
   deploy-prod:
     name: Deploy ShopClaude to Production
     needs: [backend, frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -151,7 +151,7 @@ jobs:
   deploy-dev:
     name: Deploy ShopClaude to Dev
     needs: [backend, frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
     environment: dev
     steps:
