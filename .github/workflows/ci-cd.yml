@@ -1,0 +1,142 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (build & test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Build and test
+        working-directory: backend
+        run: mvn -B clean package
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-jar
+          path: backend/target/gosuas-core-backend-*.jar
+          retention-days: 7
+
+  frontend:
+    name: Frontend (build & test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test
+        working-directory: frontend
+        run: npm test
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  # Deploys ShopClaude's own backend (shopclaude.service, port 8082, shopclaude_db)
+  # and frontend to the VPS. This is independent of the gosuas service/deploy —
+  # those files live in a separate repo/process and are not touched here.
+  deploy:
+    name: Deploy ShopClaude to VPS
+    needs: [backend, frontend]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-jar
+          path: artifacts/backend
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: artifacts/frontend-dist
+
+      - name: Load deploy SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Trust VPS host key
+        run: ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Package frontend dist
+        run: tar czf /tmp/shopclaude-frontend.tar.gz --exclude='._*' -C artifacts/frontend-dist .
+
+      - name: Write secrets env file for shopclaude.service
+        run: |
+          cat > /tmp/shopclaude.env <<EOF
+          DB_PASSWORD=$SHOPCLAUDE_DB_PASSWORD
+          JWT_SECRET=$SHOPCLAUDE_JWT_SECRET
+          RAZORPAY_KEY_ID=$SHOPCLAUDE_RAZORPAY_KEY_ID
+          RAZORPAY_KEY_SECRET=$SHOPCLAUDE_RAZORPAY_KEY_SECRET
+          ADMIN_PASSWORD=$SHOPCLAUDE_ADMIN_PASSWORD
+          SUPERADMIN_PASSWORD=$SHOPCLAUDE_SUPERADMIN_PASSWORD
+          MAIL_PASSWORD=$SHOPCLAUDE_MAIL_PASSWORD
+          EOF
+        env:
+          SHOPCLAUDE_DB_PASSWORD: ${{ secrets.SHOPCLAUDE_DB_PASSWORD }}
+          SHOPCLAUDE_JWT_SECRET: ${{ secrets.SHOPCLAUDE_JWT_SECRET }}
+          SHOPCLAUDE_RAZORPAY_KEY_ID: ${{ secrets.SHOPCLAUDE_RAZORPAY_KEY_ID }}
+          SHOPCLAUDE_RAZORPAY_KEY_SECRET: ${{ secrets.SHOPCLAUDE_RAZORPAY_KEY_SECRET }}
+          SHOPCLAUDE_ADMIN_PASSWORD: ${{ secrets.SHOPCLAUDE_ADMIN_PASSWORD }}
+          SHOPCLAUDE_SUPERADMIN_PASSWORD: ${{ secrets.SHOPCLAUDE_SUPERADMIN_PASSWORD }}
+          SHOPCLAUDE_MAIL_PASSWORD: ${{ secrets.SHOPCLAUDE_MAIL_PASSWORD }}
+
+      - name: Upload build artifacts, env file and deploy scripts to VPS
+        run: |
+          JAR_FILE=$(ls artifacts/backend/gosuas-core-backend-*.jar | tail -1)
+          DEST="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          scp "$JAR_FILE" "$DEST:/tmp/shopclaude.jar"
+          scp /tmp/shopclaude-frontend.tar.gz "$DEST:/tmp/shopclaude-frontend.tar.gz"
+          scp /tmp/shopclaude.env "$DEST:/tmp/shopclaude.env"
+          scp deploy/shopclaude.service "$DEST:/tmp/shopclaude.service"
+          scp nginx-theshopclaude.conf "$DEST:/tmp/theshopclaude.nginx.conf"
+          scp deploy/vps-setup-shopclaude.sh "$DEST:/tmp/vps-setup-shopclaude.sh"
+          scp deploy/vps-deploy-shopclaude.sh "$DEST:/tmp/vps-deploy-shopclaude.sh"
+
+      - name: Run setup + deploy on VPS
+        run: |
+          ssh "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" bash -s <<'REMOTE'
+          set -e
+          install -d -m 700 /etc/shopclaude
+          install -m 600 /tmp/shopclaude.env /etc/shopclaude/shopclaude.env
+          rm -f /tmp/shopclaude.env
+          rm -rf /tmp/shopclaude-frontend && mkdir -p /tmp/shopclaude-frontend
+          tar xzf /tmp/shopclaude-frontend.tar.gz -C /tmp/shopclaude-frontend
+          export SHOPCLAUDE_DB_PASSWORD=$(grep '^DB_PASSWORD=' /etc/shopclaude/shopclaude.env | cut -d= -f2-)
+          bash /tmp/vps-setup-shopclaude.sh
+          bash /tmp/vps-deploy-shopclaude.sh
+          REMOTE
