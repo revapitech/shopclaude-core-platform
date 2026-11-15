@@ -35,4 +35,4 @@ nginx -t && systemctl reload nginx
 echo ""
 echo "=== Deployment complete! ==="
 echo "Sites: https://theshopclaude.com and https://*.theshopclaude.com"
-echo "Backend health: curl http://localhost:8082/gosuas-core/api/public/products"
+echo "Backend health: curl http://localhost:8084/gosuas-core/api/public/products"

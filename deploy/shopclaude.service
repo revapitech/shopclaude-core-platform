@@ -6,7 +6,7 @@ After=network.target postgresql.service
 User=www-data
 WorkingDirectory=/var/www/theshopclaude/app
 ExecStart=/usr/bin/java -Dspring.profiles.active=shopclaude \
-  -Dserver.port=8082 \
+  -Dserver.port=8084 \
   -Dupload.dir=/var/www/theshopclaude/uploads \
   -jar /var/www/theshopclaude/app/shopclaude.jar
 EnvironmentFile=/etc/shopclaude/shopclaude.env

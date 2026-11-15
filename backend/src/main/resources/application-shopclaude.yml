@@ -39,7 +39,7 @@ spring:
       max-request-size: 10MB
 
 server:
-  port: ${SERVER_PORT:8082}
+  port: ${SERVER_PORT:8084}
   servlet:
     context-path: /gosuas-core
 
