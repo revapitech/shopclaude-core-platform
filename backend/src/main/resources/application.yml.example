@@ -1,6 +1,6 @@
 spring:
   application:
-    name: shopclaude-core
+    name: gosuas-core-backend
   mail:
     host: smtp.gmail.com
     port: 587

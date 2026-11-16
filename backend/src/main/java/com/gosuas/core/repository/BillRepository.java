@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface BillRepository extends JpaRepository<Bill, UUID> {
+    long countByBillNoStartingWith(String prefix);
     long countByBillNoStartingWithAndTenantId(String prefix, UUID tenantId);
     List<Bill> findAllByTenantId(UUID tenantId);
     List<Bill> findAllByTenantIdAndBillNoStartingWith(UUID tenantId, String prefix);

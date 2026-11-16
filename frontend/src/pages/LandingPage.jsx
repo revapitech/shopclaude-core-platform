@@ -92,7 +92,7 @@ function SignupModal({ initialShopName = '', initialPlan = 'STARTER', onClose, o
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.error || 'Signup failed. Please try again.'); return; }
-      localStorage.setItem('sc_token', data.token);
+      localStorage.setItem('gosuas_token', data.token);
       setCreatedSubdomain(data.subdomain);
       setStep(4);
       if (onSuccess) onSuccess(data);
@@ -437,7 +437,7 @@ function SigninModal({ onClose }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return; }
-      localStorage.setItem('sc_token', data.token);
+      localStorage.setItem('gosuas_token', data.token);
       window.location.href = tenantHomeUrl(data.subdomain);
     } catch { setError('Network error. Please try again.'); }
     finally { setLoading(false); }

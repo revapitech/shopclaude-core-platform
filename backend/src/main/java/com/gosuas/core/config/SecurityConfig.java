@@ -60,7 +60,9 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cfg = new CorsConfiguration();
         cfg.setAllowedOriginPatterns(List.of(
-                "http://localhost:*",
+                "http://localhost:5173",
+                "http://localhost:5174",
+                "http://localhost:5175",
                 "https://*.gosuas.com",
                 "https://gosuas.com",
                 "https://*.theshopclaude.com",
