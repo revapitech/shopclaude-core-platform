@@ -100,7 +100,7 @@ function readDevTenant() {
       if (tenant) localStorage.setItem(DEV_TENANT_KEY, tenant);
       else localStorage.removeItem(DEV_TENANT_KEY);
       // A token issued for another tenant must not carry over to the new one.
-      localStorage.removeItem('sc_token');
+      localStorage.removeItem('gosuas_token');
     } catch { /* storage blocked */ }
   }
   return tenant;

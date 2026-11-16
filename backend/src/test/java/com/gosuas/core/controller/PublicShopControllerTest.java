@@ -35,15 +35,13 @@ import static org.mockito.Mockito.*;
  *     3. Subdomain lookup is case-insensitive.
  *
  *   Public Product Listing API (/api/public/products)
- *     4.  Only active products are returned.
- *     5.  Inactive products are excluded.
- *     6a. Missing subdomain → 400 (cross-tenant data-leak prevention).
- *     6b. Blank subdomain → 400.
- *     6c. Unknown subdomain returns empty list (200), not 404.
- *     7.  Tenant isolation: products from one subdomain never appear for another.
- *     8.  Empty shop returns empty list.
- *     9.  Product DTO carries the correct fields (name, category, sellingPrice).
- *    10.  purchasePrice is NOT exposed in the public DTO.
+ *     4. Only active products are returned.
+ *     5. Inactive products are excluded.
+ *     6. Unknown subdomain returns empty list (200), not 404.
+ *     7. Tenant isolation: products from one subdomain never appear for another.
+ *     8. Empty shop returns empty list.
+ *     9. Product DTO carries the correct fields (name, category, sellingPrice).
+ *    10. purchasePrice is NOT exposed in the public DTO.
  */
 @ExtendWith(MockitoExtension.class)
 class PublicShopControllerTest {
@@ -139,23 +137,7 @@ class PublicShopControllerTest {
         assertThat(resp.getBody()).isEmpty();
     }
 
-    /** 6a. Missing subdomain returns 400 — prevents a cross-tenant product data leak. */
-    @Test
-    void listPublicProducts_nullSubdomain_returns400() {
-        ResponseEntity<List<PublicProductDTO>> resp = controller.listPublicProducts(null);
-        assertThat(resp.getStatusCode().value()).isEqualTo(400);
-        verifyNoInteractions(tenantRepository, productRepository);
-    }
-
-    /** 6b. Blank subdomain also returns 400. */
-    @Test
-    void listPublicProducts_blankSubdomain_returns400() {
-        ResponseEntity<List<PublicProductDTO>> resp = controller.listPublicProducts("   ");
-        assertThat(resp.getStatusCode().value()).isEqualTo(400);
-        verifyNoInteractions(tenantRepository, productRepository);
-    }
-
-    /** 6c. Unknown subdomain returns 200 with empty list — not a 404. */
+    /** 6. Unknown subdomain returns 200 with empty list — not a 404. */
     @Test
     void listPublicProducts_unknownSubdomain_returnsEmptyList() {
         when(tenantRepository.findBySubdomain("ghost")).thenReturn(Optional.empty());

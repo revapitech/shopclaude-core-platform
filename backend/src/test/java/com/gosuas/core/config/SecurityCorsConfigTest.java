@@ -31,12 +31,22 @@ class SecurityCorsConfigTest {
         return corsSource.getCorsConfiguration(req);
     }
 
-    // CORS was updated to "http://localhost:*" wildcard (commit e69f3b1) so all local dev ports
-    // (5173, 5174, 5175, …) are covered by a single pattern rather than individual entries.
     @Test
-    void corsConfig_allowsAllLocalhostPortsViaWildcard() {
+    void corsConfig_allowsLocalhost5173() {
         assertThat(configFor("/api/public/shop-info").getAllowedOriginPatterns())
-                .contains("http://localhost:*");
+                .contains("http://localhost:5173");
+    }
+
+    @Test
+    void corsConfig_allowsLocalhost5174() {
+        assertThat(configFor("/api/public/shop-info").getAllowedOriginPatterns())
+                .contains("http://localhost:5174");
+    }
+
+    @Test
+    void corsConfig_allowsLocalhost5175() {
+        assertThat(configFor("/api/public/shop-info").getAllowedOriginPatterns())
+                .contains("http://localhost:5175");
     }
 
     @Test

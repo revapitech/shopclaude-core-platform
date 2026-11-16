@@ -8,11 +8,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "rental_order", uniqueConstraints =
-    // All tenants would use the same rental number series without tenant scoping.
-    // Enforce uniqueness per tenant. See db-migration-phase2.sql to drop the old constraint.
-    @UniqueConstraint(name = "uq_rental_no_tenant", columnNames = {"rental_no", "tenant_id"})
-)
+@Table(name = "rental_order")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class RentalOrder {
 
@@ -23,8 +19,7 @@ public class RentalOrder {
     @Column(name = "tenant_id")
     private UUID tenantId;
 
-    // Uniqueness enforced tenant-scoped via uq_rental_no_tenant (see @Table above).
-    @Column(nullable = false)
+    @Column(unique = true, nullable = false)
     private String rentalNo;
 
     private String productCode;

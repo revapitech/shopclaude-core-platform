@@ -7,12 +7,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "damage_stock", uniqueConstraints =
-    // All tenants use the same DMG-{date}-{seq} prefix, so the global unique constraint
-    // collides when two tenants create damage records on the same day. Enforce per tenant.
-    // See db-migration-phase2.sql to drop the old global unique constraint.
-    @UniqueConstraint(name = "uq_damage_no_tenant", columnNames = {"damage_no", "tenant_id"})
-)
+@Table(name = "damage_stock")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class DamageStock {
 
@@ -23,8 +18,7 @@ public class DamageStock {
     @Column(name = "tenant_id")
     private UUID tenantId;
 
-    // Uniqueness enforced tenant-scoped via uq_damage_no_tenant (see @Table above).
-    @Column(nullable = false)
+    @Column(unique = true, nullable = false)
     private String damageNo;
 
     @Column(name = "product_id")
