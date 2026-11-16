@@ -5,6 +5,7 @@ import com.razorpay.Plan;
 import com.razorpay.RazorpayClient;
 import com.razorpay.Subscription;
 import com.razorpay.Utils;
+import lombok.extern.slf4j.Slf4j;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/payment")
 public class RazorpayController {
@@ -68,6 +70,7 @@ public class RazorpayController {
             return ResponseEntity.ok(res);
 
         } catch (Exception e) {
+            log.error("create-order failed [keyId={}] razorpay.mode={}: {}", keyId, razorpayMode, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to create payment order: " + e.getMessage()));
         }
@@ -118,6 +121,7 @@ public class RazorpayController {
             return ResponseEntity.ok(res);
 
         } catch (Exception e) {
+            log.error("create-subscription failed [keyId={}] razorpay.mode={}: {}", keyId, razorpayMode, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to create subscription: " + e.getMessage()));
         }
