@@ -7,7 +7,15 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(indexes = @Index(name = "idx_product_tenant_id", columnList = "tenant_id"))
+@Table(
+    indexes = @Index(name = "idx_product_tenant_id", columnList = "tenant_id"),
+    uniqueConstraints = {
+        // Tenant-scoped: two different shops may carry the same real-world SKU or barcode.
+        // See db-migration-phase2.sql to drop the old global unique constraints.
+        @UniqueConstraint(name = "uq_product_sku_tenant",     columnNames = {"sku",     "tenant_id"}),
+        @UniqueConstraint(name = "uq_product_barcode_tenant", columnNames = {"barcode", "tenant_id"})
+    }
+)
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Product {
     @Id
@@ -24,10 +32,12 @@ public class Product {
     private String color;
     private String size;
 
-    @Column(unique = true, nullable = false)
+    // Uniqueness enforced tenant-scoped via uq_product_sku_tenant (see @Table above).
+    @Column(nullable = false)
     private String sku;
 
-    @Column(unique = true, nullable = false)
+    // Uniqueness enforced tenant-scoped via uq_product_barcode_tenant (see @Table above).
+    @Column(nullable = false)
     private String barcode;
 
     private BigDecimal purchasePrice;

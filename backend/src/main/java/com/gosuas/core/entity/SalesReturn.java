@@ -10,7 +10,12 @@ import java.util.List;
 import java.util.UUID;
 
 @Entity
-@Table(name = "sales_return")
+@Table(name = "sales_return", uniqueConstraints =
+    // All tenants use the same RET-{date}-{seq} prefix, so the global unique constraint
+    // collides when two tenants create returns on the same day. Enforce per tenant.
+    // See db-migration-phase2.sql to drop the old global unique constraint.
+    @UniqueConstraint(name = "uq_return_no_tenant", columnNames = {"return_no", "tenant_id"})
+)
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class SalesReturn {
 
@@ -21,7 +26,8 @@ public class SalesReturn {
     @Column(name = "tenant_id")
     private UUID tenantId;
 
-    @Column(unique = true, nullable = false)
+    // Uniqueness enforced tenant-scoped via uq_return_no_tenant (see @Table above).
+    @Column(nullable = false)
     private String returnNo;
 
     @Column(nullable = false)
