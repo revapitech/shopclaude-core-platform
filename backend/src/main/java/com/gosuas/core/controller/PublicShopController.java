@@ -64,21 +64,16 @@ public class PublicShopController {
 
     @GetMapping("/products")
     public ResponseEntity<List<PublicProductDTO>> listPublicProducts(@RequestParam(required = false) String subdomain) {
-        List<PublicProductDTO> result;
-        if (subdomain != null && !subdomain.isBlank()) {
-            result = tenantRepository.findBySubdomain(subdomain.toLowerCase())
-                    .map(t -> productRepository.findAllByTenantId(t.getId()).stream()
-                            .filter(p -> Boolean.TRUE.equals(p.getActive()))
-                            .map(PublicProductDTO::new)
-                            .toList())
-                    .orElse(List.of());
-        } else {
-            // Backward-compat fallback: all active products
-            result = productRepository.findAll().stream()
-                    .filter(p -> Boolean.TRUE.equals(p.getActive()))
-                    .map(PublicProductDTO::new)
-                    .toList();
+        // subdomain is required — returning all products across all tenants would be a data leak.
+        if (subdomain == null || subdomain.isBlank()) {
+            return ResponseEntity.badRequest().build();
         }
+        List<PublicProductDTO> result = tenantRepository.findBySubdomain(subdomain.toLowerCase())
+                .map(t -> productRepository.findAllByTenantId(t.getId()).stream()
+                        .filter(p -> Boolean.TRUE.equals(p.getActive()))
+                        .map(PublicProductDTO::new)
+                        .toList())
+                .orElse(List.of());
         return ResponseEntity.ok().cacheControl(PRODUCTS_CACHE).body(result);
     }
 
@@ -145,11 +140,8 @@ public class PublicShopController {
             String barcode = (String) i.get("barcode");
             int qty = ((Number) i.get("quantity")).intValue();
 
-            Product product = (tenantId != null)
-                    ? productRepository.findByBarcodeAndTenantId(barcode, tenantId)
-                            .orElseThrow(() -> new RuntimeException("Product not found: " + barcode))
-                    : productRepository.findByBarcode(barcode)
-                            .orElseThrow(() -> new RuntimeException("Product not found: " + barcode));
+            Product product = productRepository.findByBarcodeAndTenantId(barcode, tenantId)
+                    .orElseThrow(() -> new RuntimeException("Product not found: " + barcode));
 
             BigDecimal price = product.getSellingPrice();
             BigDecimal lineTotal = price.multiply(BigDecimal.valueOf(qty));
@@ -282,9 +274,7 @@ public class PublicShopController {
     // count-based numbering collide on the same number forever. See BillService.generateBillNo.
     private String generateOrderNo(UUID tenantId) {
         String prefix = "WEB-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
-        List<ShopOrder> existing = (tenantId != null)
-                ? shopOrderRepository.findAllByTenantIdAndOrderNoStartingWith(tenantId, prefix)
-                : shopOrderRepository.findAllByOrderNoStartingWith(prefix);
+        List<ShopOrder> existing = shopOrderRepository.findAllByTenantIdAndOrderNoStartingWith(tenantId, prefix);
         int maxSeq = existing.stream()
                 .mapToInt(o -> {
                     try { return Integer.parseInt(o.getOrderNo().substring(prefix.length())); }
