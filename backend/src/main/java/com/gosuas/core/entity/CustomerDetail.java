@@ -24,7 +24,9 @@ public class CustomerDetail {
     private String firstName;
     private String lastName;
 
-    @Column(unique = true)
+    // Email is optional for walk-in customers. No global unique constraint — the same customer
+    // email may legitimately appear in multiple tenants (two different shops with shared customers).
+    // See db-migration-phase2.sql to drop the old global unique constraint.
     private String email;
 
     private String phone;

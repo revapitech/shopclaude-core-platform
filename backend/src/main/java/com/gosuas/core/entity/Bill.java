@@ -9,6 +9,12 @@ import java.util.List;
 import java.util.UUID;
 
 @Entity
+@Table(uniqueConstraints =
+    // Bill numbers are prefixed with the tenant's subdomain abbreviation, so global collisions
+    // are unlikely — but two tenants with the same 3-char prefix would collide. Enforce uniqueness
+    // per tenant. See db-migration-phase2.sql to drop the old global unique constraint.
+    @UniqueConstraint(name = "uq_bill_no_tenant", columnNames = {"bill_no", "tenant_id"})
+)
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Bill {
     @Id
@@ -18,7 +24,8 @@ public class Bill {
     @Column(name = "tenant_id")
     private UUID tenantId;
 
-    @Column(unique = true, nullable = false)
+    // Uniqueness enforced tenant-scoped via uq_bill_no_tenant (see @Table above).
+    @Column(nullable = false)
     private String billNo;
 
     private String customerName;
