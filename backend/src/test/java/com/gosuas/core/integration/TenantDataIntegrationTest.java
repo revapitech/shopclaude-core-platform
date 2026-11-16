@@ -49,7 +49,7 @@ import static org.assertj.core.api.Assertions.*;
  * (Skipped automatically when Docker is unavailable.)
  */
 @SpringBootTest
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties = {
         // Disable SMTP — not needed for data-layer tests
