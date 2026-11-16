@@ -17,7 +17,7 @@ function maxPhotosForPlan(plan) {
 
 // Attach JWT to every axios request
 axios.interceptors.request.use(config => {
-  const token = localStorage.getItem('sc_token');
+  const token = localStorage.getItem('gosuas_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -38,8 +38,8 @@ axios.interceptors.response.use(
       const isAuthEndpoint = (err.config?.url || '').includes('/auth/');
       const hadAuthHeader  = !!err.config?.headers?.['Authorization'];
       if (!isFileUpload && !isAuthEndpoint && hadAuthHeader) {
-        const token = localStorage.getItem('sc_token');
-        if (token) { localStorage.removeItem('sc_token'); window.location.reload(); }
+        const token = localStorage.getItem('gosuas_token');
+        if (token) { localStorage.removeItem('gosuas_token'); window.location.reload(); }
       }
     }
     return Promise.reject(err);
@@ -594,7 +594,7 @@ function exportToCsv(filename, rows, columns) {
   URL.revokeObjectURL(url);
 }
 
-function printBillReceipt(bill, shopName = 'My Shop', shopInfo = {}) {
+function printBillReceipt(bill, shopName = 'GOSUAS') {
   // Use hidden iframe (same origin) so Chrome remembers the last printer selection
   let iframe = document.getElementById('__receipt_print_frame__');
   if (!iframe) {
@@ -650,8 +650,8 @@ function printBillReceipt(bill, shopName = 'My Shop', shopInfo = {}) {
 </head>
 <body>
   <h2>${shopName}</h2>
-  ${shopInfo.phone ? `<p class="shop-phone">📞 ${shopInfo.phone}</p>` : ''}
-  ${shopInfo.address ? `<p class="shop-addr">${shopInfo.address}</p>` : ''}
+  <p class="shop-phone">📞 8078583062</p>
+  <p class="shop-addr">OPP CET Sreekaryam</p>
   <p class="sub">Tax Invoice / Receipt</p>
   <div class="dash"></div>
   <div class="info-row"><span>Bill No:</span><span>${bill.billNo || 'N/A'}</span></div>
@@ -691,7 +691,7 @@ function printBillReceipt(bill, shopName = 'My Shop', shopInfo = {}) {
   setTimeout(() => { iframe.contentWindow.print(); }, 400);
 }
 
-function printRentalReceipt(rental, shopName = 'My Shop') {
+function printRentalReceipt(rental, shopName = 'GOSUAS') {
   let iframe = document.getElementById('__rental_receipt_print_frame__');
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -762,7 +762,7 @@ function printRentalReceipt(rental, shopName = 'My Shop') {
   setTimeout(() => { iframe.contentWindow.print(); }, 400);
 }
 
-function printRentalReturnReceipt(rental, shopName = 'My Shop') {
+function printRentalReturnReceipt(rental, shopName = 'GOSUAS') {
   let iframe = document.getElementById('__rental_return_print_frame__');
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -825,7 +825,7 @@ function printRentalReturnReceipt(rental, shopName = 'My Shop') {
 // Inner HTML for one label cell of a grid sticker type (four-row / three-row / two-row).
 // Shared by single-product and bulk printing so multiple products' cells can pack into the same physical rows.
 // All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
-function buildLabelCellHTML(product, stickerType, shopName = 'My Shop') {
+function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
   const cfg = LABEL_CONFIG[stickerType];
   if (!cfg || !cfg.isGrid) return '';
   const { cellW, cellH, barcodeW, barcodeH, padV, padH, itemGap } = cfg;
@@ -877,7 +877,7 @@ function buildLabelCellHTML(product, stickerType, shopName = 'My Shop') {
 
 // Full standalone label (butterfly / single-row) — one label = one physical page, never shared across products.
 // All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
-function buildFullLabelHTML(product, stickerType, shopName = 'My Shop') {
+function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
   const cfg = LABEL_CONFIG[stickerType];
   if (!cfg || cfg.isGrid) return '';
   const { pageW, pageH, barcodeW, barcodeH, padV, padH } = cfg;
@@ -962,7 +962,7 @@ function buildGridRowsHTML(cellsHTML, stickerType) {
   return { html, pageW, pageH };
 }
 
-function buildProductLabels(product, stickerType, qty, shopName = 'My Shop') {
+function buildProductLabels(product, stickerType, qty, shopName = 'GOSUAS') {
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
   const cfg = LABEL_CONFIG[stickerType];
   if (!sticker || !cfg) return { labelsHTML: '', stickerType, sticker: null };
@@ -1185,7 +1185,7 @@ function PdfStorePage({ tenantInfo }) {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadErr, setUploadErr] = useState('');
   const [showUpload, setShowUpload] = useState(false);
-  const headers = { Authorization: `Bearer ${localStorage.getItem('sc_token')}` };
+  const headers = { Authorization: `Bearer ${localStorage.getItem('gosuas_token')}` };
   const EMOJIS = ['📄','📚','📝','🎓','📖','📊','🧪','🖊️','📐','💡'];
 
   const load = async () => {
@@ -1435,7 +1435,7 @@ function App() {
   // changes will NOT appear on the production storefront.
   const isLocalDev = isLoopbackHost(window.location.hostname) && getSubdomain() !== 'gosuas';
 
-  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('sc_token'));
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sc_sidebar') === '1');
   const toggleSidebarCollapse = () => setSidebarCollapsed(v => { const n = !v; localStorage.setItem('sc_sidebar', n ? '1' : '0'); return n; });
@@ -2107,7 +2107,7 @@ function App() {
   };
 
   const handleLogin = (token) => {
-    localStorage.setItem('sc_token', token);
+    localStorage.setItem('gosuas_token', token);
     // Strip any stale URL hash left from the session-expiry redirect, then
     // update React state directly — avoids an unreliable same-path reload.
     if (window.location.hash) window.history.replaceState(null, '', window.location.pathname);
@@ -2116,7 +2116,7 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('sc_token');
+    localStorage.removeItem('gosuas_token');
     window.location.reload();
   };
 
@@ -2628,7 +2628,7 @@ function App() {
       setDiscountType('AMOUNT');
       setBillError('');
       loadProducts();
-      printBillReceipt(res.data, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress });
+      printBillReceipt(res.data, tenantInfo?.name);
       // Refocus the barcode field for the next customer. lastBill stays visible so
       // the cashier can still regenerate the receipt; they dismiss it with the × button.
       setTimeout(() => {
@@ -2767,9 +2767,11 @@ function App() {
           <button className={`nav-item ${activePage==='customers'?'nav-active':''}`} onClick={() => { setActivePage('customers'); setSidebarOpen(false); }} data-label="Customer Data" title="Customer Data">
             <span className="nav-icon">👥</span><span className="nav-label"> Customer Data</span>
           </button>
-          <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }} data-label="Rental" title="Rental">
-            <span className="nav-icon">🔑</span><span className="nav-label"> Rental</span>
-          </button>
+          {tenantInfo?.subdomain === 'gosuas' && (
+            <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }} data-label="Rental" title="Rental">
+              <span className="nav-icon">🔑</span><span className="nav-label"> Rental</span>
+            </button>
+          )}
           <button className={`nav-item ${activePage==='alerts'?'nav-active':''}`} onClick={() => { setActivePage('alerts'); setSidebarOpen(false); }} data-label="Stock Alerts" title="Stock Alerts">
             <span className="nav-icon">⚠</span><span className="nav-label"> Stock Alerts</span>
             {lowStockItems.length > 0 && <span className="alert-count-badge nav-badge" style={{marginLeft:6}}>{lowStockItems.length}</span>}
@@ -3002,10 +3004,10 @@ function App() {
               <div className="bill-result-row">
                 <span>Status:</span><span className="paid-badge">{lastBill.paymentStatus || 'PAID'}</span>
               </div>
-              <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress })}>
+              <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
                 🖨 Reprint Receipt
               </button>
-              <button className="regenerate-bill-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress })}>
+              <button className="regenerate-bill-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
                 ↺ Regenerate Bill
               </button>
             </div>
@@ -3025,7 +3027,7 @@ function App() {
                   try {
                     const res = await axios.get(`${API}/bills/${lastBillId}`);
                     setLastBill(res.data);
-                    printBillReceipt(res.data, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress });
+                    printBillReceipt(res.data, tenantInfo?.name);
                   } catch {
                     setBillError('Could not retrieve the bill. Please check your connection.');
                   } finally {
@@ -3190,15 +3192,17 @@ function App() {
               </div>
               <form onSubmit={createProduct}>
 
-            <>
-              <label className="modal-label">Product Type</label>
-              <select value={form.productType}
-                onChange={e => setForm(f => ({...f, productType: e.target.value}))}
-                style={{marginBottom:10}}>
-                <option value="OTHER">Other (Sell)</option>
-                <option value="RENTAL">Rental</option>
-              </select>
-            </>
+            {tenantInfo?.subdomain === 'gosuas' && (
+              <>
+                <label className="modal-label">Product Type</label>
+                <select value={form.productType}
+                  onChange={e => setForm(f => ({...f, productType: e.target.value}))}
+                  style={{marginBottom:10}}>
+                  <option value="OTHER">Other (Sell)</option>
+                  <option value="RENTAL">Rental</option>
+                </select>
+              </>
+            )}
             <input
               placeholder="Product Name"
               value={form.name}
@@ -3493,11 +3497,13 @@ function App() {
                 onChange={e => setForm(f => ({...f, festiveOffer: e.target.checked}))} />
               <span>🎉 Seasonal / Festive Offer</span>
             </label>
-            <label className="edit-featured-toggle" style={{margin:'4px 0 8px'}}>
-              <input type="checkbox" checked={form.rentalAvailable || false}
-                onChange={e => setForm(f => ({...f, rentalAvailable: e.target.checked}))} />
-              <span>🔑 Available for Rental</span>
-            </label>
+            {tenantInfo?.subdomain === 'gosuas' && (
+              <label className="edit-featured-toggle" style={{margin:'4px 0 8px'}}>
+                <input type="checkbox" checked={form.rentalAvailable || false}
+                  onChange={e => setForm(f => ({...f, rentalAvailable: e.target.checked}))} />
+                <span>🔑 Available for Rental</span>
+              </label>
+            )}
             <button>
               {(() => {
                 const active = catAttrs.filter(a => (form.selectedAttrs[a.name]||[]).length > 0);
@@ -3636,7 +3642,7 @@ function App() {
               { label:'Avg Order Value',    value: `₹${fmt(s.avgOrderValue)}`,           color:'#4F46E5', sub: 'Across all channels' },
               { label:'POS Discount Given', value: `₹${fmt(s.offlineDiscount)}`,         color:'#F97316', sub: 'Total discounts offline' },
               { label:'Refunds',            value: `₹${fmt(s.refundAmount)}`,            color:'#DC2626', sub: `${s.refundCount} orders refunded` },
-              ...(s.rentalReturnCount > 0 ? [
+              ...(tenantInfo?.subdomain === 'gosuas' ? [
                 { label:'Rental Deposits Returned', value: `₹${fmt(s.rentalReturnAmount)}`, color:'#D97706',
                   sub: `${s.rentalReturnCount} returned · not counted in revenue${s.rentalDeductionAmount > 0 ? ` · ₹${fmt(s.rentalDeductionAmount)} deducted for damage` : ''}` },
               ] : []),
@@ -4854,8 +4860,8 @@ function App() {
           </div>
         );})()}{/* end orders page */}
 
-        {/* ── RENTAL PAGE ── */}
-        {activePage === 'rental' && (
+        {/* ── RENTAL PAGE (Gosuas tenant only) ── */}
+        {activePage === 'rental' && tenantInfo?.subdomain === 'gosuas' && (
           <div className="page-content">
             <section>
               <h2>New Rental</h2>
@@ -6794,15 +6800,17 @@ function App() {
           <div className="modal-box edit-modal-box" onClick={e => e.stopPropagation()}>
             <h3>Edit Product</h3>
 
-            <>
-              <label className="modal-label">Product Type</label>
-              <select value={editModal.productType || 'OTHER'}
-                onChange={e => setEditModal(m => ({...m, productType: e.target.value}))}
-                style={{marginBottom:10}}>
-                <option value="OTHER">Other (Sell)</option>
-                <option value="RENTAL">Rental</option>
-              </select>
-            </>
+            {tenantInfo?.subdomain === 'gosuas' && (
+              <>
+                <label className="modal-label">Product Type</label>
+                <select value={editModal.productType || 'OTHER'}
+                  onChange={e => setEditModal(m => ({...m, productType: e.target.value}))}
+                  style={{marginBottom:10}}>
+                  <option value="OTHER">Other (Sell)</option>
+                  <option value="RENTAL">Rental</option>
+                </select>
+              </>
+            )}
 
             <label className="modal-label">Product Name</label>
             <input value={editModal.name} onChange={e => setEditModal(m => ({...m, name: e.target.value}))} />
@@ -7072,11 +7080,13 @@ function App() {
                 onChange={e => setEditModal(m => ({...m, festiveOffer: e.target.checked}))} />
               <span>🎉 Seasonal / Festive Offer</span>
             </label>
-            <label className="edit-featured-toggle" style={{marginTop:'8px'}}>
-              <input type="checkbox" checked={editModal.rentalAvailable ?? false}
-                onChange={e => setEditModal(m => ({...m, rentalAvailable: e.target.checked}))} />
-              <span>🔑 Available for Rental</span>
-            </label>
+            {tenantInfo?.subdomain === 'gosuas' && (
+              <label className="edit-featured-toggle" style={{marginTop:'8px'}}>
+                <input type="checkbox" checked={editModal.rentalAvailable ?? false}
+                  onChange={e => setEditModal(m => ({...m, rentalAvailable: e.target.checked}))} />
+                <span>🔑 Available for Rental</span>
+              </label>
+            )}
 
             <div className="modal-actions" style={{marginTop:'18px'}}>
               <button className="modal-cancel" onClick={() => setEditModal(null)}>Cancel</button>
@@ -8904,7 +8914,7 @@ function SaDonut({ segments, size = 130 }) {
 }
 
 function SuperAdminApp() {
-  const [token, setToken] = useState(() => localStorage.getItem('sc_sa_token') || '');
+  const [token, setToken] = useState(() => localStorage.getItem('gosuas_sa_token') || '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showAdminPw, setShowAdminPw] = useState(false);
@@ -8922,7 +8932,7 @@ function SuperAdminApp() {
     e.preventDefault(); setLoginErr('');
     try {
       const res = await axios.post(`${API}/auth/login`, { email, password, subdomain: 'admin' });
-      localStorage.setItem('sc_sa_token', res.data.token);
+      localStorage.setItem('gosuas_sa_token', res.data.token);
       setToken(res.data.token);
     } catch { setLoginErr('Invalid credentials'); }
   };
@@ -8934,7 +8944,7 @@ function SuperAdminApp() {
         axios.get(`${API}/superadmin/tenants`, { headers: saHeaders() }),
       ]);
       setStats(s.data); setTenants(tl.data);
-    } catch { setToken(''); localStorage.removeItem('sc_sa_token'); }
+    } catch { setToken(''); localStorage.removeItem('gosuas_sa_token'); }
   };
 
   useEffect(() => { if (token) loadData(); }, [token]);
@@ -9117,7 +9127,7 @@ function SuperAdminApp() {
           ))}
         </nav>
         <div style={{padding:'16px 10px',borderTop:'1px solid rgba(255,255,255,0.1)'}}>
-          <button onClick={()=>{localStorage.removeItem('sc_sa_token');setToken('');}} style={{
+          <button onClick={()=>{localStorage.removeItem('gosuas_sa_token');setToken('');}} style={{
             display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',
             background:'transparent',border:'1px solid rgba(255,255,255,0.2)',borderRadius:8,
             cursor:'pointer',color:'rgba(255,255,255,0.6)',fontSize:13
@@ -9444,7 +9454,7 @@ function SuperAdminApp() {
 // Direct hash links (e.g. /#home, /#reports) always skip the landing so bookmarks
 // and shared links continue to work correctly.
 function TenantRoot() {
-  const isLoggedIn = !!localStorage.getItem('sc_token');
+  const isLoggedIn = !!localStorage.getItem('gosuas_token');
   const isLocalhost = isLoopbackHost(window.location.hostname);
   const hash = window.location.hash.replace(/^#\/?/, '');
   const hasDirectAdminLink = ADMIN_PAGES.includes(hash);
@@ -9464,7 +9474,7 @@ function TenantRoot() {
   // Welcome Back page to the landing page (URL stays "/").
   useEffect(() => {
     const onPop = (e) => {
-      if (!localStorage.getItem('sc_token') && !e.state?.scLogin) setGoToLogin(false);
+      if (!localStorage.getItem('gosuas_token') && !e.state?.scLogin) setGoToLogin(false);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
