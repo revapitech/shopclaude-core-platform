@@ -3,7 +3,10 @@
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:qa": "vite --mode qa",
+    "build:qa": "vite build --mode qa",
+    "preview:qa": "vite preview --mode qa"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

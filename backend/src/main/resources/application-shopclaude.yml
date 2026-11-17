@@ -1,0 +1,66 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  ShopClaude production profile  (spring.profiles.active=shopclaude)
+#
+#  Runs as its own instance, independent of the gosuas production profile:
+#  own port, own database, own uploads directory. Deployed by
+#  deploy/vps-deploy-shopclaude.sh as the shopclaude.service systemd unit.
+#
+#  Secrets (DB_PASSWORD, JWT_SECRET, RAZORPAY_KEY_*, ADMIN_PASSWORD,
+#  SUPERADMIN_PASSWORD, MAIL_PASSWORD) are supplied via the EnvironmentFile
+#  at /etc/shopclaude/shopclaude.env on the server — never committed here.
+# ─────────────────────────────────────────────────────────────────────────────
+spring:
+  application:
+    name: shopclaude-core-backend
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${MAIL_USERNAME:noreply@theshopclaude.com}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+  datasource:
+    driverClassName: org.postgresql.Driver
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/shopclaude_db}
+    username: ${DB_USERNAME:shopclaude_user}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+server:
+  port: ${SERVER_PORT:8084}
+  servlet:
+    context-path: /gosuas-core
+
+upload:
+  dir: ${UPLOAD_DIR:/var/www/theshopclaude/uploads}
+
+razorpay:
+  mode: ${RAZORPAY_MODE:TEST}
+  key:
+    id: ${RAZORPAY_KEY_ID}
+    secret: ${RAZORPAY_KEY_SECRET}
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration-ms: ${JWT_EXPIRY_MS:86400000}
+
+gosuas:
+  init:
+    # No legacy Gosuas seed tenant on a fresh shopclaude-only deployment.
+    create-seed-tenant: ${SEED_GOSUAS_TENANT:false}
+    admin-email: ${ADMIN_EMAIL:admin@theshopclaude.com}
+    admin-password: ${ADMIN_PASSWORD}
+    superadmin-email: ${SUPERADMIN_EMAIL:owner@theshopclaude.com}
+    superadmin-password: ${SUPERADMIN_PASSWORD}

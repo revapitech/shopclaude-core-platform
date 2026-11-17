@@ -23,7 +23,6 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
-
     @Value("${razorpay.key.secret}")
     private String razorpayKeySecret;
 

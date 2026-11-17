@@ -6,6 +6,7 @@ import com.razorpay.Order;
 import com.razorpay.RazorpayClient;
 import com.razorpay.Utils;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.json.JSONObject;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,7 @@ import java.util.Map;
 // Storefront checkout — runs on the TENANT's own connected Razorpay account (not the platform's),
 // so a shop's sales money settles directly to that shop's bank account. Contrast with
 // RazorpayController, which uses the platform's own keys for subscription/plan payments.
+@Slf4j
 @RestController
 @RequestMapping("/api/public/payment")
 @RequiredArgsConstructor
@@ -70,6 +72,7 @@ public class PublicPaymentController {
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
+            log.error("public create-order failed [subdomain={}]: {}", body.get("subdomain"), e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", "Failed to create payment order: " + e.getMessage()));
         }

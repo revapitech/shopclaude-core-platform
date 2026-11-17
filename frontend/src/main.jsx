@@ -1430,6 +1430,11 @@ function PdfStorePage({ tenantInfo }) {
 }
 
 function App() {
+  // True when the admin is running on localhost with a non-default tenant override
+  // (e.g. localhost:5174/?tenant=ismart). All API writes go to the LOCAL dev database --
+  // changes will NOT appear on the production storefront.
+  const isLocalDev = isLoopbackHost(window.location.hostname) && getSubdomain() !== 'gosuas';
+
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sc_sidebar') === '1');
@@ -2737,6 +2742,17 @@ function App() {
             {tenantInfo?.plan && <div className="sidebar-sub">{tenantInfo.plan} Plan</div>}
           </div>
         </div>
+
+        {isLocalDev && (
+          <div style={{margin:'8px 12px 0',padding:'9px 11px',background:'#FEF9C3',border:'1.5px solid #FCD34D',borderRadius:8,fontSize:11.5,lineHeight:1.4}}>
+            <div style={{fontWeight:700,color:'#78350F',marginBottom:3}}>⚠ Local dev environment</div>
+            <div style={{color:'#92400E',marginBottom:6}}>Products saved here go to your <strong>local database</strong> and will <strong>not</strong> appear on your live storefront.</div>
+            <a href={'https://' + getSubdomain() + '.theshopclaude.com'} target="_blank" rel="noreferrer"
+              style={{color:'#1D4ED8',fontWeight:600,textDecoration:'none',fontSize:11.5}}>
+              → Manage production store
+            </a>
+          </div>
+        )}
 
         <div className="sidebar-nav">
           <button className={`nav-item ${activePage==='home'?'nav-active':''}`} onClick={() => { setActivePage('home'); setSidebarOpen(false); }} data-label="Home" title="Home">
@@ -7420,6 +7436,7 @@ function ShopApp() {
   const [detailSize, setDetailSize] = useState('');
 
   const [shopInfo, setShopInfo] = useState({ name: '', logoUrl: null });
+  const [shopNotFound, setShopNotFound] = useState(false);
   const [digitalProducts, setDigitalProducts] = useState([]);
   const [pdfBuyModal, setPdfBuyModal] = useState(null); // DigitalProduct being purchased
   const [pdfForm, setPdfForm] = useState({ name: '', email: '', address: '', phone: '' });
@@ -7439,7 +7456,7 @@ function ShopApp() {
   useEffect(() => {
     const sub = getSubdomain();
     // Stage 1: shop branding loads first so the header/hero renders immediately.
-    axios.get(`${API}/public/shop-info?subdomain=${sub}`).then(r => setShopInfo(r.data)).catch(() => {});
+    axios.get(`${API}/public/shop-info?subdomain=${sub}`).then(r => setShopInfo(r.data)).catch(e => { if (e.response?.status === 404) setShopNotFound(true); });
     // Stage 2: products, digital products, and offers load in parallel.
     setProductsLoading(true);
     axios.get(`${API}/public/products?subdomain=${sub}`)
@@ -7641,6 +7658,21 @@ function ShopApp() {
   const pagedProducts  = displaySource.slice((shopPageSafe - 1) * SHOP_PAGE_SIZE, shopPageSafe * SHOP_PAGE_SIZE);
 
   useEffect(() => { setShopPage(1); }, [filterCat, search, shopTab]);
+
+  /* ── Shop not found ── */
+  if (shopNotFound) {
+    const sub = getSubdomain();
+    return (
+      <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'#f8fafc',padding:'40px 20px',textAlign:'center'}}>
+        <div style={{fontSize:48,marginBottom:16}}>🏪</div>
+        <h1 style={{fontSize:24,fontWeight:700,color:'#1e293b',marginBottom:8}}>Shop not found</h1>
+        <p style={{color:'#64748b',fontSize:15,maxWidth:360}}>
+          The shop <strong>{sub}</strong> hasn't been registered yet.
+          Visit <a href="https://theshopclaude.com" style={{color:'#2563eb'}}>theshopclaude.com</a> to create your store.
+        </p>
+      </div>
+    );
+  }
 
   /* ── Bundle / Offer page ── */
   if (activeOffer) {

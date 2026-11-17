@@ -1,0 +1,19 @@
+[Unit]
+Description=ShopClaude Dev Backend
+After=network.target postgresql.service
+
+[Service]
+User=www-data
+WorkingDirectory=/var/www/theshopclaude-dev/app
+ExecStart=/usr/bin/java -Dspring.profiles.active=shopclaude-dev \
+  -Dserver.port=8085 \
+  -Dupload.dir=/var/www/theshopclaude-dev/uploads \
+  -jar /var/www/theshopclaude-dev/app/shopclaude-dev.jar
+EnvironmentFile=/etc/shopclaude-dev/shopclaude-dev.env
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
