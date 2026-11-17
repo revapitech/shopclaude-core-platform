@@ -95,6 +95,26 @@ describe('tenantHomeUrl resolves to the correct environment', () => {
   });
 });
 
+describe('getSubdomain extracts tenant correctly from DEV tenant URLs', () => {
+  it('abhijithstore.dev.theshopclaude.com → "abhijithstore"', async () => {
+    stubBrowser('abhijithstore.dev.theshopclaude.com');
+    const { getSubdomain } = await import('./getSubdomain.js');
+    expect(getSubdomain()).toBe('abhijithstore');
+  });
+
+  it('kaklistore.dev.theshopclaude.com → "kaklistore"', async () => {
+    stubBrowser('kaklistore.dev.theshopclaude.com');
+    const { getSubdomain } = await import('./getSubdomain.js');
+    expect(getSubdomain()).toBe('kaklistore');
+  });
+
+  it('dev.theshopclaude.com root → "www" (landing page, no tenant)', async () => {
+    stubBrowser('dev.theshopclaude.com');
+    const { getSubdomain } = await import('./getSubdomain.js');
+    expect(getSubdomain()).toBe('www');
+  });
+});
+
 describe('rental feature is a per-tenant flag, not a shop name check', () => {
   it('honours the backend flag over everything else', async () => {
     const { isRentalEnabled } = await import('./tenant.js');
