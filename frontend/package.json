@@ -6,7 +6,8 @@
     "test": "vitest run",
     "dev:qa": "vite --mode qa",
     "build:qa": "vite build --mode qa",
-    "preview:qa": "vite preview --mode qa"
+    "preview:qa": "vite preview --mode qa",
+    "build:shopclaude-dev": "vite build --mode shopclaude-dev"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
