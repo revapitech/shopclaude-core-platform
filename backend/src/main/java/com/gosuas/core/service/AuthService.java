@@ -27,8 +27,10 @@ public class AuthService {
     private String razorpayKeySecret;
 
     public LoginResponse login(LoginRequest request) {
+        String subdomain = request.subdomain() != null ? request.subdomain().trim().toLowerCase() : "";
+
         // Super-admin login (subdomain = "admin", no tenant)
-        if ("admin".equalsIgnoreCase(request.subdomain())) {
+        if ("admin".equals(subdomain)) {
             User admin = userRepository.findByEmailAndRole(request.email(), "SUPERADMIN")
                     .orElseThrow(() -> new IllegalArgumentException("Invalid credentials"));
             if (!passwordEncoder.matches(request.password(), admin.getPasswordHash())) {
@@ -38,7 +40,7 @@ public class AuthService {
             return new LoginResponse(token, admin.getName(), "SUPERADMIN", "ShopClaude Platform", "admin");
         }
 
-        Tenant tenant = tenantRepository.findBySubdomain(request.subdomain())
+        Tenant tenant = tenantRepository.findBySubdomain(subdomain)
                 .orElseThrow(() -> new IllegalArgumentException("Shop not found"));
 
         User user = userRepository.findByEmailAndTenantId(request.email(), tenant.getId())
