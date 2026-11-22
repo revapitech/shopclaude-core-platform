@@ -1,6 +1,18 @@
+# This is the base configuration example.
+# Profile-specific overrides go in application-<profile>.yml (e.g. application-local.yml).
+# IMPORTANT: The filename must be exactly "application-<profile>.yml" — any typo (e.g.
+# "applivation-local.yml") will silently prevent Spring Boot from loading the profile.
+# All application-*.yml files are gitignored; create them locally from this example.
+#
+# Local dev quickstart:
+#   1. Copy this file to application-local.yml (exact name).
+#   2. Set the datasource URL to your local PostgreSQL port (commonly 5432 or 5434).
+#   3. Append ?sslmode=disable to the JDBC URL if PostgreSQL 17+ SSL causes a timeout.
+#   4. Run: mvn spring-boot:run -Dspring-boot.run.profiles=local
+
 spring:
   application:
-    name: shopclaude-core
+    name: gosuas-core-backend
   mail:
     host: smtp.gmail.com
     port: 587

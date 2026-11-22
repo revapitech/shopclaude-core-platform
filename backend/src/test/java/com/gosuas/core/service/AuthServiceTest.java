@@ -155,6 +155,51 @@ class AuthServiceTest {
                 .hasMessageContaining("Invalid credentials");
     }
 
+    // ── Subdomain normalisation (lowercase + trim) ────────────────────────────
+
+    @Test
+    void login_subdomainWithUppercase_findsTenant() {
+        // Signup stores lowercase; login must normalise before lookup so "TestShop" finds "testshop"
+        when(tenantRepository.findBySubdomain("testshop")).thenReturn(Optional.of(tenant));
+        when(userRepository.findByEmailAndTenantId("owner@test.com", tenantId)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("secret", "hashed-pw")).thenReturn(true);
+        when(jwtUtil.generate(userId, tenantId, "OWNER", "testshop")).thenReturn("tok.en");
+
+        LoginResponse resp = authService.login(new LoginRequest("owner@test.com", "secret", "TestShop"));
+
+        assertThat(resp.subdomain()).isEqualTo("testshop");
+        verify(tenantRepository).findBySubdomain("testshop");
+    }
+
+    @Test
+    void login_subdomainWithWhitespace_trimmedAndNormalized() {
+        when(tenantRepository.findBySubdomain("testshop")).thenReturn(Optional.of(tenant));
+        when(userRepository.findByEmailAndTenantId("owner@test.com", tenantId)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("secret", "hashed-pw")).thenReturn(true);
+        when(jwtUtil.generate(userId, tenantId, "OWNER", "testshop")).thenReturn("tok.en");
+
+        LoginResponse resp = authService.login(new LoginRequest("owner@test.com", "secret", "  testshop  "));
+
+        assertThat(resp.subdomain()).isEqualTo("testshop");
+        verify(tenantRepository).findBySubdomain("testshop");
+    }
+
+    @Test
+    void login_newlyCreatedShop_loginSucceeds() {
+        // Verifies the standard: signup stores lowercase subdomain, login finds it
+        when(tenantRepository.findBySubdomain("abhijithstore")).thenReturn(Optional.of(
+                Tenant.builder().id(tenantId).name("Abhijith Store").subdomain("abhijithstore")
+                        .ownerEmail("owner@test.com").plan("FREE").status("ACTIVE").build()));
+        when(userRepository.findByEmailAndTenantId("owner@test.com", tenantId)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches("pass123", "hashed-pw")).thenReturn(true);
+        when(jwtUtil.generate(userId, tenantId, "OWNER", "abhijithstore")).thenReturn("tok.abhijith");
+
+        LoginResponse resp = authService.login(new LoginRequest("owner@test.com", "pass123", "abhijithstore"));
+
+        assertThat(resp.token()).isEqualTo("tok.abhijith");
+        assertThat(resp.shopName()).isEqualTo("Abhijith Store");
+    }
+
     // ── Case insensitivity for 'admin' subdomain ───────────────────────────────
 
     @Test

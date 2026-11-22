@@ -58,7 +58,8 @@ class ProductPublishingTest {
             new BigDecimal("5000"), new BigDecimal("8999"), new BigDecimal("9999"),
             10, 2, null, "Wireless headphones", false, false, null,
             active,          // position 16 — the active / showToWebsite flag
-            null, false, "OTHER", null, null, null, null, null, null, null
+            null, false, "OTHER", null, null, null, null, null, null, null,
+            null, null, null, null, null
         );
     }
 

@@ -5,15 +5,18 @@
  * getSubdomain() wraps it with window.location.hostname.
  *
  * Rules (applied in order):
- *   localhost / 127.0.0.1 / [::1] / ::1     → 'gosuas'   (local dev)
- *   gosuas.com / *.gosuas.com                → 'gosuas'   (legacy backward-compat)
- *   {sub}.theshopclaude.com                  → sub        (platform tenants)
- *   theshopclaude.com / www.theshopclaude.com → 'www'     (landing page)
- *   anything else                            → 'www'      (no silent wrong-tenant fallback)
+ *   localhost / 127.0.0.1 / [::1] / ::1          → 'gosuas'   (local dev)
+ *   gosuas.com / *.gosuas.com                     → 'gosuas'   (legacy backward-compat)
+ *   dev.theshopclaude.com                         → 'www'      (dev landing page)
+ *   {sub}.dev.theshopclaude.com                   → sub        (dev-env tenant)
+ *   theshopclaude.com / www.theshopclaude.com     → 'www'      (landing page)
+ *   {sub}.theshopclaude.com                       → sub        (platform tenants)
+ *   anything else                                 → 'www'      (no silent wrong-tenant fallback)
  */
 
-const PLATFORM_SUFFIX = '.theshopclaude.com';
-const SUBDOMAIN_RE    = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+const PLATFORM_SUFFIX     = '.theshopclaude.com';
+const PLATFORM_DEV_SUFFIX = '.dev.theshopclaude.com';
+const SUBDOMAIN_RE        = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 /**
  * @param {string} hostname  raw value from window.location.hostname (or test input)
@@ -42,6 +45,22 @@ export function resolveSubdomain(hostname) {
 
   // ── Platform root domains → landing page ─────────────────────────────────────
   if (host === 'theshopclaude.com' || host === 'www.theshopclaude.com') {
+    return 'www';
+  }
+
+  // ── Dev environment root → landing page ──────────────────────────────────────
+  // Must be checked before the generic .theshopclaude.com block below, because
+  // dev.theshopclaude.com would otherwise resolve as tenant "dev".
+  if (host === 'dev.theshopclaude.com') {
+    return 'www';
+  }
+
+  // ── Dev-environment tenant: {subdomain}.dev.theshopclaude.com ────────────────
+  if (host.endsWith(PLATFORM_DEV_SUFFIX)) {
+    const sub = host.slice(0, host.length - PLATFORM_DEV_SUFFIX.length);
+    if (sub && !sub.includes('.') && SUBDOMAIN_RE.test(sub)) {
+      return sub;
+    }
     return 'www';
   }
 
@@ -100,7 +119,7 @@ function readDevTenant() {
       if (tenant) localStorage.setItem(DEV_TENANT_KEY, tenant);
       else localStorage.removeItem(DEV_TENANT_KEY);
       // A token issued for another tenant must not carry over to the new one.
-      localStorage.removeItem('sc_token');
+      localStorage.removeItem('gosuas_token');
     } catch { /* storage blocked */ }
   }
   return tenant;
@@ -116,10 +135,15 @@ export function getSubdomain() {
   return resolveSubdomain(host);
 }
 
-/** A tenant's store URL — the local override on localhost, the real subdomain otherwise. */
+/** A tenant's store URL — env-aware so signup on dev.theshopclaude.com links to the DEV tenant, not production. */
 export function tenantHomeUrl(sub) {
-  if (isLoopbackHost(window.location.hostname)) {
+  const host = window.location.hostname;
+  if (isLoopbackHost(host)) {
     return `${window.location.origin}/?tenant=${encodeURIComponent(sub)}`;
+  }
+  const h = host.toLowerCase().replace(/\.$/, '');
+  if (h === 'dev.theshopclaude.com' || h.endsWith('.dev.theshopclaude.com')) {
+    return `https://${sub}.dev.theshopclaude.com`;
   }
   return `https://${sub}.theshopclaude.com`;
 }

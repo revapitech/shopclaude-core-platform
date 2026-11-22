@@ -17,7 +17,7 @@ function maxPhotosForPlan(plan) {
 
 // Attach JWT to every axios request
 axios.interceptors.request.use(config => {
-  const token = localStorage.getItem('sc_token');
+  const token = localStorage.getItem('gosuas_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -38,8 +38,8 @@ axios.interceptors.response.use(
       const isAuthEndpoint = (err.config?.url || '').includes('/auth/');
       const hadAuthHeader  = !!err.config?.headers?.['Authorization'];
       if (!isFileUpload && !isAuthEndpoint && hadAuthHeader) {
-        const token = localStorage.getItem('sc_token');
-        if (token) { localStorage.removeItem('sc_token'); window.location.reload(); }
+        const token = localStorage.getItem('gosuas_token');
+        if (token) { localStorage.removeItem('gosuas_token'); window.location.reload(); }
       }
     }
     return Promise.reject(err);
@@ -481,12 +481,16 @@ function Login({ onLogin }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error || 'Invalid email or password');
+        if (res.status >= 500) {
+          setError('Server error. Please try again in a moment.');
+        } else {
+          setError(data.error || 'Invalid email or password');
+        }
         return;
       }
       onLogin(data.token);
     } catch {
-      setError('Could not connect to server. Please try again.');
+      setError('Could not reach the server. Check your connection, or that the backend is running.');
     } finally {
       setLoading(false);
     }
@@ -564,6 +568,20 @@ function Login({ onLogin }) {
   );
 }
 
+// Password-style input with a show/hide control (used for the Razorpay key secret).
+function SecretInput({ value, onChange, placeholder }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="ss-secret">
+      <input type={show ? 'text' : 'password'} value={value} onChange={e => onChange(e.target.value)}
+        placeholder={placeholder} autoComplete="new-password" spellCheck={false} />
+      <button type="button" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide key secret' : 'Show key secret'}>
+        {show ? 'Hide' : 'Show'}
+      </button>
+    </div>
+  );
+}
+
 function fmt(val) {
   const n = Number(val);
   return isNaN(n) ? '0.00' : n.toFixed(2);
@@ -590,7 +608,7 @@ function exportToCsv(filename, rows, columns) {
   URL.revokeObjectURL(url);
 }
 
-function printBillReceipt(bill, shopName = 'My Shop', shopInfo = {}) {
+function printBillReceipt(bill, shopName = 'GOSUAS', shopInfo = {}) {
   // Use hidden iframe (same origin) so Chrome remembers the last printer selection
   let iframe = document.getElementById('__receipt_print_frame__');
   if (!iframe) {
@@ -647,7 +665,7 @@ function printBillReceipt(bill, shopName = 'My Shop', shopInfo = {}) {
 <body>
   <h2>${shopName}</h2>
   ${shopInfo.phone ? `<p class="shop-phone">📞 ${shopInfo.phone}</p>` : ''}
-  ${shopInfo.address ? `<p class="shop-addr">${shopInfo.address}</p>` : ''}
+  ${shopInfo.address ? `<p class="shop-addr">${shopInfo.address.replace(/\n/g,'<br>')}</p>` : ''}
   <p class="sub">Tax Invoice / Receipt</p>
   <div class="dash"></div>
   <div class="info-row"><span>Bill No:</span><span>${bill.billNo || 'N/A'}</span></div>
@@ -687,7 +705,7 @@ function printBillReceipt(bill, shopName = 'My Shop', shopInfo = {}) {
   setTimeout(() => { iframe.contentWindow.print(); }, 400);
 }
 
-function printRentalReceipt(rental, shopName = 'My Shop') {
+function printRentalReceipt(rental, shopName = 'GOSUAS') {
   let iframe = document.getElementById('__rental_receipt_print_frame__');
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -758,7 +776,7 @@ function printRentalReceipt(rental, shopName = 'My Shop') {
   setTimeout(() => { iframe.contentWindow.print(); }, 400);
 }
 
-function printRentalReturnReceipt(rental, shopName = 'My Shop') {
+function printRentalReturnReceipt(rental, shopName = 'GOSUAS') {
   let iframe = document.getElementById('__rental_return_print_frame__');
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -821,7 +839,7 @@ function printRentalReturnReceipt(rental, shopName = 'My Shop') {
 // Inner HTML for one label cell of a grid sticker type (four-row / three-row / two-row).
 // Shared by single-product and bulk printing so multiple products' cells can pack into the same physical rows.
 // All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
-function buildLabelCellHTML(product, stickerType, shopName = 'My Shop') {
+function buildLabelCellHTML(product, stickerType, shopName = 'GOSUAS') {
   const cfg = LABEL_CONFIG[stickerType];
   if (!cfg || !cfg.isGrid) return '';
   const { cellW, cellH, barcodeW, barcodeH, padV, padH, itemGap } = cfg;
@@ -873,7 +891,7 @@ function buildLabelCellHTML(product, stickerType, shopName = 'My Shop') {
 
 // Full standalone label (butterfly / single-row) — one label = one physical page, never shared across products.
 // All dimensions are driven by LABEL_CONFIG so there is only one source of truth.
-function buildFullLabelHTML(product, stickerType, shopName = 'My Shop') {
+function buildFullLabelHTML(product, stickerType, shopName = 'GOSUAS') {
   const cfg = LABEL_CONFIG[stickerType];
   if (!cfg || cfg.isGrid) return '';
   const { pageW, pageH, barcodeW, barcodeH, padV, padH } = cfg;
@@ -958,7 +976,7 @@ function buildGridRowsHTML(cellsHTML, stickerType) {
   return { html, pageW, pageH };
 }
 
-function buildProductLabels(product, stickerType, qty, shopName = 'My Shop') {
+function buildProductLabels(product, stickerType, qty, shopName = 'GOSUAS') {
   const sticker = STICKER_TYPES.find(s => s.id === stickerType);
   const cfg = LABEL_CONFIG[stickerType];
   if (!sticker || !cfg) return { labelsHTML: '', stickerType, sticker: null };
@@ -1181,7 +1199,7 @@ function PdfStorePage({ tenantInfo }) {
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadErr, setUploadErr] = useState('');
   const [showUpload, setShowUpload] = useState(false);
-  const headers = { Authorization: `Bearer ${localStorage.getItem('sc_token')}` };
+  const headers = { Authorization: `Bearer ${localStorage.getItem('gosuas_token')}` };
   const EMOJIS = ['📄','📚','📝','🎓','📖','📊','🧪','🖊️','📐','💡'];
 
   const load = async () => {
@@ -1431,7 +1449,7 @@ function App() {
   // changes will NOT appear on the production storefront.
   const isLocalDev = isLoopbackHost(window.location.hostname) && getSubdomain() !== 'gosuas';
 
-  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('sc_token'));
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('gosuas_token'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('sc_sidebar') === '1');
   const toggleSidebarCollapse = () => setSidebarCollapsed(v => { const n = !v; localStorage.setItem('sc_sidebar', n ? '1' : '0'); return n; });
@@ -1450,6 +1468,7 @@ function App() {
   const [billError, setBillError] = useState('');
   const [inventorySearch, setInventorySearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedFamilies, setExpandedFamilies] = useState(new Set());
   const barcodeInputRef = useRef(null);
   const [labelModal, setLabelModal] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -2103,7 +2122,7 @@ function App() {
   };
 
   const handleLogin = (token) => {
-    localStorage.setItem('sc_token', token);
+    localStorage.setItem('gosuas_token', token);
     // Strip any stale URL hash left from the session-expiry redirect, then
     // update React state directly — avoids an unreliable same-path reload.
     if (window.location.hash) window.history.replaceState(null, '', window.location.pathname);
@@ -2112,7 +2131,7 @@ function App() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('sc_token');
+    localStorage.removeItem('gosuas_token');
     window.location.reload();
   };
 
@@ -2325,7 +2344,21 @@ function App() {
         const res = await axios.get(`${API}/products/sku/${input}`);
         addProductToCart(res.data);
       } catch {
-        setScanError('Product not found for barcode/SKU: ' + input);
+        // Fallback: search loaded products by exact SKU or base SKU (handles colour variants
+        // where stored SKUs are like "UTC-TS-101-BLU" but user enters base SKU "UTC-TS-101")
+        const inputLower = input.toLowerCase();
+        const matches = products.filter(p =>
+          (p.sku || '').toLowerCase() === inputLower ||
+          baseSkuOf(p.sku).toLowerCase() === inputLower
+        );
+        if (matches.length === 1) {
+          addProductToCart(matches[0]);
+        } else if (matches.length > 1) {
+          setCatalogVariantModal({ canonical: matches[0], variants: matches.sort((a, b) => (a.color || '').localeCompare(b.color || '')) });
+          setBarcode('');
+        } else {
+          setScanError('Product not found for barcode/SKU: ' + input);
+        }
       }
     } finally {
       barcodeInputRef.current?.focus();
@@ -2423,6 +2456,11 @@ function App() {
       hsnCode: p.hsnCode || '',
       gstRate: p.gstRate != null ? String(p.gstRate) : '',
       trackStock: p.trackStock !== false,
+      discountEnabled: p.discountEnabled ?? false,
+      discountType: p.discountType || 'PERCENT',
+      discountValue: p.discountValue ?? '',
+      discountStart: p.discountStart ? p.discountStart.slice(0,16) : '',
+      discountEnd: p.discountEnd ? p.discountEnd.slice(0,16) : '',
     });
   };
 
@@ -2494,6 +2532,11 @@ function App() {
       gstRate: editModal.gstRate !== '' && editModal.gstRate != null ? Number(editModal.gstRate) : null,
       trackStock: editModal.trackStock !== false,
       variantImages: editVariantImagesJson,
+      discountEnabled: editModal.discountEnabled ?? false,
+      discountType: editModal.discountEnabled ? (editModal.discountType || 'PERCENT') : null,
+      discountValue: editModal.discountEnabled && editModal.discountValue !== '' ? Number(editModal.discountValue) : null,
+      discountStart: editModal.discountEnabled && editModal.discountStart ? editModal.discountStart : null,
+      discountEnd: editModal.discountEnabled && editModal.discountEnd ? editModal.discountEnd : null,
     };
       if (editAttrs.length > 0) {
         const color = attrVals[editAttrs[0]?.name] || null;
@@ -2649,10 +2692,35 @@ function App() {
     p.category?.toLowerCase().includes(inventorySearch.toLowerCase())
   );
 
-  const totalPages = isSearching ? 1 : Math.ceil(filteredProducts.length / PAGE_SIZE);
-  const displayedProducts = isSearching
-    ? filteredProducts
-    : filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // Group colour-variant siblings (same base SKU + category) into families.
+  // When searching, keep flat so each individual variant is independently visible.
+  const productFamilies = (() => {
+    if (isSearching) return filteredProducts.map(p => ({ isSingle: true, products: [p] }));
+    const seen = new Set();
+    const result = [];
+    for (const p of filteredProducts) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      if (p.color) {
+        const baseSku = baseSkuOf(p.sku);
+        const siblings = filteredProducts.filter(x =>
+          x.category === p.category && x.color && baseSkuOf(x.sku) === baseSku
+        );
+        if (siblings.length > 1) {
+          siblings.forEach(s => seen.add(s.id));
+          result.push({ isSingle: false, products: siblings.sort((a, b) => (a.color||'').localeCompare(b.color||'')) });
+          continue;
+        }
+      }
+      result.push({ isSingle: true, products: [p] });
+    }
+    return result;
+  })();
+
+  const totalPages = isSearching ? 1 : Math.ceil(productFamilies.length / PAGE_SIZE);
+  const displayedFamilies = isSearching
+    ? productFamilies
+    : productFamilies.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const pageNumbers = (() => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -2763,9 +2831,11 @@ function App() {
           <button className={`nav-item ${activePage==='customers'?'nav-active':''}`} onClick={() => { setActivePage('customers'); setSidebarOpen(false); }} data-label="Customer Data" title="Customer Data">
             <span className="nav-icon">👥</span><span className="nav-label"> Customer Data</span>
           </button>
-          <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }} data-label="Rental" title="Rental">
-            <span className="nav-icon">🔑</span><span className="nav-label"> Rental</span>
-          </button>
+          {tenantInfo?.subdomain === 'gosuas' && (
+            <button className={`nav-item ${activePage==='rental'?'nav-active':''}`} onClick={() => { setActivePage('rental'); setSidebarOpen(false); }} data-label="Rental" title="Rental">
+              <span className="nav-icon">🔑</span><span className="nav-label"> Rental</span>
+            </button>
+          )}
           <button className={`nav-item ${activePage==='alerts'?'nav-active':''}`} onClick={() => { setActivePage('alerts'); setSidebarOpen(false); }} data-label="Stock Alerts" title="Stock Alerts">
             <span className="nav-icon">⚠</span><span className="nav-label"> Stock Alerts</span>
             {lowStockItems.length > 0 && <span className="alert-count-badge nav-badge" style={{marginLeft:6}}>{lowStockItems.length}</span>}
@@ -3035,6 +3105,9 @@ function App() {
           )}
         </section>
         <div className="pos-left">
+        <div className="add-product-bar">
+          <button className="add-product-btn" onClick={() => setShowAddForm(true)}>+ Add Product</button>
+        </div>
         {/* ── Quick Billing – Products catalogue ── */}
         {(() => {
           // Helpers (scoped to avoid polluting outer scope)
@@ -3186,15 +3259,17 @@ function App() {
               </div>
               <form onSubmit={createProduct}>
 
-            <>
-              <label className="modal-label">Product Type</label>
-              <select value={form.productType}
-                onChange={e => setForm(f => ({...f, productType: e.target.value}))}
-                style={{marginBottom:10}}>
-                <option value="OTHER">Other (Sell)</option>
-                <option value="RENTAL">Rental</option>
-              </select>
-            </>
+            {tenantInfo?.subdomain === 'gosuas' && (
+              <>
+                <label className="modal-label">Product Type</label>
+                <select value={form.productType}
+                  onChange={e => setForm(f => ({...f, productType: e.target.value}))}
+                  style={{marginBottom:10}}>
+                  <option value="OTHER">Other (Sell)</option>
+                  <option value="RENTAL">Rental</option>
+                </select>
+              </>
+            )}
             <input
               placeholder="Product Name"
               value={form.name}
@@ -3489,11 +3564,13 @@ function App() {
                 onChange={e => setForm(f => ({...f, festiveOffer: e.target.checked}))} />
               <span>🎉 Seasonal / Festive Offer</span>
             </label>
-            <label className="edit-featured-toggle" style={{margin:'4px 0 8px'}}>
-              <input type="checkbox" checked={form.rentalAvailable || false}
-                onChange={e => setForm(f => ({...f, rentalAvailable: e.target.checked}))} />
-              <span>🔑 Available for Rental</span>
-            </label>
+            {tenantInfo?.subdomain === 'gosuas' && (
+              <label className="edit-featured-toggle" style={{margin:'4px 0 8px'}}>
+                <input type="checkbox" checked={form.rentalAvailable || false}
+                  onChange={e => setForm(f => ({...f, rentalAvailable: e.target.checked}))} />
+                <span>🔑 Available for Rental</span>
+              </label>
+            )}
             <button>
               {(() => {
                 const active = catAttrs.filter(a => (form.selectedAttrs[a.name]||[]).length > 0);
@@ -3510,7 +3587,6 @@ function App() {
           <section className="inventory-section">
             <div className="inventory-header">
               <h2>Inventory</h2>
-              <button style={{background:'#1E3A5F',color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontSize:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}} onClick={() => setShowAddForm(true)}>+ Add Product</button>
               <input className="search-input" placeholder="Search by name, SKU, colour or barcode..."
                 value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} />
               <button className="export-csv-btn" onClick={() => exportToCsv('inventory.csv', filteredProducts, [
@@ -3526,7 +3602,7 @@ function App() {
             <div className="table-meta">
               {isSearching
                 ? `${filteredProducts.length} result${filteredProducts.length !== 1 ? 's' : ''} found`
-                : `Showing ${filteredProducts.length === 0 ? 0 : (currentPage-1)*PAGE_SIZE+1}–${Math.min(currentPage*PAGE_SIZE, filteredProducts.length)} of ${filteredProducts.length}`}
+                : `Showing ${productFamilies.length === 0 ? 0 : (currentPage-1)*PAGE_SIZE+1}–${Math.min(currentPage*PAGE_SIZE, productFamilies.length)} of ${productFamilies.length}${productFamilies.length !== filteredProducts.length ? ` entries (${filteredProducts.length} variants total)` : ' products'}`}
             </div>
             <div className="table-scroll-wrap">
             <table>
@@ -3534,25 +3610,93 @@ function App() {
                 <tr><th>Name</th><th>Category</th><th>Variants</th><th>SKU</th><th>Barcode</th><th>Stock</th><th>Price</th><th>Barcode Image</th><th>Label</th><th>Edit</th><th>Delete</th></tr>
               </thead>
               <tbody>
-                {displayedProducts.length === 0 && (
+                {displayedFamilies.length === 0 && (
                   <tr><td colSpan={11} style={{textAlign:'center',color:'#888',padding:'16px'}}>No products found</td></tr>
                 )}
-                {displayedProducts.map(p => {
-                  const suggested = 'two-row';
-                  const isLow = (p.stockQty ?? 0) < 5;
-                  const isOut = p.stockQty === 0;
+                {displayedFamilies.map(family => {
+                  if (family.isSingle) {
+                    const p = family.products[0];
+                    const isLow = (p.stockQty ?? 0) < 5;
+                    const isOut = p.stockQty === 0;
+                    return (
+                      <tr key={p.id} className={isOut ? 'row-critical' : isLow ? 'row-warning' : ''}>
+                        <td>{p.name}</td><td>{p.category}{p.subcategory ? <div style={{fontSize:'11px',color:'#888'}}>{p.subcategory}</div> : ''}</td>
+                        <td>{variantLabel(p) || '—'}</td>
+                        <td>{p.sku}</td><td>{p.barcode}</td>
+                        <td><span className={isOut ? 'stock-out' : isLow ? 'stock-low' : ''}>{isOut ? '⚠ OUT' : p.stockQty}</span></td>
+                        <td>{p.productType === 'RENTAL' ? `Dep ₹${p.depositAmount ?? 0} + Rent ₹${p.rentAmount ?? 0}` : `₹${p.sellingPrice}`}</td>
+                        <td><img src={`${API}/barcodes/${p.barcode}`} alt={p.barcode} /></td>
+                        <td><button className="label-btn" onClick={() => setLabelModal({product:p, stickerType:'two-row', qty:1})}>🏷 Print</button></td>
+                        <td><button className="edit-btn" onClick={() => openEdit(p)}>✏ Edit</button></td>
+                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); }}>🗑 Delete</button></td>
+                      </tr>
+                    );
+                  }
+                  // Multi-colour variant family — grouped row with expandable sub-rows
+                  const rep = family.products[0];
+                  const famKey = `${rep.category ?? ''}|${baseSkuOf(rep.sku)}`;
+                  const isExpanded = expandedFamilies.has(famKey);
+                  const totalStock = family.products.reduce((s, v) => s + (v.stockQty ?? 0), 0);
+                  const isFamLow = totalStock < 5;
+                  const isFamOut = totalStock === 0;
+                  const toggleFamily = () => setExpandedFamilies(prev => {
+                    const n = new Set(prev);
+                    n.has(famKey) ? n.delete(famKey) : n.add(famKey);
+                    return n;
+                  });
                   return (
-                    <tr key={p.id} className={isOut ? 'row-critical' : isLow ? 'row-warning' : ''}>
-                      <td>{p.name}</td><td>{p.category}{p.subcategory ? <div style={{fontSize:'11px',color:'#888'}}>{p.subcategory}</div> : ''}</td>
-                      <td>{variantLabel(p) || '—'}</td>
-                      <td>{p.sku}</td><td>{p.barcode}</td>
-                      <td><span className={isOut ? 'stock-out' : isLow ? 'stock-low' : ''}>{isOut ? '⚠ OUT' : p.stockQty}</span></td>
-                      <td>{p.productType === 'RENTAL' ? `Dep ₹${p.depositAmount ?? 0} + Rent ₹${p.rentAmount ?? 0}` : `₹${p.sellingPrice}`}</td>
-                      <td><img src={`${API}/barcodes/${p.barcode}`} alt={p.barcode} /></td>
-                      <td><button className="label-btn" onClick={() => setLabelModal({product:p, stickerType:suggested, qty:1})}>🏷 Print</button></td>
-                      <td><button className="edit-btn" onClick={() => openEdit(p)}>✏ Edit</button></td>
-                      <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); }}>🗑 Delete</button></td>
-                    </tr>
+                    <React.Fragment key={famKey}>
+                      {/* Family summary row */}
+                      <tr className={isFamOut ? 'row-critical' : isFamLow ? 'row-warning' : ''} style={{background:'#f0f4ff'}}>
+                        <td style={{fontWeight:600}}>{rep.name}</td>
+                        <td>{rep.category}</td>
+                        <td>
+                          <div style={{display:'flex',flexWrap:'wrap',gap:4,alignItems:'center'}}>
+                            {family.products.map(v => (
+                              <span key={v.id} title={v.color} style={{display:'inline-flex',alignItems:'center',gap:3,background:'#fff',border:'1px solid #e2e8f0',borderRadius:12,padding:'2px 7px',fontSize:11,fontWeight:600,whiteSpace:'nowrap'}}>
+                                <span style={{width:8,height:8,borderRadius:'50%',background:COLOR_CSS[v.color]||'#ccc',display:'inline-block',border:'1px solid #ccc',flexShrink:0}}></span>
+                                {v.color}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td style={{color:'#64748b',fontSize:12}}>{baseSkuOf(rep.sku)}</td>
+                        <td style={{color:'#9ca3af',fontSize:12}}>—</td>
+                        <td><span className={isFamOut ? 'stock-out' : isFamLow ? 'stock-low' : ''}>{isFamOut ? '⚠ OUT' : totalStock} total</span></td>
+                        <td>₹{rep.sellingPrice}</td>
+                        <td style={{color:'#9ca3af'}}>—</td>
+                        <td><button className="label-btn" onClick={() => setCatalogVariantModal({ canonical: rep, variants: family.products })}>🏷 Print</button></td>
+                        <td>
+                          <button className="edit-btn" onClick={toggleFamily} style={{minWidth:80}}>
+                            {isExpanded ? '▾' : '▸'} {family.products.length} colours
+                          </button>
+                        </td>
+                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete all ${family.products.length} colour variants of "${rep.name}"?`)) Promise.all(family.products.map(v => axios.delete(`${API}/products/${v.id}`))).then(() => { loadProducts(); showToast('All variants deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑 All</button></td>
+                      </tr>
+                      {/* Expanded variant sub-rows */}
+                      {isExpanded && family.products.map(v => {
+                        const isLowV = (v.stockQty ?? 0) < 5;
+                        const isOutV = v.stockQty === 0;
+                        return (
+                          <tr key={v.id} className={isOutV ? 'row-critical' : isLowV ? 'row-warning' : ''} style={{background:'#fafbff'}}>
+                            <td style={{paddingLeft:20,fontSize:13}}>
+                              <span style={{width:10,height:10,borderRadius:'50%',background:COLOR_CSS[v.color]||'#ccc',display:'inline-block',border:'1px solid #ccc',marginRight:6,verticalAlign:'middle',flexShrink:0}}></span>
+                              {v.color}
+                            </td>
+                            <td></td>
+                            <td style={{fontSize:12,color:'#6b7280'}}>{variantLabel(v) || '—'}</td>
+                            <td style={{fontSize:12}}>{v.sku}</td>
+                            <td style={{fontSize:12}}>{v.barcode}</td>
+                            <td><span className={isOutV ? 'stock-out' : isLowV ? 'stock-low' : ''}>{isOutV ? '⚠ OUT' : v.stockQty}</span></td>
+                            <td>₹{v.sellingPrice}</td>
+                            <td><img src={`${API}/barcodes/${v.barcode}`} alt={v.barcode} /></td>
+                            <td><button className="label-btn" onClick={() => setLabelModal({product:v, stickerType:'two-row', qty:1})}>🏷 Print</button></td>
+                            <td><button className="edit-btn" onClick={() => openEdit(v)}>✏ Edit</button></td>
+                            <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${v.name}" (${v.color})?`)) axios.delete(`${API}/products/${v.id}`).then(() => { loadProducts(); showToast('Variant deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑</button></td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -3632,7 +3776,7 @@ function App() {
               { label:'Avg Order Value',    value: `₹${fmt(s.avgOrderValue)}`,           color:'#4F46E5', sub: 'Across all channels' },
               { label:'POS Discount Given', value: `₹${fmt(s.offlineDiscount)}`,         color:'#F97316', sub: 'Total discounts offline' },
               { label:'Refunds',            value: `₹${fmt(s.refundAmount)}`,            color:'#DC2626', sub: `${s.refundCount} orders refunded` },
-              ...(s.rentalReturnCount > 0 ? [
+              ...(tenantInfo?.subdomain === 'gosuas' ? [
                 { label:'Rental Deposits Returned', value: `₹${fmt(s.rentalReturnAmount)}`, color:'#D97706',
                   sub: `${s.rentalReturnCount} returned · not counted in revenue${s.rentalDeductionAmount > 0 ? ` · ₹${fmt(s.rentalDeductionAmount)} deducted for damage` : ''}` },
               ] : []),
@@ -4850,8 +4994,8 @@ function App() {
           </div>
         );})()}{/* end orders page */}
 
-        {/* ── RENTAL PAGE ── */}
-        {activePage === 'rental' && (
+        {/* ── RENTAL PAGE (Gosuas tenant only) ── */}
+        {activePage === 'rental' && tenantInfo?.subdomain === 'gosuas' && (
           <div className="page-content">
             <section>
               <h2>New Rental</h2>
@@ -6613,19 +6757,28 @@ function App() {
         const closeModal = () => { setShopEditModal(null); setShopLogoFile(null); setShopLogoPreview(null); setShopBannerFile(null); setShopBannerPreview(null); };
         return (
         <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal-box shop-settings-box" style={{width:820, maxWidth:'94vw'}} onClick={e => e.stopPropagation()}>
-            <h3>Shop Settings</h3>
-
-            <div className="shop-settings-grid">
-              {/* Logo upload */}
+          <div className="modal-box shop-settings-box ss-box" role="dialog" aria-label="Shop Settings" onClick={e => e.stopPropagation()}>
+            <div className="ss-head">
               <div>
-                <label className="modal-label">Shop Logo</label>
-                <div style={{display:'flex',alignItems:'center',gap:14,margin:'8px 0'}}>
-                  <img src={shopLogoPreview || logoSrc} alt="logo"
-                    style={{width:64,height:64,objectFit:'contain',borderRadius:10,border:'1.5px solid #e5e7eb',background:'#f9fafb',flexShrink:0}} />
-                  <div>
-                    <label style={{display:'inline-block',padding:'7px 14px',background:'#1E3A5F',color:'#fff',borderRadius:7,cursor:'pointer',fontSize:13,fontWeight:600}}>
-                      📁 Choose Image
+                <h3>Shop Settings</h3>
+                <p>Manage your branding, contact details, payouts and tax setup.</p>
+              </div>
+              <button type="button" className="ss-x" onClick={closeModal} aria-label="Close">✕</button>
+            </div>
+
+            <div className="ss-body">
+              {/* ── Shop branding ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head">
+                  <h4>Shop Branding</h4>
+                  <p>Your logo and banner appear on your storefront and login page.</p>
+                </div>
+                <div className="ss-media">
+                  <div className="ss-field">
+                    <span className="ss-label">Shop logo</span>
+                    <div className="ss-logo-box"><img src={shopLogoPreview || logoSrc} alt="Shop logo" /></div>
+                    <label className="ss-btn-up">
+                      {shopLogoPreview || shopLogoFile ? 'Change logo' : 'Choose logo'}
                       <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
                         const f = e.target.files?.[0];
                         if (!f) return;
@@ -6633,85 +6786,117 @@ function App() {
                         setShopLogoPreview(URL.createObjectURL(f));
                       }} />
                     </label>
-                    <div style={{fontSize:11.5,color:'#9ca3af',marginTop:5}}>PNG, JPG, SVG</div>
+                    <span className="ss-hint"><b>512 × 512 px</b> · square (1:1) · PNG, JPG or SVG · up to 10 MB</span>
+                  </div>
+
+                  <div className="ss-field">
+                    <span className="ss-label">Store banner</span>
+                    <div className={`ss-banner-box${(shopBannerPreview || bannerSrc) ? '' : ' empty'}`}>
+                      {(shopBannerPreview || bannerSrc)
+                        ? <img src={shopBannerPreview || bannerSrc} alt="Store banner" />
+                        : <span>No banner set</span>}
+                      {shopBannerPreview && <span className="ss-new">NEW</span>}
+                    </div>
+                    <label className="ss-btn-up">
+                      {(shopBannerPreview || bannerSrc) ? 'Change banner' : 'Upload banner'}
+                      <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        setShopBannerFile(f);
+                        setShopBannerPreview(URL.createObjectURL(f));
+                      }} />
+                    </label>
+                    <span className="ss-hint"><b>1600 × 500 px</b> · wide (16:5) · PNG or JPG · up to 10 MB. Keep key content centred — edges may be cropped on small screens.</span>
                   </div>
                 </div>
-              </div>
+              </section>
 
-              {/* Banner upload */}
-              <div>
-                <label className="modal-label">Store Banner</label>
-                <div style={{margin:'8px 0'}}>
-                  {(shopBannerPreview || bannerSrc) ? (
-                    <div style={{marginBottom:8,borderRadius:8,overflow:'hidden',border:'1.5px solid #e5e7eb',height:64,position:'relative'}}>
-                      <img src={shopBannerPreview || bannerSrc} alt="banner"
-                        style={{width:'100%',height:'100%',objectFit:'cover'}} />
-                      {shopBannerPreview && <span style={{position:'absolute',top:4,right:6,background:'#16a34a',color:'#fff',fontSize:9,padding:'2px 6px',borderRadius:99,fontWeight:700}}>NEW</span>}
-                    </div>
-                  ) : (
-                    <div style={{marginBottom:8,height:64,border:'2px dashed #d1d5db',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',color:'#9ca3af',fontSize:11.5}}>
-                      No banner set
-                    </div>
-                  )}
-                  <label style={{display:'inline-block',padding:'7px 14px',background:'#1E3A5F',color:'#fff',borderRadius:7,cursor:'pointer',fontSize:13,fontWeight:600}}>
-                    🖼️ {bannerSrc ? 'Change Banner' : 'Upload Banner'}
-                    <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      setShopBannerFile(f);
-                      setShopBannerPreview(URL.createObjectURL(f));
-                    }} />
-                  </label>
+              {/* ── Shop details ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head">
+                  <h4>Shop Details</h4>
+                  <p>Basic information customers and shipping labels use.</p>
                 </div>
-              </div>
+                <div className="ss-grid">
+                  <div className="ss-field">
+                    <label className="ss-label">Shop name</label>
+                    <input value={shopEditModal.name} onChange={e => setShopEditModal(m => ({...m, name: e.target.value}))}
+                      placeholder="Enter your shop name" autoFocus />
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">WhatsApp / contact number</label>
+                    <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile number"
+                      value={shopEditModal.phoneNumber || ''}
+                      onChange={e => setShopEditModal(m => ({...m, phoneNumber: e.target.value.replace(/\D/g,'').slice(0,10)}))} />
+                    <span className="ss-hint">Shown on your storefront.</span>
+                  </div>
+                  <div className="ss-field ss-full">
+                    <label className="ss-label">Shop address</label>
+                    <textarea value={shopEditModal.address || ''} onChange={e => setShopEditModal(m => ({...m, address: e.target.value}))}
+                      rows={3} placeholder={'e.g.\n12 MG Road, Indiranagar\nBengaluru, Karnataka - 560038\nPhone: 9876543210'}
+                      style={{resize:'vertical'}} />
+                    <span className="ss-hint">Printed on shipping labels.</span>
+                  </div>
+                </div>
+              </section>
 
-              {/* Shop name */}
-              <div>
-                <label className="modal-label">Shop Name</label>
-                <input value={shopEditModal.name} onChange={e => setShopEditModal(m => ({...m, name: e.target.value}))}
-                  placeholder="Enter your shop name" autoFocus style={{marginTop:4}} />
-              </div>
+              {/* ── Bank details ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head">
+                  <h4>Bank Details</h4>
+                  <p>Used for payouts.</p>
+                </div>
+                <div className="ss-grid">
+                  <div className="ss-field">
+                    <label className="ss-label">Account number</label>
+                    <input value={shopEditModal.bankAccountNumber || ''} onChange={e => setShopEditModal(m => ({...m, bankAccountNumber: e.target.value}))}
+                      placeholder="Enter account number" />
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">Confirm account number</label>
+                    <input value={shopEditModal.confirmBankAccountNumber || ''} onChange={e => setShopEditModal(m => ({...m, confirmBankAccountNumber: e.target.value}))}
+                      placeholder="Re-enter account number" />
+                    {shopEditModal.confirmBankAccountNumber && shopEditModal.confirmBankAccountNumber !== (shopEditModal.bankAccountNumber || '') &&
+                      <span className="ss-err">Account numbers don't match</span>}
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">Account holder name</label>
+                    <input value={shopEditModal.bankAccountHolderName || ''} onChange={e => setShopEditModal(m => ({...m, bankAccountHolderName: e.target.value}))}
+                      placeholder="Name as on bank account" />
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">IFSC code</label>
+                    <input value={shopEditModal.bankIfscCode || ''} onChange={e => setShopEditModal(m => ({...m, bankIfscCode: e.target.value.toUpperCase()}))}
+                      placeholder="e.g. SBIN0001234" />
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">Branch name</label>
+                    <input value={shopEditModal.bankBranchName || ''} onChange={e => setShopEditModal(m => ({...m, bankBranchName: e.target.value}))}
+                      placeholder="Enter branch name" />
+                  </div>
+                </div>
+              </section>
 
-              <div>
-                <label className="modal-label">WhatsApp / Contact Number <span style={{fontWeight:400,color:'#9ca3af'}}>(shown on storefront)</span></label>
-                <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile number"
-                  value={shopEditModal.phoneNumber || ''}
-                  onChange={e => setShopEditModal(m => ({...m, phoneNumber: e.target.value.replace(/\D/g,'').slice(0,10)}))}
-                  style={{marginTop:4}} />
-              </div>
-            </div>
-
-            {/* Shop address — full width */}
-            <label className="modal-label" style={{marginTop:14}}>Shop Address <span style={{fontWeight:400,color:'#9ca3af'}}>(used on shipping labels)</span></label>
-            <textarea value={shopEditModal.address || ''} onChange={e => setShopEditModal(m => ({...m, address: e.target.value}))}
-              rows={3} placeholder={'e.g.\n12 MG Road, Indiranagar\nBengaluru, Karnataka - 560038\nPhone: 9876543210'}
-              style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,fontFamily:'inherit',resize:'vertical',boxSizing:'border-box',outline:'none'}}
-              onFocus={e=>e.target.style.borderColor='#1E3A5F'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
-
-            {/* Bank details */}
-            <label className="modal-label" style={{marginTop:16}}>Bank Details <span style={{fontWeight:400,color:'#9ca3af'}}>(for payouts)</span></label>
-            <div className="shop-settings-grid" style={{marginTop:6}}>
-              <input value={shopEditModal.bankAccountNumber || ''} onChange={e => setShopEditModal(m => ({...m, bankAccountNumber: e.target.value}))}
-                placeholder="Account Number" />
-              <input value={shopEditModal.confirmBankAccountNumber || ''} onChange={e => setShopEditModal(m => ({...m, confirmBankAccountNumber: e.target.value}))}
-                placeholder="Confirm Account Number" />
-              <input value={shopEditModal.bankAccountHolderName || ''} onChange={e => setShopEditModal(m => ({...m, bankAccountHolderName: e.target.value}))}
-                placeholder="Account Holder Name" />
-              <input value={shopEditModal.bankIfscCode || ''} onChange={e => setShopEditModal(m => ({...m, bankIfscCode: e.target.value.toUpperCase()}))}
-                placeholder="IFSC Code" />
-              <input value={shopEditModal.bankBranchName || ''} onChange={e => setShopEditModal(m => ({...m, bankBranchName: e.target.value}))}
-                placeholder="Branch Name" />
-            </div>
-
-            {/* Razorpay — customer payments settle straight to the shop's own account, not ours */}
-            <label className="modal-label" style={{marginTop:16,display:'flex',alignItems:'center',gap:6}}>
-              Razorpay Payments <span style={{fontWeight:400,color:'#9ca3af'}}>(so your customers' payments go to you)</span>
-              <button type="button" onClick={() => setRzpHelpOpen(v => !v)} title="How do I connect Razorpay?"
-                style={{width:18,height:18,minWidth:18,padding:0,margin:0,borderRadius:'50%',border:'1.5px solid #1E3A5F',background: rzpHelpOpen ? '#1E3A5F' : '#fff',color: rzpHelpOpen ? '#fff' : '#1E3A5F',fontSize:11,fontWeight:700,lineHeight:1,cursor:'pointer',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>
-                i
-              </button>
-            </label>
-
+              {/* ── Razorpay — customer payments settle straight to the shop's own account, not ours ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head ss-sec-head-row">
+                  <div>
+                    <h4 style={{display:'flex',alignItems:'center',gap:8}}>
+                      Razorpay Payments
+                      <button type="button" className={`ss-info${rzpHelpOpen ? ' on' : ''}`} onClick={() => setRzpHelpOpen(v => !v)}
+                        title="How do I connect Razorpay?" aria-label="How do I connect Razorpay?">i</button>
+                    </h4>
+                    <p>Connect your own Razorpay account so customer payments go straight to you.</p>
+                  </div>
+                  <span className={`ss-status ${tenantInfo?.razorpayMerchantConnected ? 'ok' : 'warn'}`}>
+                    <i className="ss-dot" />
+                    {tenantInfo?.razorpayMerchantConnected ? 'Connected' : 'Not connected'}
+                  </span>
+                </div>
+                {!tenantInfo?.razorpayMerchantConnected &&
+                  <div className="ss-callout warn">⚠ Customers can't check out until Razorpay is connected.</div>}
+                {tenantInfo?.razorpayMerchantConnected &&
+                  <div className="ss-callout ok">✅ Payments settle directly to your account.</div>}
             {rzpHelpOpen && (
               <div className="rzp-help-box">
                 <strong>Steps to connect your Razorpay account:</strong>
@@ -6726,55 +6911,64 @@ function App() {
                 <p>Once connected, every payment your customers make on your shop goes directly into your own Razorpay account and settles to your bank — it never passes through or is visible to us.</p>
               </div>
             )}
-
-            <div style={{fontSize:12,fontWeight:600,margin:'2px 0 8px',color: tenantInfo?.razorpayMerchantConnected ? '#1e7e34' : '#e65100'}}>
-              {tenantInfo?.razorpayMerchantConnected ? '✅ Connected — payments settle to your account' : '⚠ Not connected — customers can\'t check out yet'}
-            </div>
-            <div className="shop-settings-grid">
-              <input value={shopEditModal.razorpayMerchantKeyId || ''} onChange={e => setShopEditModal(m => ({...m, razorpayMerchantKeyId: e.target.value}))}
-                placeholder="Razorpay Key ID (rzp_live_...)" />
-              <input type="password" value={shopEditModal.razorpayMerchantKeySecret || ''} onChange={e => setShopEditModal(m => ({...m, razorpayMerchantKeySecret: e.target.value}))}
-                placeholder={tenantInfo?.razorpayMerchantConnected ? 'Key Secret (leave blank to keep current)' : 'Razorpay Key Secret'} />
-            </div>
-            <p style={{fontSize:11.5,color:'#9ca3af',margin:'6px 0 0'}}>
-              Get these from your own Razorpay Dashboard → Settings → API Keys. We never see or store your sales money — it goes straight to your Razorpay account.
-            </p>
-
-            {/* GST Settings */}
-            <label className="modal-label" style={{marginTop:16}}>GST Settings</label>
-            <div style={{background:'#f8faff',border:'1.5px solid #dbeafe',borderRadius:8,padding:'12px 14px',marginTop:4,display:'flex',flexDirection:'column',gap:10}}>
-              <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,fontWeight:600,color:'#1E3A5F'}}>
-                <input type="checkbox" checked={shopEditModal.gstRegistered || false}
-                  onChange={e => setShopEditModal(m => ({...m, gstRegistered: e.target.checked}))} />
-                GST Registered Business
-              </label>
-              {shopEditModal.gstRegistered && (
-                <>
-                  <div>
-                    <label className="modal-label">GSTIN</label>
-                    <input value={shopEditModal.gstin || ''} onChange={e => setShopEditModal(m => ({...m, gstin: e.target.value.toUpperCase()}))}
-                      placeholder="e.g. 29ABCDE1234F1Z5" maxLength={15} style={{marginTop:4,fontFamily:'monospace',letterSpacing:1}} />
+                <div className="ss-grid">
+                  <div className="ss-field">
+                    <label className="ss-label">Key ID</label>
+                    <input value={shopEditModal.razorpayMerchantKeyId || ''} onChange={e => setShopEditModal(m => ({...m, razorpayMerchantKeyId: e.target.value}))}
+                      placeholder="rzp_live_..." autoComplete="off" spellCheck={false} />
                   </div>
-                  <div>
-                    <label className="modal-label">Supply Type</label>
-                    <select value={shopEditModal.supplyType || 'INTRA'} onChange={e => setShopEditModal(m => ({...m, supplyType: e.target.value}))}
-                      style={{marginTop:4,padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none',width:'100%'}}>
-                      <option value="INTRA">Intra-State (CGST + SGST)</option>
-                      <option value="INTER">Inter-State (IGST)</option>
-                    </select>
+                  <div className="ss-field">
+                    <label className="ss-label">Key secret</label>
+                    <SecretInput value={shopEditModal.razorpayMerchantKeySecret || ''} onChange={v => setShopEditModal(m => ({...m, razorpayMerchantKeySecret: v}))}
+                      placeholder={tenantInfo?.razorpayMerchantConnected ? 'Leave blank to keep current' : 'Enter Razorpay key secret'} />
                   </div>
-                </>
-              )}
-            </div>
-            <p style={{fontSize:11.5,color:'#9ca3af',margin:'4px 0 0'}}>
-              When enabled, GST will be computed on every POS bill and shown on receipts. Set the applicable rate per product in the Products page.
-            </p>
+                </div>
+                <p className="ss-hint" style={{margin:'10px 0 0'}}>
+                  🔒 Get these from your own Razorpay Dashboard → Settings → API Keys. We never see or store your sales money — it goes straight to your Razorpay account.
+                </p>
+              </section>
 
-            <div style={{display:'flex',gap:10,marginTop:18}}>
-              <button className="btn-primary" onClick={saveShopSettings} disabled={shopEditSaving} style={{flex:1}}>
-                {shopEditSaving ? 'Saving…' : 'Save'}
+              {/* ── GST ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head">
+                  <h4>GST Settings</h4>
+                  <p>Set the applicable GST rate per product in the Products page.</p>
+                </div>
+                <label className="ss-toggle-row">
+                  <span>
+                    <b>GST registered business</b>
+                    <small>When on, GST is computed on every POS bill and shown on receipts.</small>
+                  </span>
+                  <span className="ss-switch">
+                    <input type="checkbox" role="switch" checked={shopEditModal.gstRegistered || false}
+                      onChange={e => setShopEditModal(m => ({...m, gstRegistered: e.target.checked}))} />
+                    <span className="ss-slider" />
+                  </span>
+                </label>
+                {shopEditModal.gstRegistered && (
+                  <div className="ss-grid" style={{marginTop:14}}>
+                    <div className="ss-field">
+                      <label className="ss-label">GSTIN</label>
+                      <input value={shopEditModal.gstin || ''} onChange={e => setShopEditModal(m => ({...m, gstin: e.target.value.toUpperCase()}))}
+                        placeholder="e.g. 29ABCDE1234F1Z5" maxLength={15} style={{fontFamily:'monospace',letterSpacing:1}} />
+                    </div>
+                    <div className="ss-field">
+                      <label className="ss-label">Supply type</label>
+                      <select value={shopEditModal.supplyType || 'INTRA'} onChange={e => setShopEditModal(m => ({...m, supplyType: e.target.value}))}>
+                        <option value="INTRA">Intra-State (CGST + SGST)</option>
+                        <option value="INTER">Inter-State (IGST)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <div className="ss-foot">
+              <button className="btn-secondary ss-cancel" onClick={closeModal}>Cancel</button>
+              <button className="btn-primary ss-save" onClick={saveShopSettings} disabled={shopEditSaving}>
+                {shopEditSaving ? 'Saving…' : 'Save changes'}
               </button>
-              <button className="btn-secondary" onClick={closeModal} style={{flex:1}}>Cancel</button>
             </div>
           </div>
         </div>
@@ -6790,15 +6984,17 @@ function App() {
           <div className="modal-box edit-modal-box" onClick={e => e.stopPropagation()}>
             <h3>Edit Product</h3>
 
-            <>
-              <label className="modal-label">Product Type</label>
-              <select value={editModal.productType || 'OTHER'}
-                onChange={e => setEditModal(m => ({...m, productType: e.target.value}))}
-                style={{marginBottom:10}}>
-                <option value="OTHER">Other (Sell)</option>
-                <option value="RENTAL">Rental</option>
-              </select>
-            </>
+            {tenantInfo?.subdomain === 'gosuas' && (
+              <>
+                <label className="modal-label">Product Type</label>
+                <select value={editModal.productType || 'OTHER'}
+                  onChange={e => setEditModal(m => ({...m, productType: e.target.value}))}
+                  style={{marginBottom:10}}>
+                  <option value="OTHER">Other (Sell)</option>
+                  <option value="RENTAL">Rental</option>
+                </select>
+              </>
+            )}
 
             <label className="modal-label">Product Name</label>
             <input value={editModal.name} onChange={e => setEditModal(m => ({...m, name: e.target.value}))} />
@@ -6879,6 +7075,42 @@ function App() {
               <input type="checkbox" checked={editModal.trackStock === false} onChange={e => setEditModal(m => ({...m, trackStock: !e.target.checked}))} style={{width:15,height:15,cursor:'pointer'}} />
               Don't Track Stock
             </label>
+
+            {/* Limited-Time Discount */}
+            <div style={{marginTop:12,border:'1.5px solid #e5e7eb',borderRadius:10,padding:'10px 14px',background:'#fafbfc'}}>
+              <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,fontWeight:700,color:'#1E3A5F',cursor:'pointer',userSelect:'none'}}>
+                <input type="checkbox" checked={!!editModal.discountEnabled} onChange={e => setEditModal(m => ({...m, discountEnabled: e.target.checked}))} style={{width:15,height:15,cursor:'pointer'}} />
+                Limited-Time Discount
+              </label>
+              {editModal.discountEnabled && (
+                <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:8}}>
+                  <div style={{display:'flex',gap:8}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">Discount Type</label>
+                      <select value={editModal.discountType || 'PERCENT'} onChange={e => setEditModal(m => ({...m, discountType: e.target.value}))} style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff',outline:'none',width:'100%'}}>
+                        <option value="PERCENT">Percentage (%)</option>
+                        <option value="FLAT">Flat Amount (₹)</option>
+                      </select>
+                    </div>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">{editModal.discountType === 'FLAT' ? 'Discount Amount ₹' : 'Discount %'}</label>
+                      <input type="number" min="0" max={editModal.discountType === 'PERCENT' ? 100 : undefined} value={editModal.discountValue} onChange={e => setEditModal(m => ({...m, discountValue: e.target.value}))} placeholder={editModal.discountType === 'FLAT' ? '50' : '10'} />
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:8}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">Start Date &amp; Time (IST)</label>
+                      <input type="datetime-local" value={editModal.discountStart || ''} onChange={e => setEditModal(m => ({...m, discountStart: e.target.value}))} style={{width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13}} />
+                    </div>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">End Date &amp; Time (IST)</label>
+                      <input type="datetime-local" value={editModal.discountEnd || ''} onChange={e => setEditModal(m => ({...m, discountEnd: e.target.value}))} style={{width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13}} />
+                    </div>
+                  </div>
+                  <div style={{fontSize:11,color:'#6b7280'}}>Leave start/end blank for an open-ended discount with no expiry.</div>
+                </div>
+              )}
+            </div>
 
             {/* Variant attributes — single-select per attribute */}
             {editAttrs.length > 0 && (
@@ -7068,11 +7300,13 @@ function App() {
                 onChange={e => setEditModal(m => ({...m, festiveOffer: e.target.checked}))} />
               <span>🎉 Seasonal / Festive Offer</span>
             </label>
-            <label className="edit-featured-toggle" style={{marginTop:'8px'}}>
-              <input type="checkbox" checked={editModal.rentalAvailable ?? false}
-                onChange={e => setEditModal(m => ({...m, rentalAvailable: e.target.checked}))} />
-              <span>🔑 Available for Rental</span>
-            </label>
+            {tenantInfo?.subdomain === 'gosuas' && (
+              <label className="edit-featured-toggle" style={{marginTop:'8px'}}>
+                <input type="checkbox" checked={editModal.rentalAvailable ?? false}
+                  onChange={e => setEditModal(m => ({...m, rentalAvailable: e.target.checked}))} />
+                <span>🔑 Available for Rental</span>
+              </label>
+            )}
 
             <div className="modal-actions" style={{marginTop:'18px'}}>
               <button className="modal-cancel" onClick={() => setEditModal(null)}>Cancel</button>
@@ -7459,7 +7693,7 @@ function ShopApp() {
       const ex = prev.find(i => i.key === key);
       if (ex) return prev.map(i => i.key === key ? { ...i, qty: i.qty + 1 } : i);
       return [...prev, {
-        key, barcode: p.barcode, name: p.name, price: p.sellingPrice,
+        key, barcode: p.barcode, name: p.name, price: p.discountedPrice ?? p.sellingPrice,
         imageUrl: p.imageUrl, qty: 1,
         selectedColor: selectedColor || p.color || '',
         selectedSize: selectedSize || p.size || '',
@@ -7976,6 +8210,26 @@ function ShopApp() {
     const dpBaseSku = baseSkuOf(dp.sku);
     const colorFamily = products.filter(p => p.category === dp.category && baseSkuOf(p.sku) === dpBaseSku && p.color);
     const hasColorFamily = colorFamily.length > 1;
+
+    // Aggregate size options across all siblings with the same base SKU + category.
+    // If the colour family is active, only look at siblings with the same colour as dp.
+    const sizeSiblings = products.filter(p =>
+      p.category === dp.category &&
+      baseSkuOf(p.sku) === dpBaseSku &&
+      (!hasColorFamily || p.color === dp.color)
+    );
+    // Build { size, product } pairs; preserve insertion order, deduplicate sizes
+    const sizeFamily = (() => {
+      const seen = new Set();
+      const result = [];
+      for (const sib of sizeSiblings) {
+        for (const s of (sib.size || '').split(',').map(x => x.trim()).filter(Boolean)) {
+          if (!seen.has(s)) { seen.add(s); result.push({ size: s, product: sib }); }
+        }
+      }
+      return result;
+    })();
+    const hasSizeFamily = sizeFamily.length > 0;
     // Exclude colour siblings from "You May Also Like" since they're shown in the colour picker above
     const similar = products.filter(p => p.category === dp.category && p.id !== dp.id && !(hasColorFamily && baseSkuOf(p.sku) === dpBaseSku)).slice(0, 8);
     return (
@@ -8017,7 +8271,15 @@ function ShopApp() {
           <div className="s2-detail-info">
             <div className="s2-detail-cat">{dp.category}{dp.subcategory ? ` · ${dp.subcategory}` : ''}</div>
             <h1 className="s2-detail-name">{dp.name}</h1>
-            <div className="s2-detail-price">₹{Number(dp.sellingPrice).toFixed(2)}</div>
+            {dp.discountedPrice != null ? (
+              <div style={{display:'flex',alignItems:'baseline',gap:10,flexWrap:'wrap'}}>
+                <div className="s2-detail-price">₹{Number(dp.discountedPrice).toFixed(2)}</div>
+                <div style={{fontSize:16,color:'#9ca3af',textDecoration:'line-through'}}>₹{Number(dp.sellingPrice).toFixed(2)}</div>
+                <div style={{fontSize:12,background:'#fef3c7',color:'#b45309',padding:'2px 10px',borderRadius:99,fontWeight:700}}>{dp.discountLabel}</div>
+              </div>
+            ) : (
+              <div className="s2-detail-price">₹{Number(dp.sellingPrice).toFixed(2)}</div>
+            )}
 
             {(hasColorFamily || dp.color) && (
               <div className="s2-detail-attr-block">
@@ -8049,17 +8311,29 @@ function ShopApp() {
               </div>
             )}
 
-            {dp.size && (
+            {hasSizeFamily && (
               <div className="s2-detail-attr-block">
                 <div className="s2-attr-lbl">Size</div>
                 <div className="s2-detail-size-chips">
-                  {dp.size.split(',').filter(Boolean).map(s => s.trim()).map(s => (
-                    <button key={s}
-                      className={`s2-size-chip ${detailSize === s ? 's2-size-chip-on' : ''}`}
-                      onClick={() => setDetailSize(detailSize === s ? '' : s)}>
-                      {s}
-                    </button>
-                  ))}
+                  {sizeFamily.map(({ size: s, product: sibP }) => {
+                    const isSelected = detailSize === s;
+                    const isOos = sibP.stockQty === 0;
+                    return (
+                      <button key={s}
+                        className={`s2-size-chip ${isSelected ? 's2-size-chip-on' : ''} ${isOos ? 's2-size-chip-oos' : ''}`}
+                        onClick={() => {
+                          if (sibP.id !== dp.id) {
+                            setDetailProduct(sibP);
+                            setDetailQty(1);
+                            setDetailImgIdx(0);
+                          }
+                          setDetailSize(s);
+                        }}>
+                        {s}
+                        {isOos && <span style={{fontSize:'0.72em',marginLeft:3,opacity:0.65}}>(Out)</span>}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -8487,8 +8761,15 @@ function ShopApp() {
                         {p.description && <div className="s2-card-desc" style={{fontSize:11,color:'#6b7280',lineHeight:1.4,margin:'2px 0 4px',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{p.description}</div>}
                         {variantLabel(p) && <div className="s2-card-meta">{variantLabel(p)}</div>}
                         <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                          <div className={`s2-card-price ${p.stockQty === 0 ? 's2-price-soldout' : ''}`}>₹{Number(p.sellingPrice).toFixed(2)}</div>
-                          {p.mrp && Number(p.mrp) > Number(p.sellingPrice) && (
+                          <div className={`s2-card-price ${p.stockQty === 0 ? 's2-price-soldout' : ''}`}>
+                            ₹{Number(p.discountedPrice ?? p.sellingPrice).toFixed(2)}
+                          </div>
+                          {p.discountedPrice != null ? (
+                            <>
+                              <div style={{fontSize:11,color:'#9ca3af',textDecoration:'line-through'}}>₹{Number(p.sellingPrice).toFixed(0)}</div>
+                              <div style={{fontSize:10,background:'#fef3c7',color:'#b45309',padding:'1px 6px',borderRadius:99,fontWeight:700}}>{p.discountLabel}</div>
+                            </>
+                          ) : p.mrp && Number(p.mrp) > Number(p.sellingPrice) && (
                             <>
                               <div style={{fontSize:11,color:'#9ca3af',textDecoration:'line-through'}}>₹{Number(p.mrp).toFixed(0)}</div>
                               <div style={{fontSize:10,background:'#dcfce7',color:'#15803d',padding:'1px 6px',borderRadius:99,fontWeight:700}}>
@@ -8839,7 +9120,10 @@ function ShopApp() {
             </div>
           </div>
         </div>
-        <div className="s2-footer-bottom">© {new Date().getFullYear()} {shopName} · All rights reserved</div>
+        <div className="s2-footer-bottom">
+          © {new Date().getFullYear()} {shopName} · All rights reserved
+          <span className="s2-powered-by"> · Powered by <a href="https://theshopclaude.com" target="_blank" rel="noopener noreferrer" className="s2-powered-link">ShopClaude</a></span>
+        </div>
       </footer>
 
     </div>
@@ -8900,7 +9184,7 @@ function SaDonut({ segments, size = 130 }) {
 }
 
 function SuperAdminApp() {
-  const [token, setToken] = useState(() => localStorage.getItem('sc_sa_token') || '');
+  const [token, setToken] = useState(() => localStorage.getItem('gosuas_sa_token') || '');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showAdminPw, setShowAdminPw] = useState(false);
@@ -8918,7 +9202,7 @@ function SuperAdminApp() {
     e.preventDefault(); setLoginErr('');
     try {
       const res = await axios.post(`${API}/auth/login`, { email, password, subdomain: 'admin' });
-      localStorage.setItem('sc_sa_token', res.data.token);
+      localStorage.setItem('gosuas_sa_token', res.data.token);
       setToken(res.data.token);
     } catch { setLoginErr('Invalid credentials'); }
   };
@@ -8930,7 +9214,7 @@ function SuperAdminApp() {
         axios.get(`${API}/superadmin/tenants`, { headers: saHeaders() }),
       ]);
       setStats(s.data); setTenants(tl.data);
-    } catch { setToken(''); localStorage.removeItem('sc_sa_token'); }
+    } catch { setToken(''); localStorage.removeItem('gosuas_sa_token'); }
   };
 
   useEffect(() => { if (token) loadData(); }, [token]);
@@ -9113,7 +9397,7 @@ function SuperAdminApp() {
           ))}
         </nav>
         <div style={{padding:'16px 10px',borderTop:'1px solid rgba(255,255,255,0.1)'}}>
-          <button onClick={()=>{localStorage.removeItem('sc_sa_token');setToken('');}} style={{
+          <button onClick={()=>{localStorage.removeItem('gosuas_sa_token');setToken('');}} style={{
             display:'flex',alignItems:'center',gap:8,width:'100%',padding:'9px 12px',
             background:'transparent',border:'1px solid rgba(255,255,255,0.2)',borderRadius:8,
             cursor:'pointer',color:'rgba(255,255,255,0.6)',fontSize:13
@@ -9440,7 +9724,7 @@ function SuperAdminApp() {
 // Direct hash links (e.g. /#home, /#reports) always skip the landing so bookmarks
 // and shared links continue to work correctly.
 function TenantRoot() {
-  const isLoggedIn = !!localStorage.getItem('sc_token');
+  const isLoggedIn = !!localStorage.getItem('gosuas_token');
   const isLocalhost = isLoopbackHost(window.location.hostname);
   const hash = window.location.hash.replace(/^#\/?/, '');
   const hasDirectAdminLink = ADMIN_PAGES.includes(hash);
@@ -9460,7 +9744,7 @@ function TenantRoot() {
   // Welcome Back page to the landing page (URL stays "/").
   useEffect(() => {
     const onPop = (e) => {
-      if (!localStorage.getItem('sc_token') && !e.state?.scLogin) setGoToLogin(false);
+      if (!localStorage.getItem('gosuas_token') && !e.state?.scLogin) setGoToLogin(false);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);

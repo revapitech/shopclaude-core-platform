@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './landing.css';
 import { tenantHomeUrl } from '../utils/getSubdomain.js';
+import { setToken } from '../utils/session.js';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:8080/gosuas-core/api';
 
@@ -92,7 +93,7 @@ function SignupModal({ initialShopName = '', initialPlan = 'STARTER', onClose, o
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.error || 'Signup failed. Please try again.'); return; }
-      localStorage.setItem('sc_token', data.token);
+      setToken(data.token, data.subdomain);
       setCreatedSubdomain(data.subdomain);
       setStep(4);
       if (onSuccess) onSuccess(data);
@@ -172,7 +173,7 @@ function SignupModal({ initialShopName = '', initialPlan = 'STARTER', onClose, o
 
   const shopUrl = domainType === 'custom' && customDomain
     ? `https://${customDomain}`
-    : `https://${createdSubdomain}.theshopclaude.com`;
+    : tenantHomeUrl(createdSubdomain);
 
   return (
     <div className="sc-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -437,7 +438,7 @@ function SigninModal({ onClose }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return; }
-      localStorage.setItem('sc_token', data.token);
+      setToken(data.token, data.subdomain);
       window.location.href = tenantHomeUrl(data.subdomain);
     } catch { setError('Network error. Please try again.'); }
     finally { setLoading(false); }

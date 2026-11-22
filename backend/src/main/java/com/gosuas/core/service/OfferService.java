@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -116,7 +117,7 @@ public class OfferService {
     // ─── Public storefront ──────────────────────────────────────────────────────
 
     public List<OfferResponse> listPublicOffers(UUID tenantId) {
-        return offerRepository.findActivePublicOffers(tenantId, LocalDateTime.now())
+        return offerRepository.findActivePublicOffers(tenantId, LocalDateTime.now(ZoneId.of("Asia/Kolkata")))
                 .stream().map(this::buildResponse).toList();
     }
 

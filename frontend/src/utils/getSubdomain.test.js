@@ -28,6 +28,17 @@ describe('platform root domains', () => {
   eq('www.theshopclaude.com',  'www');
 });
 
+// ── Dev environment domain ────────────────────────────────────────────────────
+describe('dev environment domain (dev.theshopclaude.com)', () => {
+  eq('dev.theshopclaude.com',          'www');   // root → landing page
+  eq('ismart.dev.theshopclaude.com',   'ismart'); // tenant on dev env
+  eq('shop-1.dev.theshopclaude.com',   'shop-1'); // hyphenated tenant on dev env
+  eq('DEV.THESHOPCLAUDE.COM',          'www');    // case normalised
+  eq('ISMART.DEV.THESHOPCLAUDE.COM',   'ismart'); // case normalised
+  eq('bad.shop.dev.theshopclaude.com', 'www');    // multi-label → reject
+  eq('-bad.dev.theshopclaude.com',     'www');    // invalid label → reject
+});
+
 // ── Platform tenants ──────────────────────────────────────────────────────────
 describe('platform tenant subdomains', () => {
   eq('gosuas.theshopclaude.com',  'gosuas');

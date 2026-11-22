@@ -12,8 +12,8 @@ spring:
             enable: true
             required: true
   datasource:
-    url: ${DB_URL}
-    username: ${DB_USERNAME:gosuas_user}
+    url: jdbc:postgresql://localhost:5432/gosuas_core_db
+    username: gosuas_user
     password: ${DB_PASSWORD}
   jpa:
     hibernate:
@@ -38,15 +38,11 @@ razorpay:
     secret: ${RAZORPAY_KEY_SECRET}
 
 jwt:
-  # JWT_SECRET must be set via environment variable in production — no default is provided.
-  # Minimum 32 characters. Generate with: openssl rand -base64 48
-  secret: ${JWT_SECRET}
+  secret: ${JWT_SECRET:gosuas-super-secret-jwt-signing-key-for-dev-only-2026}
   expiration-ms: 86400000
 
 gosuas:
   init:
-    # Set SEED_GOSUAS_TENANT=false on fresh deployments that don't need the legacy Gosuas tenant.
-    create-seed-tenant: ${SEED_GOSUAS_TENANT:true}
     admin-email: ${GOSUAS_ADMIN_EMAIL:admin@gosuas.com}
     admin-password: ${GOSUAS_ADMIN_PASSWORD:admin@123}
     superadmin-email: ${SC_SUPERADMIN_EMAIL:owner@theshopclaude.com}

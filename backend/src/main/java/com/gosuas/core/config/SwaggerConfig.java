@@ -17,7 +17,7 @@ public class SwaggerConfig {
                 .info(new Info()
                         .title("ShopClaude Core API")
                         .version("1.0.0")
-                        .description("ShopClaude Platform REST API"))
+                        .description("gosuas-core-backend REST API"))
                 .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
                 .components(new Components()
                         .addSecuritySchemes("bearerAuth", new SecurityScheme()

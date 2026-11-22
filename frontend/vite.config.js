@@ -5,6 +5,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     historyApiFallback: true,
+    proxy: {
+      '/gosuas-core': {
+        target: 'http://localhost:8081',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     rollupOptions: {

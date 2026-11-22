@@ -60,7 +60,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration cfg = new CorsConfiguration();
         cfg.setAllowedOriginPatterns(List.of(
-                "http://localhost:*",
+                "http://localhost:*",   // any Vite dev-server port (5173, 5174, 5177, …)
                 "https://*.gosuas.com",
                 "https://gosuas.com",
                 "https://*.theshopclaude.com",

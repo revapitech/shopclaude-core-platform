@@ -54,7 +54,7 @@ razorpay:
     secret: ${RAZORPAY_KEY_SECRET:Zlv5OofDcpQ7ClQNUCpe943O}
 
 jwt:
-  secret: ${JWT_SECRET:shopclaude-qa-jwt-secret-not-for-production-2026}
+  secret: ${JWT_SECRET:gosuas-qa-jwt-secret-not-for-production-2026}
   expiration-ms: 86400000
 
 gosuas:

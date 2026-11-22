@@ -7,15 +7,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(
-    indexes = @Index(name = "idx_product_tenant_id", columnList = "tenant_id"),
-    uniqueConstraints = {
-        // Tenant-scoped: two different shops may carry the same real-world SKU or barcode.
-        // See db-migration-phase2.sql to drop the old global unique constraints.
-        @UniqueConstraint(name = "uq_product_sku_tenant",     columnNames = {"sku",     "tenant_id"}),
-        @UniqueConstraint(name = "uq_product_barcode_tenant", columnNames = {"barcode", "tenant_id"})
-    }
-)
+@Table(indexes = @Index(name = "idx_product_tenant_id", columnList = "tenant_id"))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Product {
     @Id
@@ -32,12 +24,10 @@ public class Product {
     private String color;
     private String size;
 
-    // Uniqueness enforced tenant-scoped via uq_product_sku_tenant (see @Table above).
-    @Column(nullable = false)
+    @Column(unique = true, nullable = false)
     private String sku;
 
-    // Uniqueness enforced tenant-scoped via uq_product_barcode_tenant (see @Table above).
-    @Column(nullable = false)
+    @Column(unique = true, nullable = false)
     private String barcode;
 
     private BigDecimal purchasePrice;
@@ -90,6 +80,25 @@ public class Product {
     // Null for products with no custom variant images (existing products unaffected).
     @Column(name = "variant_images", columnDefinition = "TEXT")
     private String variantImages;
+
+    // Limited-time discount — applied on the storefront only.
+    // discountType: "PERCENT" (e.g. 10 = 10% off) or "FLAT" (e.g. 50 = ₹50 off)
+    // Active when discountEnabled=true AND current time is within [discountStart, discountEnd].
+    // Null start/end = open-ended on that side.
+    @Column(name = "discount_enabled")
+    private Boolean discountEnabled;
+
+    @Column(name = "discount_type")
+    private String discountType;
+
+    @Column(name = "discount_value", precision = 10, scale = 2)
+    private java.math.BigDecimal discountValue;
+
+    @Column(name = "discount_start")
+    private LocalDateTime discountStart;
+
+    @Column(name = "discount_end")
+    private LocalDateTime discountEnd;
 
     @PrePersist
     public void prePersist() {

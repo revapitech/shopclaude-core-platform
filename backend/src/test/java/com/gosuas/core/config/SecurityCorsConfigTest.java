@@ -9,12 +9,14 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Verifies that the CORS allowedOriginPatterns list covers all expected origins,
- * including both local dev ports (5173 and 5174) and production domains.
+ * Verifies that the CORS allowedOriginPatterns list covers all expected origins.
+ * Localhost is allowed via the wildcard pattern http://localhost:* so any Vite
+ * dev-server port (5173, 5174, 5177, …) is covered without hardcoding each one.
  *
  * A missing origin in this list causes Spring's CorsFilter to return 403 before
  * any permitAll() rule is evaluated — which is the root cause of the
- * "GET /api/public/shop-info returns 403" bug when the frontend runs on port 5174.
+ * "GET /api/public/shop-info returns 403" bug when the frontend runs on an
+ * unexpected port.
  */
 class SecurityCorsConfigTest {
 
@@ -31,10 +33,9 @@ class SecurityCorsConfigTest {
         return corsSource.getCorsConfiguration(req);
     }
 
-    // CORS was updated to "http://localhost:*" wildcard (commit e69f3b1) so all local dev ports
-    // (5173, 5174, 5175, …) are covered by a single pattern rather than individual entries.
     @Test
-    void corsConfig_allowsAllLocalhostPortsViaWildcard() {
+    void corsConfig_allowsLocalhostWildcard() {
+        // Single wildcard pattern covers all Vite dev ports (5173, 5174, 5177, …)
         assertThat(configFor("/api/public/shop-info").getAllowedOriginPatterns())
                 .contains("http://localhost:*");
     }
