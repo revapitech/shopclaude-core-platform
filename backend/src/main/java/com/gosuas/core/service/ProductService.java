@@ -199,6 +199,11 @@ public class ProductService {
         if (request.trackStock() != null) product.setTrackStock(request.trackStock());
         // variantImages is always set (null to clear, string to update); nullable is intentional
         product.setVariantImages(request.variantImages());
+        product.setDiscountEnabled(Boolean.TRUE.equals(request.discountEnabled()));
+        product.setDiscountType(request.discountType());
+        product.setDiscountValue(request.discountValue());
+        product.setDiscountStart(request.discountStart());
+        product.setDiscountEnd(request.discountEnd());
         return productRepository.save(product);
     }
 }

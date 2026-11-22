@@ -594,7 +594,7 @@ function exportToCsv(filename, rows, columns) {
   URL.revokeObjectURL(url);
 }
 
-function printBillReceipt(bill, shopName = 'GOSUAS') {
+function printBillReceipt(bill, shopName = 'GOSUAS', shopInfo = {}) {
   // Use hidden iframe (same origin) so Chrome remembers the last printer selection
   let iframe = document.getElementById('__receipt_print_frame__');
   if (!iframe) {
@@ -650,8 +650,8 @@ function printBillReceipt(bill, shopName = 'GOSUAS') {
 </head>
 <body>
   <h2>${shopName}</h2>
-  <p class="shop-phone">📞 8078583062</p>
-  <p class="shop-addr">OPP CET Sreekaryam</p>
+  ${shopInfo.phone ? `<p class="shop-phone">📞 ${shopInfo.phone}</p>` : ''}
+  ${shopInfo.address ? `<p class="shop-addr">${shopInfo.address.replace(/\n/g,'<br>')}</p>` : ''}
   <p class="sub">Tax Invoice / Receipt</p>
   <div class="dash"></div>
   <div class="info-row"><span>Bill No:</span><span>${bill.billNo || 'N/A'}</span></div>
@@ -1454,6 +1454,7 @@ function App() {
   const [billError, setBillError] = useState('');
   const [inventorySearch, setInventorySearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [expandedFamilies, setExpandedFamilies] = useState(new Set());
   const barcodeInputRef = useRef(null);
   const [labelModal, setLabelModal] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -2329,7 +2330,21 @@ function App() {
         const res = await axios.get(`${API}/products/sku/${input}`);
         addProductToCart(res.data);
       } catch {
-        setScanError('Product not found for barcode/SKU: ' + input);
+        // Fallback: search loaded products by exact SKU or base SKU (handles colour variants
+        // where stored SKUs are like "UTC-TS-101-BLU" but user enters base SKU "UTC-TS-101")
+        const inputLower = input.toLowerCase();
+        const matches = products.filter(p =>
+          (p.sku || '').toLowerCase() === inputLower ||
+          baseSkuOf(p.sku).toLowerCase() === inputLower
+        );
+        if (matches.length === 1) {
+          addProductToCart(matches[0]);
+        } else if (matches.length > 1) {
+          setCatalogVariantModal({ canonical: matches[0], variants: matches.sort((a, b) => (a.color || '').localeCompare(b.color || '')) });
+          setBarcode('');
+        } else {
+          setScanError('Product not found for barcode/SKU: ' + input);
+        }
       }
     } finally {
       barcodeInputRef.current?.focus();
@@ -2427,6 +2442,11 @@ function App() {
       hsnCode: p.hsnCode || '',
       gstRate: p.gstRate != null ? String(p.gstRate) : '',
       trackStock: p.trackStock !== false,
+      discountEnabled: p.discountEnabled ?? false,
+      discountType: p.discountType || 'PERCENT',
+      discountValue: p.discountValue ?? '',
+      discountStart: p.discountStart ? p.discountStart.slice(0,16) : '',
+      discountEnd: p.discountEnd ? p.discountEnd.slice(0,16) : '',
     });
   };
 
@@ -2498,6 +2518,11 @@ function App() {
       gstRate: editModal.gstRate !== '' && editModal.gstRate != null ? Number(editModal.gstRate) : null,
       trackStock: editModal.trackStock !== false,
       variantImages: editVariantImagesJson,
+      discountEnabled: editModal.discountEnabled ?? false,
+      discountType: editModal.discountEnabled ? (editModal.discountType || 'PERCENT') : null,
+      discountValue: editModal.discountEnabled && editModal.discountValue !== '' ? Number(editModal.discountValue) : null,
+      discountStart: editModal.discountEnabled && editModal.discountStart ? editModal.discountStart : null,
+      discountEnd: editModal.discountEnabled && editModal.discountEnd ? editModal.discountEnd : null,
     };
       if (editAttrs.length > 0) {
         const color = attrVals[editAttrs[0]?.name] || null;
@@ -2628,7 +2653,7 @@ function App() {
       setDiscountType('AMOUNT');
       setBillError('');
       loadProducts();
-      printBillReceipt(res.data, tenantInfo?.name);
+      printBillReceipt(res.data, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress });
       // Refocus the barcode field for the next customer. lastBill stays visible so
       // the cashier can still regenerate the receipt; they dismiss it with the × button.
       setTimeout(() => {
@@ -2653,10 +2678,35 @@ function App() {
     p.category?.toLowerCase().includes(inventorySearch.toLowerCase())
   );
 
-  const totalPages = isSearching ? 1 : Math.ceil(filteredProducts.length / PAGE_SIZE);
-  const displayedProducts = isSearching
-    ? filteredProducts
-    : filteredProducts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  // Group colour-variant siblings (same base SKU + category) into families.
+  // When searching, keep flat so each individual variant is independently visible.
+  const productFamilies = (() => {
+    if (isSearching) return filteredProducts.map(p => ({ isSingle: true, products: [p] }));
+    const seen = new Set();
+    const result = [];
+    for (const p of filteredProducts) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      if (p.color) {
+        const baseSku = baseSkuOf(p.sku);
+        const siblings = filteredProducts.filter(x =>
+          x.category === p.category && x.color && baseSkuOf(x.sku) === baseSku
+        );
+        if (siblings.length > 1) {
+          siblings.forEach(s => seen.add(s.id));
+          result.push({ isSingle: false, products: siblings.sort((a, b) => (a.color||'').localeCompare(b.color||'')) });
+          continue;
+        }
+      }
+      result.push({ isSingle: true, products: [p] });
+    }
+    return result;
+  })();
+
+  const totalPages = isSearching ? 1 : Math.ceil(productFamilies.length / PAGE_SIZE);
+  const displayedFamilies = isSearching
+    ? productFamilies
+    : productFamilies.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const pageNumbers = (() => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -3004,10 +3054,10 @@ function App() {
               <div className="bill-result-row">
                 <span>Status:</span><span className="paid-badge">{lastBill.paymentStatus || 'PAID'}</span>
               </div>
-              <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
+              <button className="print-again-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress })}>
                 🖨 Reprint Receipt
               </button>
-              <button className="regenerate-bill-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name)}>
+              <button className="regenerate-bill-btn" onClick={() => printBillReceipt(lastBill, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress })}>
                 ↺ Regenerate Bill
               </button>
             </div>
@@ -3027,7 +3077,7 @@ function App() {
                   try {
                     const res = await axios.get(`${API}/bills/${lastBillId}`);
                     setLastBill(res.data);
-                    printBillReceipt(res.data, tenantInfo?.name);
+                    printBillReceipt(res.data, tenantInfo?.name, { phone: tenantInfo?.phoneNumber, address: tenantInfo?.shopAddress });
                   } catch {
                     setBillError('Could not retrieve the bill. Please check your connection.');
                   } finally {
@@ -3536,7 +3586,7 @@ function App() {
             <div className="table-meta">
               {isSearching
                 ? `${filteredProducts.length} result${filteredProducts.length !== 1 ? 's' : ''} found`
-                : `Showing ${filteredProducts.length === 0 ? 0 : (currentPage-1)*PAGE_SIZE+1}–${Math.min(currentPage*PAGE_SIZE, filteredProducts.length)} of ${filteredProducts.length}`}
+                : `Showing ${productFamilies.length === 0 ? 0 : (currentPage-1)*PAGE_SIZE+1}–${Math.min(currentPage*PAGE_SIZE, productFamilies.length)} of ${productFamilies.length}${productFamilies.length !== filteredProducts.length ? ` entries (${filteredProducts.length} variants total)` : ' products'}`}
             </div>
             <div className="table-scroll-wrap">
             <table>
@@ -3544,25 +3594,93 @@ function App() {
                 <tr><th>Name</th><th>Category</th><th>Variants</th><th>SKU</th><th>Barcode</th><th>Stock</th><th>Price</th><th>Barcode Image</th><th>Label</th><th>Edit</th><th>Delete</th></tr>
               </thead>
               <tbody>
-                {displayedProducts.length === 0 && (
+                {displayedFamilies.length === 0 && (
                   <tr><td colSpan={11} style={{textAlign:'center',color:'#888',padding:'16px'}}>No products found</td></tr>
                 )}
-                {displayedProducts.map(p => {
-                  const suggested = 'two-row';
-                  const isLow = (p.stockQty ?? 0) < 5;
-                  const isOut = p.stockQty === 0;
+                {displayedFamilies.map(family => {
+                  if (family.isSingle) {
+                    const p = family.products[0];
+                    const isLow = (p.stockQty ?? 0) < 5;
+                    const isOut = p.stockQty === 0;
+                    return (
+                      <tr key={p.id} className={isOut ? 'row-critical' : isLow ? 'row-warning' : ''}>
+                        <td>{p.name}</td><td>{p.category}{p.subcategory ? <div style={{fontSize:'11px',color:'#888'}}>{p.subcategory}</div> : ''}</td>
+                        <td>{variantLabel(p) || '—'}</td>
+                        <td>{p.sku}</td><td>{p.barcode}</td>
+                        <td><span className={isOut ? 'stock-out' : isLow ? 'stock-low' : ''}>{isOut ? '⚠ OUT' : p.stockQty}</span></td>
+                        <td>{p.productType === 'RENTAL' ? `Dep ₹${p.depositAmount ?? 0} + Rent ₹${p.rentAmount ?? 0}` : `₹${p.sellingPrice}`}</td>
+                        <td><img src={`${API}/barcodes/${p.barcode}`} alt={p.barcode} /></td>
+                        <td><button className="label-btn" onClick={() => setLabelModal({product:p, stickerType:'two-row', qty:1})}>🏷 Print</button></td>
+                        <td><button className="edit-btn" onClick={() => openEdit(p)}>✏ Edit</button></td>
+                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); }}>🗑 Delete</button></td>
+                      </tr>
+                    );
+                  }
+                  // Multi-colour variant family — grouped row with expandable sub-rows
+                  const rep = family.products[0];
+                  const famKey = `${rep.category ?? ''}|${baseSkuOf(rep.sku)}`;
+                  const isExpanded = expandedFamilies.has(famKey);
+                  const totalStock = family.products.reduce((s, v) => s + (v.stockQty ?? 0), 0);
+                  const isFamLow = totalStock < 5;
+                  const isFamOut = totalStock === 0;
+                  const toggleFamily = () => setExpandedFamilies(prev => {
+                    const n = new Set(prev);
+                    n.has(famKey) ? n.delete(famKey) : n.add(famKey);
+                    return n;
+                  });
                   return (
-                    <tr key={p.id} className={isOut ? 'row-critical' : isLow ? 'row-warning' : ''}>
-                      <td>{p.name}</td><td>{p.category}{p.subcategory ? <div style={{fontSize:'11px',color:'#888'}}>{p.subcategory}</div> : ''}</td>
-                      <td>{variantLabel(p) || '—'}</td>
-                      <td>{p.sku}</td><td>{p.barcode}</td>
-                      <td><span className={isOut ? 'stock-out' : isLow ? 'stock-low' : ''}>{isOut ? '⚠ OUT' : p.stockQty}</span></td>
-                      <td>{p.productType === 'RENTAL' ? `Dep ₹${p.depositAmount ?? 0} + Rent ₹${p.rentAmount ?? 0}` : `₹${p.sellingPrice}`}</td>
-                      <td><img src={`${API}/barcodes/${p.barcode}`} alt={p.barcode} /></td>
-                      <td><button className="label-btn" onClick={() => setLabelModal({product:p, stickerType:suggested, qty:1})}>🏷 Print</button></td>
-                      <td><button className="edit-btn" onClick={() => openEdit(p)}>✏ Edit</button></td>
-                      <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); }}>🗑 Delete</button></td>
-                    </tr>
+                    <React.Fragment key={famKey}>
+                      {/* Family summary row */}
+                      <tr className={isFamOut ? 'row-critical' : isFamLow ? 'row-warning' : ''} style={{background:'#f0f4ff'}}>
+                        <td style={{fontWeight:600}}>{rep.name}</td>
+                        <td>{rep.category}</td>
+                        <td>
+                          <div style={{display:'flex',flexWrap:'wrap',gap:4,alignItems:'center'}}>
+                            {family.products.map(v => (
+                              <span key={v.id} title={v.color} style={{display:'inline-flex',alignItems:'center',gap:3,background:'#fff',border:'1px solid #e2e8f0',borderRadius:12,padding:'2px 7px',fontSize:11,fontWeight:600,whiteSpace:'nowrap'}}>
+                                <span style={{width:8,height:8,borderRadius:'50%',background:COLOR_CSS[v.color]||'#ccc',display:'inline-block',border:'1px solid #ccc',flexShrink:0}}></span>
+                                {v.color}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td style={{color:'#64748b',fontSize:12}}>{baseSkuOf(rep.sku)}</td>
+                        <td style={{color:'#9ca3af',fontSize:12}}>—</td>
+                        <td><span className={isFamOut ? 'stock-out' : isFamLow ? 'stock-low' : ''}>{isFamOut ? '⚠ OUT' : totalStock} total</span></td>
+                        <td>₹{rep.sellingPrice}</td>
+                        <td style={{color:'#9ca3af'}}>—</td>
+                        <td><button className="label-btn" onClick={() => setCatalogVariantModal({ canonical: rep, variants: family.products })}>🏷 Print</button></td>
+                        <td>
+                          <button className="edit-btn" onClick={toggleFamily} style={{minWidth:80}}>
+                            {isExpanded ? '▾' : '▸'} {family.products.length} colours
+                          </button>
+                        </td>
+                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete all ${family.products.length} colour variants of "${rep.name}"?`)) Promise.all(family.products.map(v => axios.delete(`${API}/products/${v.id}`))).then(() => { loadProducts(); showToast('All variants deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑 All</button></td>
+                      </tr>
+                      {/* Expanded variant sub-rows */}
+                      {isExpanded && family.products.map(v => {
+                        const isLowV = (v.stockQty ?? 0) < 5;
+                        const isOutV = v.stockQty === 0;
+                        return (
+                          <tr key={v.id} className={isOutV ? 'row-critical' : isLowV ? 'row-warning' : ''} style={{background:'#fafbff'}}>
+                            <td style={{paddingLeft:20,fontSize:13}}>
+                              <span style={{width:10,height:10,borderRadius:'50%',background:COLOR_CSS[v.color]||'#ccc',display:'inline-block',border:'1px solid #ccc',marginRight:6,verticalAlign:'middle',flexShrink:0}}></span>
+                              {v.color}
+                            </td>
+                            <td></td>
+                            <td style={{fontSize:12,color:'#6b7280'}}>{variantLabel(v) || '—'}</td>
+                            <td style={{fontSize:12}}>{v.sku}</td>
+                            <td style={{fontSize:12}}>{v.barcode}</td>
+                            <td><span className={isOutV ? 'stock-out' : isLowV ? 'stock-low' : ''}>{isOutV ? '⚠ OUT' : v.stockQty}</span></td>
+                            <td>₹{v.sellingPrice}</td>
+                            <td><img src={`${API}/barcodes/${v.barcode}`} alt={v.barcode} /></td>
+                            <td><button className="label-btn" onClick={() => setLabelModal({product:v, stickerType:'two-row', qty:1})}>🏷 Print</button></td>
+                            <td><button className="edit-btn" onClick={() => openEdit(v)}>✏ Edit</button></td>
+                            <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${v.name}" (${v.color})?`)) axios.delete(`${API}/products/${v.id}`).then(() => { loadProducts(); showToast('Variant deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑</button></td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -6892,6 +7010,42 @@ function App() {
               Don't Track Stock
             </label>
 
+            {/* Limited-Time Discount */}
+            <div style={{marginTop:12,border:'1.5px solid #e5e7eb',borderRadius:10,padding:'10px 14px',background:'#fafbfc'}}>
+              <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,fontWeight:700,color:'#1E3A5F',cursor:'pointer',userSelect:'none'}}>
+                <input type="checkbox" checked={!!editModal.discountEnabled} onChange={e => setEditModal(m => ({...m, discountEnabled: e.target.checked}))} style={{width:15,height:15,cursor:'pointer'}} />
+                Limited-Time Discount
+              </label>
+              {editModal.discountEnabled && (
+                <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:8}}>
+                  <div style={{display:'flex',gap:8}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">Discount Type</label>
+                      <select value={editModal.discountType || 'PERCENT'} onChange={e => setEditModal(m => ({...m, discountType: e.target.value}))} style={{padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:14,background:'#fff',outline:'none',width:'100%'}}>
+                        <option value="PERCENT">Percentage (%)</option>
+                        <option value="FLAT">Flat Amount (₹)</option>
+                      </select>
+                    </div>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">{editModal.discountType === 'FLAT' ? 'Discount Amount ₹' : 'Discount %'}</label>
+                      <input type="number" min="0" max={editModal.discountType === 'PERCENT' ? 100 : undefined} value={editModal.discountValue} onChange={e => setEditModal(m => ({...m, discountValue: e.target.value}))} placeholder={editModal.discountType === 'FLAT' ? '50' : '10'} />
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:8}}>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">Start Date &amp; Time (IST)</label>
+                      <input type="datetime-local" value={editModal.discountStart || ''} onChange={e => setEditModal(m => ({...m, discountStart: e.target.value}))} style={{width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13}} />
+                    </div>
+                    <div style={{flex:1}}>
+                      <label className="modal-label">End Date &amp; Time (IST)</label>
+                      <input type="datetime-local" value={editModal.discountEnd || ''} onChange={e => setEditModal(m => ({...m, discountEnd: e.target.value}))} style={{width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13}} />
+                    </div>
+                  </div>
+                  <div style={{fontSize:11,color:'#6b7280'}}>Leave start/end blank for an open-ended discount with no expiry.</div>
+                </div>
+              )}
+            </div>
+
             {/* Variant attributes — single-select per attribute */}
             {editAttrs.length > 0 && (
               <div style={{marginTop:'12px',display:'flex',flexDirection:'column',gap:10}}>
@@ -7473,7 +7627,7 @@ function ShopApp() {
       const ex = prev.find(i => i.key === key);
       if (ex) return prev.map(i => i.key === key ? { ...i, qty: i.qty + 1 } : i);
       return [...prev, {
-        key, barcode: p.barcode, name: p.name, price: p.sellingPrice,
+        key, barcode: p.barcode, name: p.name, price: p.discountedPrice ?? p.sellingPrice,
         imageUrl: p.imageUrl, qty: 1,
         selectedColor: selectedColor || p.color || '',
         selectedSize: selectedSize || p.size || '',
@@ -7990,6 +8144,26 @@ function ShopApp() {
     const dpBaseSku = baseSkuOf(dp.sku);
     const colorFamily = products.filter(p => p.category === dp.category && baseSkuOf(p.sku) === dpBaseSku && p.color);
     const hasColorFamily = colorFamily.length > 1;
+
+    // Aggregate size options across all siblings with the same base SKU + category.
+    // If the colour family is active, only look at siblings with the same colour as dp.
+    const sizeSiblings = products.filter(p =>
+      p.category === dp.category &&
+      baseSkuOf(p.sku) === dpBaseSku &&
+      (!hasColorFamily || p.color === dp.color)
+    );
+    // Build { size, product } pairs; preserve insertion order, deduplicate sizes
+    const sizeFamily = (() => {
+      const seen = new Set();
+      const result = [];
+      for (const sib of sizeSiblings) {
+        for (const s of (sib.size || '').split(',').map(x => x.trim()).filter(Boolean)) {
+          if (!seen.has(s)) { seen.add(s); result.push({ size: s, product: sib }); }
+        }
+      }
+      return result;
+    })();
+    const hasSizeFamily = sizeFamily.length > 0;
     // Exclude colour siblings from "You May Also Like" since they're shown in the colour picker above
     const similar = products.filter(p => p.category === dp.category && p.id !== dp.id && !(hasColorFamily && baseSkuOf(p.sku) === dpBaseSku)).slice(0, 8);
     return (
@@ -8031,7 +8205,15 @@ function ShopApp() {
           <div className="s2-detail-info">
             <div className="s2-detail-cat">{dp.category}{dp.subcategory ? ` · ${dp.subcategory}` : ''}</div>
             <h1 className="s2-detail-name">{dp.name}</h1>
-            <div className="s2-detail-price">₹{Number(dp.sellingPrice).toFixed(2)}</div>
+            {dp.discountedPrice != null ? (
+              <div style={{display:'flex',alignItems:'baseline',gap:10,flexWrap:'wrap'}}>
+                <div className="s2-detail-price">₹{Number(dp.discountedPrice).toFixed(2)}</div>
+                <div style={{fontSize:16,color:'#9ca3af',textDecoration:'line-through'}}>₹{Number(dp.sellingPrice).toFixed(2)}</div>
+                <div style={{fontSize:12,background:'#fef3c7',color:'#b45309',padding:'2px 10px',borderRadius:99,fontWeight:700}}>{dp.discountLabel}</div>
+              </div>
+            ) : (
+              <div className="s2-detail-price">₹{Number(dp.sellingPrice).toFixed(2)}</div>
+            )}
 
             {(hasColorFamily || dp.color) && (
               <div className="s2-detail-attr-block">
@@ -8063,17 +8245,29 @@ function ShopApp() {
               </div>
             )}
 
-            {dp.size && (
+            {hasSizeFamily && (
               <div className="s2-detail-attr-block">
                 <div className="s2-attr-lbl">Size</div>
                 <div className="s2-detail-size-chips">
-                  {dp.size.split(',').filter(Boolean).map(s => s.trim()).map(s => (
-                    <button key={s}
-                      className={`s2-size-chip ${detailSize === s ? 's2-size-chip-on' : ''}`}
-                      onClick={() => setDetailSize(detailSize === s ? '' : s)}>
-                      {s}
-                    </button>
-                  ))}
+                  {sizeFamily.map(({ size: s, product: sibP }) => {
+                    const isSelected = detailSize === s;
+                    const isOos = sibP.stockQty === 0;
+                    return (
+                      <button key={s}
+                        className={`s2-size-chip ${isSelected ? 's2-size-chip-on' : ''} ${isOos ? 's2-size-chip-oos' : ''}`}
+                        onClick={() => {
+                          if (sibP.id !== dp.id) {
+                            setDetailProduct(sibP);
+                            setDetailQty(1);
+                            setDetailImgIdx(0);
+                          }
+                          setDetailSize(s);
+                        }}>
+                        {s}
+                        {isOos && <span style={{fontSize:'0.72em',marginLeft:3,opacity:0.65}}>(Out)</span>}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -8501,8 +8695,15 @@ function ShopApp() {
                         {p.description && <div className="s2-card-desc" style={{fontSize:11,color:'#6b7280',lineHeight:1.4,margin:'2px 0 4px',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{p.description}</div>}
                         {variantLabel(p) && <div className="s2-card-meta">{variantLabel(p)}</div>}
                         <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                          <div className={`s2-card-price ${p.stockQty === 0 ? 's2-price-soldout' : ''}`}>₹{Number(p.sellingPrice).toFixed(2)}</div>
-                          {p.mrp && Number(p.mrp) > Number(p.sellingPrice) && (
+                          <div className={`s2-card-price ${p.stockQty === 0 ? 's2-price-soldout' : ''}`}>
+                            ₹{Number(p.discountedPrice ?? p.sellingPrice).toFixed(2)}
+                          </div>
+                          {p.discountedPrice != null ? (
+                            <>
+                              <div style={{fontSize:11,color:'#9ca3af',textDecoration:'line-through'}}>₹{Number(p.sellingPrice).toFixed(0)}</div>
+                              <div style={{fontSize:10,background:'#fef3c7',color:'#b45309',padding:'1px 6px',borderRadius:99,fontWeight:700}}>{p.discountLabel}</div>
+                            </>
+                          ) : p.mrp && Number(p.mrp) > Number(p.sellingPrice) && (
                             <>
                               <div style={{fontSize:11,color:'#9ca3af',textDecoration:'line-through'}}>₹{Number(p.mrp).toFixed(0)}</div>
                               <div style={{fontSize:10,background:'#dcfce7',color:'#15803d',padding:'1px 6px',borderRadius:99,fontWeight:700}}>
@@ -8853,7 +9054,10 @@ function ShopApp() {
             </div>
           </div>
         </div>
-        <div className="s2-footer-bottom">© {new Date().getFullYear()} {shopName} · All rights reserved</div>
+        <div className="s2-footer-bottom">
+          © {new Date().getFullYear()} {shopName} · All rights reserved
+          <span className="s2-powered-by"> · Powered by <a href="https://theshopclaude.com" target="_blank" rel="noopener noreferrer" className="s2-powered-link">ShopClaude</a></span>
+        </div>
       </footer>
 
     </div>

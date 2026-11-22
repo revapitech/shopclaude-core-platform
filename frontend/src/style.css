@@ -2470,3 +2470,60 @@ section {
   .s2-offers-festive-wrap { padding: 36px 0 44px; }
   .s2-offer-poster { height: 150px; }
 }
+
+/* ── Powered by ShopClaude ── */
+.s2-powered-by { font-size: 11px; color: #444; }
+.s2-powered-link { color: #F5971E; text-decoration: none; font-weight: 700; }
+.s2-powered-link:hover { text-decoration: underline; }
+
+/* ── Size chip OOS state ── */
+.s2-size-chip-oos { opacity: 0.5; text-decoration: line-through; cursor: default; }
+
+/* ── Storefront mobile: additional fixes ── */
+@media (max-width: 480px) {
+  /* Header: logo smaller, cart btn tighter */
+  .s2-logo { width: 36px; height: 36px; }
+  .s2-header-inner { padding: 8px 12px; gap: 8px; }
+  .s2-search-bar { font-size: 13px; padding: 6px 12px; }
+  .s2-cart-icon-btn { padding: 6px 9px; font-size: 13px; }
+
+  /* Footer: stack brand above links */
+  .s2-footer-inner { flex-direction: column; gap: 20px; padding: 24px 16px 20px; }
+  .s2-footer-links { flex-direction: row; gap: 32px; }
+  .s2-footer-brand { gap: 10px; }
+  .s2-footer-name { font-size: 15px; }
+  .s2-footer-bottom { font-size: 11px; padding: 12px 16px; }
+  .s2-powered-by { display: block; margin-top: 4px; }
+
+  /* Product detail page */
+  .s2-detail-name { font-size: 20px; }
+  .s2-detail-price { font-size: 20px; }
+  .s2-detail-attr-block { gap: 8px; }
+  .s2-detail-atc { padding: 12px; font-size: 14px; }
+  .s2-detail-buy { padding: 11px; font-size: 14px; }
+  .s2-similar-section { padding: 20px 12px; }
+
+  /* Cart drawer */
+  .s2-drawer-hdr { padding: 14px 16px; }
+  .s2-cart-items { padding: 10px 12px; }
+
+  /* Checkout modal */
+  .s2-checkout-hdr { padding: 14px 16px; }
+  .s2-checkout-body { padding: 14px 16px 20px; }
+  .s2-form-row { gap: 8px; }
+  .s2-checkout-submit { font-size: 14px; padding: 13px; }
+
+  /* Offer grid */
+  .s2-offers-grid { grid-template-columns: 1fr; gap: 12px; }
+  .s2-offers-section { padding: 20px 12px 0; }
+
+  /* Track order */
+  .s2-track-page { padding: 20px 12px; }
+  .s2-track-card { padding: 14px; }
+}
+
+@media (max-width: 360px) {
+  .s2-grid { grid-template-columns: 1fr; gap: 12px; }
+  .s2-card-name { font-size: 13px; }
+  .s2-detail-wrap { padding: 12px 10px; }
+}
