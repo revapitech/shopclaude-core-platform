@@ -568,6 +568,20 @@ function Login({ onLogin }) {
   );
 }
 
+// Password-style input with a show/hide control (used for the Razorpay key secret).
+function SecretInput({ value, onChange, placeholder }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="ss-secret">
+      <input type={show ? 'text' : 'password'} value={value} onChange={e => onChange(e.target.value)}
+        placeholder={placeholder} autoComplete="new-password" spellCheck={false} />
+      <button type="button" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide key secret' : 'Show key secret'}>
+        {show ? 'Hide' : 'Show'}
+      </button>
+    </div>
+  );
+}
+
 function fmt(val) {
   const n = Number(val);
   return isNaN(n) ? '0.00' : n.toFixed(2);
@@ -3091,6 +3105,9 @@ function App() {
           )}
         </section>
         <div className="pos-left">
+        <div className="add-product-bar">
+          <button className="add-product-btn" onClick={() => setShowAddForm(true)}>+ Add Product</button>
+        </div>
         {/* ── Quick Billing – Products catalogue ── */}
         {(() => {
           // Helpers (scoped to avoid polluting outer scope)
@@ -3570,7 +3587,6 @@ function App() {
           <section className="inventory-section">
             <div className="inventory-header">
               <h2>Inventory</h2>
-              <button style={{background:'#1E3A5F',color:'#fff',border:'none',borderRadius:6,padding:'7px 14px',fontSize:13,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}} onClick={() => setShowAddForm(true)}>+ Add Product</button>
               <input className="search-input" placeholder="Search by name, SKU, colour or barcode..."
                 value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} />
               <button className="export-csv-btn" onClick={() => exportToCsv('inventory.csv', filteredProducts, [
@@ -6741,19 +6757,28 @@ function App() {
         const closeModal = () => { setShopEditModal(null); setShopLogoFile(null); setShopLogoPreview(null); setShopBannerFile(null); setShopBannerPreview(null); };
         return (
         <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal-box shop-settings-box" style={{width:820, maxWidth:'94vw'}} onClick={e => e.stopPropagation()}>
-            <h3>Shop Settings</h3>
-
-            <div className="shop-settings-grid">
-              {/* Logo upload */}
+          <div className="modal-box shop-settings-box ss-box" role="dialog" aria-label="Shop Settings" onClick={e => e.stopPropagation()}>
+            <div className="ss-head">
               <div>
-                <label className="modal-label">Shop Logo</label>
-                <div style={{display:'flex',alignItems:'center',gap:14,margin:'8px 0'}}>
-                  <img src={shopLogoPreview || logoSrc} alt="logo"
-                    style={{width:64,height:64,objectFit:'contain',borderRadius:10,border:'1.5px solid #e5e7eb',background:'#f9fafb',flexShrink:0}} />
-                  <div>
-                    <label style={{display:'inline-block',padding:'7px 14px',background:'#1E3A5F',color:'#fff',borderRadius:7,cursor:'pointer',fontSize:13,fontWeight:600}}>
-                      📁 Choose Image
+                <h3>Shop Settings</h3>
+                <p>Manage your branding, contact details, payouts and tax setup.</p>
+              </div>
+              <button type="button" className="ss-x" onClick={closeModal} aria-label="Close">✕</button>
+            </div>
+
+            <div className="ss-body">
+              {/* ── Shop branding ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head">
+                  <h4>Shop Branding</h4>
+                  <p>Your logo and banner appear on your storefront and login page.</p>
+                </div>
+                <div className="ss-media">
+                  <div className="ss-field">
+                    <span className="ss-label">Shop logo</span>
+                    <div className="ss-logo-box"><img src={shopLogoPreview || logoSrc} alt="Shop logo" /></div>
+                    <label className="ss-btn-up">
+                      {shopLogoPreview || shopLogoFile ? 'Change logo' : 'Choose logo'}
                       <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
                         const f = e.target.files?.[0];
                         if (!f) return;
@@ -6761,85 +6786,117 @@ function App() {
                         setShopLogoPreview(URL.createObjectURL(f));
                       }} />
                     </label>
-                    <div style={{fontSize:11.5,color:'#9ca3af',marginTop:5}}>PNG, JPG, SVG</div>
+                    <span className="ss-hint"><b>512 × 512 px</b> · square (1:1) · PNG, JPG or SVG · up to 10 MB</span>
+                  </div>
+
+                  <div className="ss-field">
+                    <span className="ss-label">Store banner</span>
+                    <div className={`ss-banner-box${(shopBannerPreview || bannerSrc) ? '' : ' empty'}`}>
+                      {(shopBannerPreview || bannerSrc)
+                        ? <img src={shopBannerPreview || bannerSrc} alt="Store banner" />
+                        : <span>No banner set</span>}
+                      {shopBannerPreview && <span className="ss-new">NEW</span>}
+                    </div>
+                    <label className="ss-btn-up">
+                      {(shopBannerPreview || bannerSrc) ? 'Change banner' : 'Upload banner'}
+                      <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        setShopBannerFile(f);
+                        setShopBannerPreview(URL.createObjectURL(f));
+                      }} />
+                    </label>
+                    <span className="ss-hint"><b>1600 × 500 px</b> · wide (16:5) · PNG or JPG · up to 10 MB. Keep key content centred — edges may be cropped on small screens.</span>
                   </div>
                 </div>
-              </div>
+              </section>
 
-              {/* Banner upload */}
-              <div>
-                <label className="modal-label">Store Banner</label>
-                <div style={{margin:'8px 0'}}>
-                  {(shopBannerPreview || bannerSrc) ? (
-                    <div style={{marginBottom:8,borderRadius:8,overflow:'hidden',border:'1.5px solid #e5e7eb',height:64,position:'relative'}}>
-                      <img src={shopBannerPreview || bannerSrc} alt="banner"
-                        style={{width:'100%',height:'100%',objectFit:'cover'}} />
-                      {shopBannerPreview && <span style={{position:'absolute',top:4,right:6,background:'#16a34a',color:'#fff',fontSize:9,padding:'2px 6px',borderRadius:99,fontWeight:700}}>NEW</span>}
-                    </div>
-                  ) : (
-                    <div style={{marginBottom:8,height:64,border:'2px dashed #d1d5db',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',color:'#9ca3af',fontSize:11.5}}>
-                      No banner set
-                    </div>
-                  )}
-                  <label style={{display:'inline-block',padding:'7px 14px',background:'#1E3A5F',color:'#fff',borderRadius:7,cursor:'pointer',fontSize:13,fontWeight:600}}>
-                    🖼️ {bannerSrc ? 'Change Banner' : 'Upload Banner'}
-                    <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      setShopBannerFile(f);
-                      setShopBannerPreview(URL.createObjectURL(f));
-                    }} />
-                  </label>
+              {/* ── Shop details ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head">
+                  <h4>Shop Details</h4>
+                  <p>Basic information customers and shipping labels use.</p>
                 </div>
-              </div>
+                <div className="ss-grid">
+                  <div className="ss-field">
+                    <label className="ss-label">Shop name</label>
+                    <input value={shopEditModal.name} onChange={e => setShopEditModal(m => ({...m, name: e.target.value}))}
+                      placeholder="Enter your shop name" autoFocus />
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">WhatsApp / contact number</label>
+                    <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile number"
+                      value={shopEditModal.phoneNumber || ''}
+                      onChange={e => setShopEditModal(m => ({...m, phoneNumber: e.target.value.replace(/\D/g,'').slice(0,10)}))} />
+                    <span className="ss-hint">Shown on your storefront.</span>
+                  </div>
+                  <div className="ss-field ss-full">
+                    <label className="ss-label">Shop address</label>
+                    <textarea value={shopEditModal.address || ''} onChange={e => setShopEditModal(m => ({...m, address: e.target.value}))}
+                      rows={3} placeholder={'e.g.\n12 MG Road, Indiranagar\nBengaluru, Karnataka - 560038\nPhone: 9876543210'}
+                      style={{resize:'vertical'}} />
+                    <span className="ss-hint">Printed on shipping labels.</span>
+                  </div>
+                </div>
+              </section>
 
-              {/* Shop name */}
-              <div>
-                <label className="modal-label">Shop Name</label>
-                <input value={shopEditModal.name} onChange={e => setShopEditModal(m => ({...m, name: e.target.value}))}
-                  placeholder="Enter your shop name" autoFocus style={{marginTop:4}} />
-              </div>
+              {/* ── Bank details ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head">
+                  <h4>Bank Details</h4>
+                  <p>Used for payouts.</p>
+                </div>
+                <div className="ss-grid">
+                  <div className="ss-field">
+                    <label className="ss-label">Account number</label>
+                    <input value={shopEditModal.bankAccountNumber || ''} onChange={e => setShopEditModal(m => ({...m, bankAccountNumber: e.target.value}))}
+                      placeholder="Enter account number" />
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">Confirm account number</label>
+                    <input value={shopEditModal.confirmBankAccountNumber || ''} onChange={e => setShopEditModal(m => ({...m, confirmBankAccountNumber: e.target.value}))}
+                      placeholder="Re-enter account number" />
+                    {shopEditModal.confirmBankAccountNumber && shopEditModal.confirmBankAccountNumber !== (shopEditModal.bankAccountNumber || '') &&
+                      <span className="ss-err">Account numbers don't match</span>}
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">Account holder name</label>
+                    <input value={shopEditModal.bankAccountHolderName || ''} onChange={e => setShopEditModal(m => ({...m, bankAccountHolderName: e.target.value}))}
+                      placeholder="Name as on bank account" />
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">IFSC code</label>
+                    <input value={shopEditModal.bankIfscCode || ''} onChange={e => setShopEditModal(m => ({...m, bankIfscCode: e.target.value.toUpperCase()}))}
+                      placeholder="e.g. SBIN0001234" />
+                  </div>
+                  <div className="ss-field">
+                    <label className="ss-label">Branch name</label>
+                    <input value={shopEditModal.bankBranchName || ''} onChange={e => setShopEditModal(m => ({...m, bankBranchName: e.target.value}))}
+                      placeholder="Enter branch name" />
+                  </div>
+                </div>
+              </section>
 
-              <div>
-                <label className="modal-label">WhatsApp / Contact Number <span style={{fontWeight:400,color:'#9ca3af'}}>(shown on storefront)</span></label>
-                <input type="tel" inputMode="numeric" maxLength={10} placeholder="10-digit mobile number"
-                  value={shopEditModal.phoneNumber || ''}
-                  onChange={e => setShopEditModal(m => ({...m, phoneNumber: e.target.value.replace(/\D/g,'').slice(0,10)}))}
-                  style={{marginTop:4}} />
-              </div>
-            </div>
-
-            {/* Shop address — full width */}
-            <label className="modal-label" style={{marginTop:14}}>Shop Address <span style={{fontWeight:400,color:'#9ca3af'}}>(used on shipping labels)</span></label>
-            <textarea value={shopEditModal.address || ''} onChange={e => setShopEditModal(m => ({...m, address: e.target.value}))}
-              rows={3} placeholder={'e.g.\n12 MG Road, Indiranagar\nBengaluru, Karnataka - 560038\nPhone: 9876543210'}
-              style={{marginTop:4,width:'100%',padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,fontFamily:'inherit',resize:'vertical',boxSizing:'border-box',outline:'none'}}
-              onFocus={e=>e.target.style.borderColor='#1E3A5F'} onBlur={e=>e.target.style.borderColor='#e5e7eb'} />
-
-            {/* Bank details */}
-            <label className="modal-label" style={{marginTop:16}}>Bank Details <span style={{fontWeight:400,color:'#9ca3af'}}>(for payouts)</span></label>
-            <div className="shop-settings-grid" style={{marginTop:6}}>
-              <input value={shopEditModal.bankAccountNumber || ''} onChange={e => setShopEditModal(m => ({...m, bankAccountNumber: e.target.value}))}
-                placeholder="Account Number" />
-              <input value={shopEditModal.confirmBankAccountNumber || ''} onChange={e => setShopEditModal(m => ({...m, confirmBankAccountNumber: e.target.value}))}
-                placeholder="Confirm Account Number" />
-              <input value={shopEditModal.bankAccountHolderName || ''} onChange={e => setShopEditModal(m => ({...m, bankAccountHolderName: e.target.value}))}
-                placeholder="Account Holder Name" />
-              <input value={shopEditModal.bankIfscCode || ''} onChange={e => setShopEditModal(m => ({...m, bankIfscCode: e.target.value.toUpperCase()}))}
-                placeholder="IFSC Code" />
-              <input value={shopEditModal.bankBranchName || ''} onChange={e => setShopEditModal(m => ({...m, bankBranchName: e.target.value}))}
-                placeholder="Branch Name" />
-            </div>
-
-            {/* Razorpay — customer payments settle straight to the shop's own account, not ours */}
-            <label className="modal-label" style={{marginTop:16,display:'flex',alignItems:'center',gap:6}}>
-              Razorpay Payments <span style={{fontWeight:400,color:'#9ca3af'}}>(so your customers' payments go to you)</span>
-              <button type="button" onClick={() => setRzpHelpOpen(v => !v)} title="How do I connect Razorpay?"
-                style={{width:18,height:18,minWidth:18,padding:0,margin:0,borderRadius:'50%',border:'1.5px solid #1E3A5F',background: rzpHelpOpen ? '#1E3A5F' : '#fff',color: rzpHelpOpen ? '#fff' : '#1E3A5F',fontSize:11,fontWeight:700,lineHeight:1,cursor:'pointer',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>
-                i
-              </button>
-            </label>
-
+              {/* ── Razorpay — customer payments settle straight to the shop's own account, not ours ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head ss-sec-head-row">
+                  <div>
+                    <h4 style={{display:'flex',alignItems:'center',gap:8}}>
+                      Razorpay Payments
+                      <button type="button" className={`ss-info${rzpHelpOpen ? ' on' : ''}`} onClick={() => setRzpHelpOpen(v => !v)}
+                        title="How do I connect Razorpay?" aria-label="How do I connect Razorpay?">i</button>
+                    </h4>
+                    <p>Connect your own Razorpay account so customer payments go straight to you.</p>
+                  </div>
+                  <span className={`ss-status ${tenantInfo?.razorpayMerchantConnected ? 'ok' : 'warn'}`}>
+                    <i className="ss-dot" />
+                    {tenantInfo?.razorpayMerchantConnected ? 'Connected' : 'Not connected'}
+                  </span>
+                </div>
+                {!tenantInfo?.razorpayMerchantConnected &&
+                  <div className="ss-callout warn">⚠ Customers can't check out until Razorpay is connected.</div>}
+                {tenantInfo?.razorpayMerchantConnected &&
+                  <div className="ss-callout ok">✅ Payments settle directly to your account.</div>}
             {rzpHelpOpen && (
               <div className="rzp-help-box">
                 <strong>Steps to connect your Razorpay account:</strong>
@@ -6854,55 +6911,64 @@ function App() {
                 <p>Once connected, every payment your customers make on your shop goes directly into your own Razorpay account and settles to your bank — it never passes through or is visible to us.</p>
               </div>
             )}
-
-            <div style={{fontSize:12,fontWeight:600,margin:'2px 0 8px',color: tenantInfo?.razorpayMerchantConnected ? '#1e7e34' : '#e65100'}}>
-              {tenantInfo?.razorpayMerchantConnected ? '✅ Connected — payments settle to your account' : '⚠ Not connected — customers can\'t check out yet'}
-            </div>
-            <div className="shop-settings-grid">
-              <input value={shopEditModal.razorpayMerchantKeyId || ''} onChange={e => setShopEditModal(m => ({...m, razorpayMerchantKeyId: e.target.value}))}
-                placeholder="Razorpay Key ID (rzp_live_...)" />
-              <input type="password" value={shopEditModal.razorpayMerchantKeySecret || ''} onChange={e => setShopEditModal(m => ({...m, razorpayMerchantKeySecret: e.target.value}))}
-                placeholder={tenantInfo?.razorpayMerchantConnected ? 'Key Secret (leave blank to keep current)' : 'Razorpay Key Secret'} />
-            </div>
-            <p style={{fontSize:11.5,color:'#9ca3af',margin:'6px 0 0'}}>
-              Get these from your own Razorpay Dashboard → Settings → API Keys. We never see or store your sales money — it goes straight to your Razorpay account.
-            </p>
-
-            {/* GST Settings */}
-            <label className="modal-label" style={{marginTop:16}}>GST Settings</label>
-            <div style={{background:'#f8faff',border:'1.5px solid #dbeafe',borderRadius:8,padding:'12px 14px',marginTop:4,display:'flex',flexDirection:'column',gap:10}}>
-              <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13,fontWeight:600,color:'#1E3A5F'}}>
-                <input type="checkbox" checked={shopEditModal.gstRegistered || false}
-                  onChange={e => setShopEditModal(m => ({...m, gstRegistered: e.target.checked}))} />
-                GST Registered Business
-              </label>
-              {shopEditModal.gstRegistered && (
-                <>
-                  <div>
-                    <label className="modal-label">GSTIN</label>
-                    <input value={shopEditModal.gstin || ''} onChange={e => setShopEditModal(m => ({...m, gstin: e.target.value.toUpperCase()}))}
-                      placeholder="e.g. 29ABCDE1234F1Z5" maxLength={15} style={{marginTop:4,fontFamily:'monospace',letterSpacing:1}} />
+                <div className="ss-grid">
+                  <div className="ss-field">
+                    <label className="ss-label">Key ID</label>
+                    <input value={shopEditModal.razorpayMerchantKeyId || ''} onChange={e => setShopEditModal(m => ({...m, razorpayMerchantKeyId: e.target.value}))}
+                      placeholder="rzp_live_..." autoComplete="off" spellCheck={false} />
                   </div>
-                  <div>
-                    <label className="modal-label">Supply Type</label>
-                    <select value={shopEditModal.supplyType || 'INTRA'} onChange={e => setShopEditModal(m => ({...m, supplyType: e.target.value}))}
-                      style={{marginTop:4,padding:'8px 10px',border:'1.5px solid #e5e7eb',borderRadius:8,fontSize:13,background:'#fff',outline:'none',width:'100%'}}>
-                      <option value="INTRA">Intra-State (CGST + SGST)</option>
-                      <option value="INTER">Inter-State (IGST)</option>
-                    </select>
+                  <div className="ss-field">
+                    <label className="ss-label">Key secret</label>
+                    <SecretInput value={shopEditModal.razorpayMerchantKeySecret || ''} onChange={v => setShopEditModal(m => ({...m, razorpayMerchantKeySecret: v}))}
+                      placeholder={tenantInfo?.razorpayMerchantConnected ? 'Leave blank to keep current' : 'Enter Razorpay key secret'} />
                   </div>
-                </>
-              )}
-            </div>
-            <p style={{fontSize:11.5,color:'#9ca3af',margin:'4px 0 0'}}>
-              When enabled, GST will be computed on every POS bill and shown on receipts. Set the applicable rate per product in the Products page.
-            </p>
+                </div>
+                <p className="ss-hint" style={{margin:'10px 0 0'}}>
+                  🔒 Get these from your own Razorpay Dashboard → Settings → API Keys. We never see or store your sales money — it goes straight to your Razorpay account.
+                </p>
+              </section>
 
-            <div style={{display:'flex',gap:10,marginTop:18}}>
-              <button className="btn-primary" onClick={saveShopSettings} disabled={shopEditSaving} style={{flex:1}}>
-                {shopEditSaving ? 'Saving…' : 'Save'}
+              {/* ── GST ── */}
+              <section className="ss-sec">
+                <div className="ss-sec-head">
+                  <h4>GST Settings</h4>
+                  <p>Set the applicable GST rate per product in the Products page.</p>
+                </div>
+                <label className="ss-toggle-row">
+                  <span>
+                    <b>GST registered business</b>
+                    <small>When on, GST is computed on every POS bill and shown on receipts.</small>
+                  </span>
+                  <span className="ss-switch">
+                    <input type="checkbox" role="switch" checked={shopEditModal.gstRegistered || false}
+                      onChange={e => setShopEditModal(m => ({...m, gstRegistered: e.target.checked}))} />
+                    <span className="ss-slider" />
+                  </span>
+                </label>
+                {shopEditModal.gstRegistered && (
+                  <div className="ss-grid" style={{marginTop:14}}>
+                    <div className="ss-field">
+                      <label className="ss-label">GSTIN</label>
+                      <input value={shopEditModal.gstin || ''} onChange={e => setShopEditModal(m => ({...m, gstin: e.target.value.toUpperCase()}))}
+                        placeholder="e.g. 29ABCDE1234F1Z5" maxLength={15} style={{fontFamily:'monospace',letterSpacing:1}} />
+                    </div>
+                    <div className="ss-field">
+                      <label className="ss-label">Supply type</label>
+                      <select value={shopEditModal.supplyType || 'INTRA'} onChange={e => setShopEditModal(m => ({...m, supplyType: e.target.value}))}>
+                        <option value="INTRA">Intra-State (CGST + SGST)</option>
+                        <option value="INTER">Inter-State (IGST)</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <div className="ss-foot">
+              <button className="btn-secondary ss-cancel" onClick={closeModal}>Cancel</button>
+              <button className="btn-primary ss-save" onClick={saveShopSettings} disabled={shopEditSaving}>
+                {shopEditSaving ? 'Saving…' : 'Save changes'}
               </button>
-              <button className="btn-secondary" onClick={closeModal} style={{flex:1}}>Cancel</button>
             </div>
           </div>
         </div>
