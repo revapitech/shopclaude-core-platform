@@ -81,6 +81,25 @@ public class Product {
     @Column(name = "variant_images", columnDefinition = "TEXT")
     private String variantImages;
 
+    // Limited-time discount — applied on the storefront only.
+    // discountType: "PERCENT" (e.g. 10 = 10% off) or "FLAT" (e.g. 50 = ₹50 off)
+    // Active when discountEnabled=true AND current time is within [discountStart, discountEnd].
+    // Null start/end = open-ended on that side.
+    @Column(name = "discount_enabled")
+    private Boolean discountEnabled;
+
+    @Column(name = "discount_type")
+    private String discountType;
+
+    @Column(name = "discount_value", precision = 10, scale = 2)
+    private java.math.BigDecimal discountValue;
+
+    @Column(name = "discount_start")
+    private LocalDateTime discountStart;
+
+    @Column(name = "discount_end")
+    private LocalDateTime discountEnd;
+
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();

@@ -29,5 +29,10 @@ public record ProductRequest(
         String hsnCode,
         BigDecimal gstRate,
         Boolean trackStock,
-        String variantImages
+        String variantImages,
+        Boolean discountEnabled,
+        String discountType,
+        java.math.BigDecimal discountValue,
+        java.time.LocalDateTime discountStart,
+        java.time.LocalDateTime discountEnd
 ) {}
