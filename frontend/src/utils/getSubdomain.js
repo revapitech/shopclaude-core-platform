@@ -135,10 +135,15 @@ export function getSubdomain() {
   return resolveSubdomain(host);
 }
 
-/** A tenant's store URL — the local override on localhost, the real subdomain otherwise. */
+/** A tenant's store URL — env-aware so signup on dev.theshopclaude.com links to the DEV tenant, not production. */
 export function tenantHomeUrl(sub) {
-  if (isLoopbackHost(window.location.hostname)) {
+  const host = window.location.hostname;
+  if (isLoopbackHost(host)) {
     return `${window.location.origin}/?tenant=${encodeURIComponent(sub)}`;
+  }
+  const h = host.toLowerCase().replace(/\.$/, '');
+  if (h === 'dev.theshopclaude.com' || h.endsWith('.dev.theshopclaude.com')) {
+    return `https://${sub}.dev.theshopclaude.com`;
   }
   return `https://${sub}.theshopclaude.com`;
 }

@@ -29,6 +29,7 @@ public class ProductController {
     @GetMapping("/barcode/{barcode}")
     public ResponseEntity<Product> findByBarcode(@PathVariable String barcode) {
         return productService.findByBarcodeOpt(barcode)
+                .or(() -> productService.findBySkuOpt(barcode))
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }

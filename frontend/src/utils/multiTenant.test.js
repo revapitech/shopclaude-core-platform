@@ -69,6 +69,52 @@ describe('two shops resolve independently', () => {
   });
 });
 
+describe('tenantHomeUrl resolves to the correct environment', () => {
+  it('localhost → /?tenant=sub (local override URL)', async () => {
+    stubBrowser('localhost');
+    const { tenantHomeUrl } = await import('./getSubdomain.js');
+    expect(tenantHomeUrl('newshop')).toBe('https://localhost/?tenant=newshop');
+  });
+
+  it('dev.theshopclaude.com → https://sub.dev.theshopclaude.com (stays on DEV)', async () => {
+    stubBrowser('dev.theshopclaude.com');
+    const { tenantHomeUrl } = await import('./getSubdomain.js');
+    expect(tenantHomeUrl('abhijithstore')).toBe('https://abhijithstore.dev.theshopclaude.com');
+  });
+
+  it('sub.dev.theshopclaude.com → https://newshop.dev.theshopclaude.com (stays on DEV)', async () => {
+    stubBrowser('existing.dev.theshopclaude.com');
+    const { tenantHomeUrl } = await import('./getSubdomain.js');
+    expect(tenantHomeUrl('newshop')).toBe('https://newshop.dev.theshopclaude.com');
+  });
+
+  it('production → https://sub.theshopclaude.com', async () => {
+    stubBrowser('admin.theshopclaude.com');
+    const { tenantHomeUrl } = await import('./getSubdomain.js');
+    expect(tenantHomeUrl('newshop')).toBe('https://newshop.theshopclaude.com');
+  });
+});
+
+describe('getSubdomain extracts tenant correctly from DEV tenant URLs', () => {
+  it('abhijithstore.dev.theshopclaude.com → "abhijithstore"', async () => {
+    stubBrowser('abhijithstore.dev.theshopclaude.com');
+    const { getSubdomain } = await import('./getSubdomain.js');
+    expect(getSubdomain()).toBe('abhijithstore');
+  });
+
+  it('kaklistore.dev.theshopclaude.com → "kaklistore"', async () => {
+    stubBrowser('kaklistore.dev.theshopclaude.com');
+    const { getSubdomain } = await import('./getSubdomain.js');
+    expect(getSubdomain()).toBe('kaklistore');
+  });
+
+  it('dev.theshopclaude.com root → "www" (landing page, no tenant)', async () => {
+    stubBrowser('dev.theshopclaude.com');
+    const { getSubdomain } = await import('./getSubdomain.js');
+    expect(getSubdomain()).toBe('www');
+  });
+});
+
 describe('rental feature is a per-tenant flag, not a shop name check', () => {
   it('honours the backend flag over everything else', async () => {
     const { isRentalEnabled } = await import('./tenant.js');

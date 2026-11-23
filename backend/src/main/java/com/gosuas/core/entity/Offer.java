@@ -5,6 +5,7 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.UUID;
 
 @Entity
@@ -78,7 +79,7 @@ public class Offer {
     /** Computed status — never persisted, always derived at runtime. */
     public String computeStatus() {
         if (!Boolean.TRUE.equals(active)) return "INACTIVE";
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Kolkata"));
         if (startDateTime != null && startDateTime.isAfter(now)) return "SCHEDULED";
         if (endDateTime   != null && endDateTime.isBefore(now))  return "EXPIRED";
         if (startDateTime == null && endDateTime == null)        return "DRAFT";

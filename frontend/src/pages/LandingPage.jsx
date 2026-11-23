@@ -173,7 +173,7 @@ function SignupModal({ initialShopName = '', initialPlan = 'STARTER', onClose, o
 
   const shopUrl = domainType === 'custom' && customDomain
     ? `https://${customDomain}`
-    : `https://${createdSubdomain}.theshopclaude.com`;
+    : tenantHomeUrl(createdSubdomain);
 
   return (
     <div className="sc-overlay" onClick={e => e.target === e.currentTarget && onClose()}>

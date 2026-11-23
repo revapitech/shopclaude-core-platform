@@ -1424,7 +1424,7 @@ img { width: 140px; height: 44px; object-fit: contain; }
   table { font-size: 12px; }
   th { padding: 8px 6px; }
   td { padding: 6px 6px; }
-  img { width: 80px; height: 30px; }
+  td img { width: 80px; height: 30px; }
 
   /* ── Edit prices row: 2-col on mobile ── */
   .edit-prices-row { grid-template-columns: 1fr 1fr; }
@@ -2470,8 +2470,6 @@ section {
   .s2-offers-festive-wrap { padding: 36px 0 44px; }
   .s2-offer-poster { height: 150px; }
 }
-<<<<<<< Updated upstream
-=======
 
 /* ── Shop Settings modal ── */
 .ss-box { width:820px; max-width:94vw; padding:0 !important; display:flex; flex-direction:column; overflow:hidden !important; max-height:90vh; border-radius:16px; }
@@ -2582,6 +2580,7 @@ section {
   .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+
 /* ── Inventory table (11 columns, full width, no cramped wrapping) ── */
 .inventory-fullwidth { margin-top: 20px; }
 .inv-table { table-layout: auto; min-width: 1100px; }
@@ -2596,4 +2595,4 @@ img.inv-barcode { display: block; width: 100px; height: 34px; object-fit: contai
   .inventory-fullwidth { margin-top: 14px; }
   .inv-table { min-width: 1000px; }
 }
->>>>>>> Stashed changes
+
