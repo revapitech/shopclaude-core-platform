@@ -25,6 +25,7 @@ spring:
             enable: true
             required: true
   datasource:
+
     driverClassName: org.postgresql.Driver
     url: ${DB_URL:jdbc:postgresql://localhost:5432/shopclaude_dev_db}
     username: ${DB_USERNAME:shopclaude_dev_user}
