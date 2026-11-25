@@ -3584,7 +3584,31 @@ function App() {
           </div>
         )}
 
-<<<<<<< Updated upstream
+          {/* ── Digital PDF Products ── */}
+          {digitalProducts.length > 0 && (
+            <section style={{marginTop:0}}>
+              <h2 style={{display:'flex',alignItems:'center',gap:8}}>📄 Digital PDF Products</h2>
+              <div style={{overflowX:'auto'}}>
+                <table className="data-table">
+                  <thead><tr><th>Title</th><th>Description</th><th>Price</th><th>Password</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {digitalProducts.map(d => (
+                      <tr key={d.id}>
+                        <td><span style={{marginRight:6}}>{d.coverEmoji||'📄'}</span>{d.title}</td>
+                        <td style={{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.description||'—'}</td>
+                        <td>₹{d.price}</td>
+                        <td>{d.passwordHash ? '🔒 Protected' : '—'}</td>
+                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${d.title}"?`)) axios.delete(`${API}/digital-products/${d.id}`).then(() => { loadDigitalProducts(); showToast('Digital product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑 Delete</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+        </div>{/* end pos-left */}
+        </div>{/* end pos-layout */}
+
           <section className="inventory-section">
             <div className="inventory-header">
               <h2>Inventory</h2>
@@ -3714,99 +3738,7 @@ function App() {
               </div>
             )}
           </section>
-=======
->>>>>>> Stashed changes
 
-          {/* ── Digital PDF Products ── */}
-          {digitalProducts.length > 0 && (
-            <section style={{marginTop:0}}>
-              <h2 style={{display:'flex',alignItems:'center',gap:8}}>📄 Digital PDF Products</h2>
-              <div style={{overflowX:'auto'}}>
-                <table className="data-table">
-                  <thead><tr><th>Title</th><th>Description</th><th>Price</th><th>Password</th><th>Action</th></tr></thead>
-                  <tbody>
-                    {digitalProducts.map(d => (
-                      <tr key={d.id}>
-                        <td><span style={{marginRight:6}}>{d.coverEmoji||'📄'}</span>{d.title}</td>
-                        <td style={{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.description||'—'}</td>
-                        <td>₹{d.price}</td>
-                        <td>{d.passwordHash ? '🔒 Protected' : '—'}</td>
-                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${d.title}"?`)) axios.delete(`${API}/digital-products/${d.id}`).then(() => { loadDigitalProducts(); showToast('Digital product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑 Delete</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-        </div>{/* end pos-left */}
-        </div>{/* end pos-layout */}
-
-        <div className="inventory-fullwidth">
-          <section className="inventory-section">
-            <div className="inventory-header">
-              <h2>Inventory</h2>
-              <input className="search-input" placeholder="Search by name, SKU, colour or barcode..."
-                value={inventorySearch} onChange={e => setInventorySearch(e.target.value)} />
-              <button className="export-csv-btn" onClick={() => exportToCsv('inventory.csv', filteredProducts, [
-                { label: 'Name', key: 'name' },
-                { label: 'Category', key: 'category' },
-                { label: 'Variant', key: r => variantLabel(r) },
-                { label: 'SKU', key: 'sku' },
-                { label: 'Barcode', key: 'barcode' },
-                { label: 'Stock', key: 'stockQty' },
-                { label: 'Price', key: 'sellingPrice' },
-              ])}>⬇ Export CSV</button>
-            </div>
-            <div className="table-meta">
-              {isSearching
-                ? `${filteredProducts.length} result${filteredProducts.length !== 1 ? 's' : ''} found`
-                : `Showing ${filteredProducts.length === 0 ? 0 : (currentPage-1)*PAGE_SIZE+1}–${Math.min(currentPage*PAGE_SIZE, filteredProducts.length)} of ${filteredProducts.length}`}
-            </div>
-            <div className="table-scroll-wrap">
-            <table className="inv-table">
-              <thead>
-                <tr><th>Name</th><th>Category</th><th>Variants</th><th>SKU</th><th>Barcode</th><th>Stock</th><th>Price</th><th>Barcode Image</th><th>Label</th><th>Edit</th><th>Delete</th></tr>
-              </thead>
-              <tbody>
-                {displayedProducts.length === 0 && (
-                  <tr><td colSpan={11} style={{textAlign:'center',color:'#888',padding:'16px'}}>No products found</td></tr>
-                )}
-                {displayedProducts.map(p => {
-                  const suggested = 'two-row';
-                  const isLow = (p.stockQty ?? 0) < 5;
-                  const isOut = p.stockQty === 0;
-                  return (
-                    <tr key={p.id} className={isOut ? 'row-critical' : isLow ? 'row-warning' : ''}>
-                      <td className="inv-name-cell" title={p.name}>{p.name}</td>
-                      <td className="inv-cat">{p.category}{p.subcategory ? <div style={{fontSize:'11px',color:'#888'}}>{p.subcategory}</div> : ''}</td>
-                      <td className="inv-var">{variantLabel(p) || '—'}</td>
-                      <td className="inv-nw">{p.sku}</td>
-                      <td className="inv-nw">{p.barcode}</td>
-                      <td><span className={isOut ? 'stock-out' : isLow ? 'stock-low' : ''}>{isOut ? '⚠ OUT' : p.stockQty}</span></td>
-                      <td className="inv-nw">{p.productType === 'RENTAL' ? `Dep ₹${p.depositAmount ?? 0} + Rent ₹${p.rentAmount ?? 0}` : `₹${p.sellingPrice}`}</td>
-                      <td><img className="inv-barcode" src={`${API}/barcodes/${p.barcode}`} alt={p.barcode} /></td>
-                      <td><button className="label-btn" onClick={() => setLabelModal({product:p, stickerType:suggested, qty:1})}>🏷 Print</button></td>
-                      <td><button className="edit-btn" onClick={() => openEdit(p)}>✏ Edit</button></td>
-                      <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); }}>🗑 Delete</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            </div>{/* end table-scroll-wrap */}
-            {!isSearching && totalPages > 1 && (
-              <div className="pagination">
-                <button className="pg-btn" onClick={() => setCurrentPage(p=>Math.max(1,p-1))} disabled={currentPage===1}>‹ Prev</button>
-                {pageNumbers.map((pg, i) => pg==='…'
-                  ? <span key={`e${i}`} className="pg-ellipsis">…</span>
-                  : <button key={pg} className={`pg-btn ${pg===currentPage?'pg-active':''}`} onClick={() => setCurrentPage(pg)}>{pg}</button>
-                )}
-                <button className="pg-btn" onClick={() => setCurrentPage(p=>Math.min(totalPages,p+1))} disabled={currentPage===totalPages}>Next ›</button>
-              </div>
-            )}
-          </section>
-        </div>
         </div>}{/* end home page */}
 
         {/* ── REPORTS PAGE ── */}
