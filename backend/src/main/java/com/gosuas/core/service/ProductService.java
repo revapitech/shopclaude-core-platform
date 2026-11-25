@@ -17,6 +17,12 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final TenantRepository tenantRepository;
 
+    // Pasted spreadsheet values commonly carry a leading/trailing tab or space, which then
+    // breaks exact SKU/barcode lookups (e.g. "\tHYD-MOU-002-BLA" never matches "HYD-MOU-002").
+    private static String trim(String s) {
+        return s == null ? null : s.strip();
+    }
+
     private static int maxPhotosForPlan(String plan) {
         return "PRO".equals(plan) ? 6 : 2; // STARTER (₹999) → 2, PRO (₹1,699) → 6
     }
@@ -51,11 +57,12 @@ public class ProductService {
         }
         validatePhotoLimit(request.imageUrl(), tenant != null ? tenant.getPlan() : null, request.variantAttrs());
 
-        if (request.sku() == null || request.sku().isBlank()) {
+        String sku = trim(request.sku());
+        if (sku == null || sku.isBlank()) {
             throw new IllegalArgumentException("SKU is required");
         }
-        if (productRepository.findBySkuAndTenantId(request.sku(), tenantId).isPresent()) {
-            throw new IllegalArgumentException("SKU '" + request.sku() + "' already exists");
+        if (productRepository.findBySkuAndTenantId(sku, tenantId).isPresent()) {
+            throw new IllegalArgumentException("SKU '" + sku + "' already exists");
         }
         if (request.stockQty() != null && request.stockQty() < 0) {
             throw new IllegalArgumentException("Stock quantity cannot be negative");
@@ -65,11 +72,11 @@ public class ProductService {
         boolean isRental = "RENTAL".equalsIgnoreCase(productType);
         Product product = Product.builder()
                 .tenantId(tenantId)
-                .name(request.name())
-                .category(request.category())
-                .color(request.color())
-                .size(request.size())
-                .sku(request.sku())
+                .name(trim(request.name()))
+                .category(trim(request.category()))
+                .color(trim(request.color()))
+                .size(trim(request.size()))
+                .sku(sku)
                 .barcode(barcode)
                 .purchasePrice(request.purchasePrice())
                 .sellingPrice(request.sellingPrice())
@@ -81,10 +88,10 @@ public class ProductService {
                 .lowStockAlertQty(request.lowStockAlertQty())
                 .imageUrl(request.imageUrl())
                 .colorPhotoUrl(request.colorPhotoUrl())
-                .description(request.description())
-                .subcategory(request.subcategory())
+                .description(trim(request.description()))
+                .subcategory(trim(request.subcategory()))
                 .variantAttrs(request.variantAttrs())
-                .hsnCode(request.hsnCode())
+                .hsnCode(trim(request.hsnCode()))
                 .gstRate(request.gstRate())
                 .active(request.active() != null ? request.active() : Boolean.FALSE)
                 .festiveOffer(request.festiveOffer() != null ? request.festiveOffer() : Boolean.FALSE)
@@ -161,9 +168,9 @@ public class ProductService {
                 validatePhotoLimit(request.imageUrl(), tenant != null ? tenant.getPlan() : null, request.variantAttrs());
             }
         }
-        product.setName(request.name());
-        if (request.category() != null) product.setCategory(request.category());
-        if (request.sku() != null) product.setSku(request.sku());
+        product.setName(trim(request.name()));
+        if (request.category() != null) product.setCategory(trim(request.category()));
+        if (request.sku() != null) product.setSku(trim(request.sku()));
         if (request.barcode() != null && !request.barcode().isBlank() && !request.barcode().equals(product.getBarcode())) {
             // Uniqueness check is tenant-scoped: a barcode used by another tenant is not a conflict.
             productRepository.findByBarcodeAndTenantId(request.barcode(), tenantId).ifPresent(existing -> {
@@ -173,8 +180,8 @@ public class ProductService {
             });
             product.setBarcode(request.barcode());
         }
-        product.setColor(request.color());
-        product.setSize(request.size());
+        product.setColor(trim(request.color()));
+        product.setSize(trim(request.size()));
         product.setPurchasePrice(request.purchasePrice());
         product.setSellingPrice(request.sellingPrice());
         product.setMrp(request.mrp());
@@ -184,12 +191,12 @@ public class ProductService {
         product.setVariantAttrs(request.variantAttrs());
         if (request.imageUrl() != null) product.setImageUrl(request.imageUrl());
         product.setColorPhotoUrl(request.colorPhotoUrl());
-        if (request.description() != null) product.setDescription(request.description());
+        if (request.description() != null) product.setDescription(trim(request.description()));
         if (request.featured() != null) product.setFeatured(request.featured());
         if (request.festiveOffer() != null) product.setFestiveOffer(request.festiveOffer());
-        if (request.subcategory() != null) product.setSubcategory(request.subcategory());
+        if (request.subcategory() != null) product.setSubcategory(trim(request.subcategory()));
         if (request.active() != null) product.setActive(request.active());
-        if (request.hsnCode() != null) product.setHsnCode(request.hsnCode());
+        if (request.hsnCode() != null) product.setHsnCode(trim(request.hsnCode()));
         // Allow explicitly setting gstRate to null (to remove GST from a product)
         product.setGstRate(request.gstRate());
         if (request.productType() != null) product.setProductType(request.productType());
