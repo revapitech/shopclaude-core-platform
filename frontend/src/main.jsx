@@ -3139,11 +3139,40 @@ function App() {
               addProductToCart(p);
             }
           };
+          // Collapse colour-variant siblings (same category + base SKU) into one card —
+          // same grouping convention as the Inventory table — so a product with
+          // Blue/Black/White variants shows once, not three times. Choosing the colour
+          // happens via the existing variant picker (handleCatalogAdd above).
+          const catalogFamilies = (() => {
+            const seen = new Set();
+            const result = [];
+            for (const p of catalogProducts) {
+              if (seen.has(p.id)) continue;
+              seen.add(p.id);
+              if (p.color) {
+                const base = baseSkuOf(p.sku);
+                const siblings = catalogProducts.filter(x => x.category === p.category && x.color && baseSkuOf(x.sku) === base);
+                if (siblings.length > 1) {
+                  siblings.forEach(s => seen.add(s.id));
+                  result.push([...siblings].sort((a, b) => {
+                    // Prefer an in-stock sibling as the card's representative so the merged
+                    // card isn't wrongly shown/disabled as sold-out when other colours aren't.
+                    const aOos = (a.stockQty ?? 0) <= 0, bOos = (b.stockQty ?? 0) <= 0;
+                    if (aOos !== bOos) return aOos ? 1 : -1;
+                    return (a.color || '').localeCompare(b.color || '');
+                  })[0]);
+                  continue;
+                }
+              }
+              result.push(p);
+            }
+            return result;
+          })();
           return (
           <section style={{marginTop:24,paddingTop:20,borderTop:'1.5px solid #e5e7eb'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:8}}>
               <h2 style={{margin:0,fontSize:16,fontWeight:700}}>🛍 Quick Billing – Products</h2>
-              <span style={{fontSize:12,color:'#6b7280'}}>{catalogProducts.length} product{catalogProducts.length !== 1 ? 's' : ''}</span>
+              <span style={{fontSize:12,color:'#6b7280'}}>{catalogFamilies.length} product{catalogFamilies.length !== 1 ? 's' : ''}</span>
             </div>
             {/* Filters */}
             <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14,alignItems:'center'}}>
@@ -3178,7 +3207,7 @@ function App() {
               </div>
             ) : (
               <div className="catalog-grid">
-                {catalogProducts.map(p => {
+                {catalogFamilies.map(p => {
                   const imgUrl = firstImgUrl(p);
                   const outOfStock = p.trackStock !== false && (p.stockQty ?? 0) <= 0;
                   const vLabel = variantLabel(p);
@@ -7872,7 +7901,39 @@ function ShopApp() {
     return null; // 'all' — use filtered (cat + search)
   })();
 
-  const displaySource = shopTab === 'all' ? filtered : (tabFiltered || []);
+  // Collapse colour-variant siblings into one card — the product detail page
+  // already lets the customer switch colour/size via its own picker, so the
+  // grid must not list each colour as a separate product.
+  // Note: the public products API (unlike the authenticated admin one) does not
+  // expose `sku`, so siblings are grouped by name+category instead of base SKU —
+  // every colour/size variant created together always shares the same name and
+  // category (see createProduct in the admin form), so this is a safe match key.
+  const dedupeColorFamilies = (list) => {
+    const seen = new Set();
+    const result = [];
+    for (const p of list) {
+      if (seen.has(p.id)) continue;
+      seen.add(p.id);
+      if (p.color) {
+        const siblings = list.filter(x => x.category === p.category && x.name === p.name && x.color);
+        if (siblings.length > 1) {
+          siblings.forEach(s => seen.add(s.id));
+          result.push([...siblings].sort((a, b) => {
+            // Prefer an in-stock sibling as the card's representative so the merged
+            // card isn't wrongly shown/disabled as sold-out when other colours aren't.
+            const aOos = (a.stockQty ?? 0) <= 0, bOos = (b.stockQty ?? 0) <= 0;
+            if (aOos !== bOos) return aOos ? 1 : -1;
+            return (a.color || '').localeCompare(b.color || '');
+          })[0]);
+          continue;
+        }
+      }
+      result.push(p);
+    }
+    return result;
+  };
+
+  const displaySource = dedupeColorFamilies(shopTab === 'all' ? filtered : (tabFiltered || []));
   const SHOP_PAGE_SIZE = 10;
   const shopTotalPages = Math.ceil(displaySource.length / SHOP_PAGE_SIZE);
   const shopPageSafe   = Math.min(shopPage, Math.max(1, shopTotalPages));
@@ -8207,16 +8268,17 @@ function ShopApp() {
   if (detailProduct) {
     const dp = detailProduct;
     const dpUrls = imgUrls(dp);
-    // Group all colour-variant siblings (same base SKU + category) so we can render them as a single product with a colour picker
-    const dpBaseSku = baseSkuOf(dp.sku);
-    const colorFamily = products.filter(p => p.category === dp.category && baseSkuOf(p.sku) === dpBaseSku && p.color);
+    // Group all colour-variant siblings (same name + category — the public API doesn't
+    // expose `sku`, so unlike the admin side this can't group by base SKU; see
+    // dedupeColorFamilies above) so we can render them as a single product with a colour picker
+    const colorFamily = products.filter(p => p.category === dp.category && p.name === dp.name && p.color);
     const hasColorFamily = colorFamily.length > 1;
 
-    // Aggregate size options across all siblings with the same base SKU + category.
+    // Aggregate size options across all siblings with the same name + category.
     // If the colour family is active, only look at siblings with the same colour as dp.
     const sizeSiblings = products.filter(p =>
       p.category === dp.category &&
-      baseSkuOf(p.sku) === dpBaseSku &&
+      p.name === dp.name &&
       (!hasColorFamily || p.color === dp.color)
     );
     // Build { size, product } pairs; preserve insertion order, deduplicate sizes
@@ -8231,8 +8293,11 @@ function ShopApp() {
       return result;
     })();
     const hasSizeFamily = sizeFamily.length > 0;
-    // Exclude colour siblings from "You May Also Like" since they're shown in the colour picker above
-    const similar = products.filter(p => p.category === dp.category && p.id !== dp.id && !(hasColorFamily && baseSkuOf(p.sku) === dpBaseSku)).slice(0, 8);
+    // Exclude colour siblings from "You May Also Like" since they're shown in the colour picker above.
+    // Other similar products are also deduped by colour family so each shows once.
+    const similar = dedupeColorFamilies(
+      products.filter(p => p.category === dp.category && p.id !== dp.id && !(hasColorFamily && p.name === dp.name))
+    ).slice(0, 8);
     return (
       <>
         <div className="s2-detail-page">
@@ -8737,9 +8802,14 @@ function ShopApp() {
                   {pagedProducts.map((p, pIdx) => {
                     const urls = imgUrls(p);
                     const isNew = p.createdAt && (now - new Date(p.createdAt).getTime()) < 60 * 24 * 60 * 60 * 1000;
+                    // Cards that stand in for a colour family must let the customer pick a
+                    // colour before adding — open the detail page's colour picker instead
+                    // of silently adding whichever variant happens to represent the card.
+                    const hasColorSiblings = Boolean(p.color) && products.some(x => x.id !== p.id && x.category === p.category && x.name === p.name && x.color);
+                    const openDetail = () => { setDetailProduct(p); setDetailQty(1); setDetailImgIdx(0); setDetailColor(p.color?.split(',')[0]?.trim()||''); setDetailSize(p.size?.split(',')[0]?.trim()||''); window.scrollTo({top:0,behavior:'smooth'}); };
                     return (
                     <div key={p.id} className={`s2-card ${p.stockQty === 0 ? 's2-card-soldout' : ''}`}
-                      onClick={() => { setDetailProduct(p); setDetailQty(1); setDetailImgIdx(0); setDetailColor(p.color?.split(',')[0]?.trim()||''); setDetailSize(p.size?.split(',')[0]?.trim()||''); window.scrollTo({top:0,behavior:'smooth'}); }}>
+                      onClick={openDetail}>
                       <div className="s2-card-img-wrap">
                         {p.stockQty === 0 && <div className="s2-sold-ribbon">Sold Out</div>}
                         {p.festiveOffer && p.stockQty > 0 && <div className="s2-new-badge" style={{background:'#dc2626'}}>🎉 Sale</div>}
@@ -8752,7 +8822,7 @@ function ShopApp() {
                           : null}
                         <div className="s2-card-placeholder" style={{display: urls.length > 0 ? 'none' : 'flex'}}><span>💎</span></div>
                         {p.stockQty > 0
-                          ? <button className="s2-quick-add" onClick={e => { e.stopPropagation(); addToCart(p); }}>Add to Cart</button>
+                          ? <button className="s2-quick-add" onClick={e => { e.stopPropagation(); if (hasColorSiblings) openDetail(); else addToCart(p); }}>{hasColorSiblings ? 'Select Colour' : 'Add to Cart'}</button>
                           : <div className="s2-out-of-stock">Out of Stock</div>
                         }
                       </div>
