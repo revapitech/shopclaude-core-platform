@@ -10,8 +10,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Verifies that the CORS allowedOriginPatterns list covers all expected origins.
- * Localhost is allowed via the wildcard pattern http://localhost:* so any Vite
+ * Localhost is allowed via the wildcard pattern http://localhost:[*] so any Vite
  * dev-server port (5173, 5174, 5177, …) is covered without hardcoding each one.
+ * Note: Spring requires the port wildcard to be bracketed ([*]) — a bare trailing
+ * "*" (http://localhost:*) is parsed as a literal character and never matches.
  *
  * A missing origin in this list causes Spring's CorsFilter to return 403 before
  * any permitAll() rule is evaluated — which is the root cause of the
@@ -37,7 +39,17 @@ class SecurityCorsConfigTest {
     void corsConfig_allowsLocalhostWildcard() {
         // Single wildcard pattern covers all Vite dev ports (5173, 5174, 5177, …)
         assertThat(configFor("/api/public/shop-info").getAllowedOriginPatterns())
-                .contains("http://localhost:*");
+                .contains("http://localhost:[*]");
+    }
+
+    @Test
+    void corsConfig_actuallyMatchesLocalhostOriginWithAnyPort() {
+        // Regression test: a bare "http://localhost:*" pattern is parsed literally
+        // and never matches a real Origin header, even though it looks correct
+        // and even though it appears in getAllowedOriginPatterns().
+        CorsConfiguration cfg = configFor("/api/auth/login");
+        assertThat(cfg.checkOrigin("http://localhost:5173")).isEqualTo("http://localhost:5173");
+        assertThat(cfg.checkOrigin("http://localhost:4321")).isEqualTo("http://localhost:4321");
     }
 
     @Test

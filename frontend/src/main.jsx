@@ -3584,6 +3584,31 @@ function App() {
           </div>
         )}
 
+          {/* ── Digital PDF Products ── */}
+          {digitalProducts.length > 0 && (
+            <section style={{marginTop:0}}>
+              <h2 style={{display:'flex',alignItems:'center',gap:8}}>📄 Digital PDF Products</h2>
+              <div style={{overflowX:'auto'}}>
+                <table className="data-table">
+                  <thead><tr><th>Title</th><th>Description</th><th>Price</th><th>Password</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {digitalProducts.map(d => (
+                      <tr key={d.id}>
+                        <td><span style={{marginRight:6}}>{d.coverEmoji||'📄'}</span>{d.title}</td>
+                        <td style={{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.description||'—'}</td>
+                        <td>₹{d.price}</td>
+                        <td>{d.passwordHash ? '🔒 Protected' : '—'}</td>
+                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${d.title}"?`)) axios.delete(`${API}/digital-products/${d.id}`).then(() => { loadDigitalProducts(); showToast('Digital product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑 Delete</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+        </div>{/* end pos-left */}
+        </div>{/* end pos-layout */}
+
           <section className="inventory-section">
             <div className="inventory-header">
               <h2>Inventory</h2>
@@ -3714,30 +3739,6 @@ function App() {
             )}
           </section>
 
-          {/* ── Digital PDF Products ── */}
-          {digitalProducts.length > 0 && (
-            <section style={{marginTop:0}}>
-              <h2 style={{display:'flex',alignItems:'center',gap:8}}>📄 Digital PDF Products</h2>
-              <div style={{overflowX:'auto'}}>
-                <table className="data-table">
-                  <thead><tr><th>Title</th><th>Description</th><th>Price</th><th>Password</th><th>Action</th></tr></thead>
-                  <tbody>
-                    {digitalProducts.map(d => (
-                      <tr key={d.id}>
-                        <td><span style={{marginRight:6}}>{d.coverEmoji||'📄'}</span>{d.title}</td>
-                        <td style={{maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.description||'—'}</td>
-                        <td>₹{d.price}</td>
-                        <td>{d.passwordHash ? '🔒 Protected' : '—'}</td>
-                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${d.title}"?`)) axios.delete(`${API}/digital-products/${d.id}`).then(() => { loadDigitalProducts(); showToast('Digital product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑 Delete</button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-        </div>{/* end pos-left */}
-        </div>{/* end pos-layout */}
         </div>}{/* end home page */}
 
         {/* ── REPORTS PAGE ── */}
