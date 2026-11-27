@@ -41,6 +41,16 @@ public class ProductController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    // Unified Offline Billing entry point: accepts a barcode, variant SKU, or base SKU and
+    // resolves to either a single product (EXACT) or the sibling variants to choose from
+    // (AMBIGUOUS). See ProductService.lookup for the resolution order.
+    @GetMapping("/lookup")
+    public ResponseEntity<com.gosuas.core.dto.ProductLookupResponse> lookup(@RequestParam String code) {
+        return productService.lookup(code)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @PutMapping("/{id}/stock/{qty}")
     public Product updateStock(@PathVariable UUID id, @PathVariable Integer qty) {
         return productService.updateStock(id, qty);

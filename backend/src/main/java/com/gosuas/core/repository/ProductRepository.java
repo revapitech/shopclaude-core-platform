@@ -18,6 +18,13 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     long countByTenantId(UUID tenantId);
 
     /**
+     * Colour/size variants share a SKU prefix like "RB4-" (see baseSkuOf on the frontend) —
+     * used to resolve a base SKU to its sibling variants. Spring Data parameterizes the
+     * generated LIKE pattern, so no raw SQL concatenation is involved.
+     */
+    List<Product> findByTenantIdAndSkuStartingWith(UUID tenantId, String skuPrefix);
+
+    /**
      * Atomically decrements stock and increments soldCount only when sufficient
      * stock exists. Returns the number of rows updated (1 = success, 0 = insufficient
      * stock). The WHERE stockQty >= qty guard prevents concurrent overselling even

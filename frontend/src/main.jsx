@@ -1,5 +1,6 @@
 import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import axios from 'axios';
 import './style.css';
 
@@ -579,6 +580,81 @@ function SecretInput({ value, onChange, placeholder }) {
         {show ? 'Hide' : 'Show'}
       </button>
     </div>
+  );
+}
+
+// Small outline icons used beside Shop Settings section headings.
+function SSIcon({ name }) {
+  const p = { width: 20, height: 20, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  switch (name) {
+    case 'branding':
+      return (<svg {...p}><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg>);
+    case 'details':
+      return (<svg {...p}><path d="M3 9l1.2-5h15.6L21 9" /><path d="M4 9v10h16V9" /><path d="M9 19v-5h6v5" /></svg>);
+    case 'bank':
+      return (<svg {...p}><path d="M3 10l9-6 9 6" /><path d="M5 10v9M9 10v9M15 10v9M19 10v9" /><path d="M3 21h18" /></svg>);
+    case 'gst':
+      return (<svg {...p}><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z" /><circle cx="9.5" cy="9" r="1.2" /><circle cx="14.5" cy="14" r="1.2" /><path d="M9 15l6-6" /></svg>);
+    case 'razorpay':
+      return (<svg {...p}><rect x="2" y="5" width="20" height="14" rx="2.5" /><path d="M2 10h20" /><path d="M6 15h4" /></svg>);
+    default:
+      return null;
+  }
+}
+
+// Small outline icons used inside row action menus (edit / print / delete / chevron).
+function RowIcon({ name }) {
+  const p = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  switch (name) {
+    case 'edit':
+      return (<svg {...p}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>);
+    case 'print':
+      return (<svg {...p}><path d="M6 9V3h12v6" /><rect x="4" y="9" width="16" height="7" rx="1" /><path d="M6 20h12v-5H6z" /></svg>);
+    case 'trash':
+      return (<svg {...p}><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v5M14 11v5" /></svg>);
+    case 'kebab':
+      return (<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>);
+    case 'chevron':
+      return (<svg {...p}><polyline points="9 6 15 12 9 18" /></svg>);
+    default:
+      return null;
+  }
+}
+
+// Compact "⋮" action menu used on Inventory rows — renders via a portal so it's
+// never clipped by the table's horizontal-scroll wrapper.
+function RowActionMenu({ id, openId, setOpenId, items }) {
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState(null);
+  const isOpen = openId === id;
+
+  const toggle = (e) => {
+    e.stopPropagation();
+    if (isOpen) { setOpenId(null); return; }
+    const r = btnRef.current.getBoundingClientRect();
+    const menuW = 190;
+    setPos({ top: r.bottom + 6, left: Math.max(8, Math.min(r.right - menuW, window.innerWidth - menuW - 8)) });
+    setOpenId(id);
+  };
+
+  return (
+    <>
+      <button type="button" ref={btnRef} className="inv-action-btn" onClick={toggle}
+        aria-label="Row actions" aria-haspopup="menu" aria-expanded={isOpen}>
+        <RowIcon name="kebab" />
+      </button>
+      {isOpen && pos && createPortal(
+        <div className="inv-action-menu" style={{ top: pos.top, left: pos.left, width: 190 }} onClick={e => e.stopPropagation()}>
+          {items.map((it, i) => (
+            <button key={i} type="button" className={`inv-action-item${it.danger ? ' danger' : ''}`}
+              onClick={() => { setOpenId(null); it.onClick(); }}>
+              <RowIcon name={it.icon} />{it.label}
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -1465,10 +1541,12 @@ function App() {
   const [lastBillId, setLastBillId] = useState(null);
   const [regeneratingBill, setRegeneratingBill] = useState(false);
   const [scanError, setScanError] = useState('');
+  const [scanLoading, setScanLoading] = useState(false);
   const [billError, setBillError] = useState('');
   const [inventorySearch, setInventorySearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedFamilies, setExpandedFamilies] = useState(new Set());
+  const [invMenuOpen, setInvMenuOpen] = useState(null);
   const barcodeInputRef = useRef(null);
   const [labelModal, setLabelModal] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
@@ -2322,6 +2400,18 @@ function App() {
       setBarcode('');
       return;
     }
+    // Client-side stock guard so the cashier finds out immediately rather than only after
+    // clicking "Generate Bill". The backend's atomic decrementStock (see BillService) is
+    // still the authoritative, concurrency-safe check at the moment of sale — this is only
+    // an early warning, not a replacement for it.
+    const trackedStock = found.trackStock !== false;
+    const existingQty = cart.find(i => i.barcode === found.barcode)?.quantity || 0;
+    if (trackedStock && existingQty + 1 > (found.stockQty ?? 0)) {
+      const msg = `Only ${found.stockQty ?? 0} unit${(found.stockQty ?? 0) === 1 ? '' : 's'} of "${found.name}" in stock.`;
+      setScanError(msg);
+      showToast(msg, 'error');
+      return;
+    }
     setCart(prev => {
       const existing = prev.find(i => i.barcode === found.barcode);
       if (existing) return prev.map(i => i.barcode === found.barcode ? { ...i, quantity: i.quantity + 1 } : i);
@@ -2332,35 +2422,33 @@ function App() {
   };
 
   const scanBarcode = async () => {
+    // Guard against duplicate submissions from a rapid-fire barcode scanner or
+    // repeated Enter/click while a lookup is already in flight.
+    if (scanLoading) return;
     const input = barcode.trim();
-    if (!input) return;
+    if (!input) {
+      setScanError('Enter a barcode or SKU to scan.');
+      return;
+    }
+    setScanError('');
+    setScanLoading(true);
     try {
-      // Try barcode lookup first
-      const res = await axios.get(`${API}/products/barcode/${input}`);
-      addProductToCart(res.data);
-    } catch {
-      try {
-        // Try SKU lookup
-        const res = await axios.get(`${API}/products/sku/${input}`);
-        addProductToCart(res.data);
-      } catch {
-        // Fallback: search loaded products by exact SKU or base SKU (handles colour variants
-        // where stored SKUs are like "UTC-TS-101-BLU" but user enters base SKU "UTC-TS-101")
-        const inputLower = input.toLowerCase();
-        const matches = products.filter(p =>
-          (p.sku || '').toLowerCase() === inputLower ||
-          baseSkuOf(p.sku).toLowerCase() === inputLower
-        );
-        if (matches.length === 1) {
-          addProductToCart(matches[0]);
-        } else if (matches.length > 1) {
-          setCatalogVariantModal({ canonical: matches[0], variants: matches.sort((a, b) => (a.color || '').localeCompare(b.color || '')) });
-          setBarcode('');
-        } else {
-          setScanError('Product not found for barcode/SKU: ' + input);
-        }
+      // Single unified lookup: resolves a barcode, an exact variant SKU, or a base SKU
+      // shared by multiple colour/size variants (returned as AMBIGUOUS for the picker).
+      const res = await axios.get(`${API}/products/lookup`, { params: { code: input } });
+      const { match, product, variants } = res.data;
+      if (match === 'AMBIGUOUS') {
+        setCatalogVariantModal({ canonical: variants[0], variants });
+        setBarcode('');
+      } else {
+        addProductToCart(product);
       }
+    } catch (err) {
+      setScanError(err.response?.status === 404
+        ? 'Product not found for barcode/SKU: ' + input
+        : 'Could not look up this product. Please check your connection and try again.');
     } finally {
+      setScanLoading(false);
       barcodeInputRef.current?.focus();
     }
   };
@@ -2682,28 +2770,30 @@ function App() {
 
   const PAGE_SIZE = 10;
   const isSearching = inventorySearch.trim().length > 0;
+  const searchQuery = inventorySearch.trim().toLowerCase();
 
-  const filteredProducts = products.filter(p =>
+  const matchesInventorySearch = (p) =>
     !isSearching ||
-    p.name?.toLowerCase().includes(inventorySearch.toLowerCase()) ||
-    p.sku?.toLowerCase().includes(inventorySearch.toLowerCase()) ||
-    p.barcode?.toLowerCase().includes(inventorySearch.toLowerCase()) ||
-    variantLabel(p).toLowerCase().includes(inventorySearch.toLowerCase()) ||
-    p.category?.toLowerCase().includes(inventorySearch.toLowerCase())
-  );
+    p.name?.toLowerCase().includes(searchQuery) ||
+    p.sku?.toLowerCase().includes(searchQuery) ||
+    p.barcode?.toLowerCase().includes(searchQuery) ||
+    variantLabel(p).toLowerCase().includes(searchQuery) ||
+    p.category?.toLowerCase().includes(searchQuery);
 
-  // Group colour-variant siblings (same base SKU + category) into families.
-  // When searching, keep flat so each individual variant is independently visible.
+  const filteredProducts = products.filter(matchesInventorySearch);
+
+  // Group colour-variant siblings (same category + base SKU — the product's "parent" identity,
+  // never the display name) into one family — every product always renders as a single parent
+  // row with its variants nested underneath, search or not.
   const productFamilies = (() => {
-    if (isSearching) return filteredProducts.map(p => ({ isSingle: true, products: [p] }));
     const seen = new Set();
     const result = [];
-    for (const p of filteredProducts) {
+    for (const p of products) {
       if (seen.has(p.id)) continue;
       seen.add(p.id);
       if (p.color) {
         const baseSku = baseSkuOf(p.sku);
-        const siblings = filteredProducts.filter(x =>
+        const siblings = products.filter(x =>
           x.category === p.category && x.color && baseSkuOf(x.sku) === baseSku
         );
         if (siblings.length > 1) {
@@ -2717,10 +2807,19 @@ function App() {
     return result;
   })();
 
-  const totalPages = isSearching ? 1 : Math.ceil(productFamilies.length / PAGE_SIZE);
+  // While searching, only keep families with at least one matching variant — but still show
+  // every variant in that family (not just the one that matched), auto-expanded below.
+  const visibleFamilies = isSearching
+    ? productFamilies.filter(f => f.products.some(matchesInventorySearch))
+    : productFamilies;
+
+  const totalVariantCount = products.length;
+  const uniqueProductCount = productFamilies.length;
+
+  const totalPages = isSearching ? 1 : Math.ceil(visibleFamilies.length / PAGE_SIZE);
   const displayedFamilies = isSearching
-    ? productFamilies
-    : productFamilies.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+    ? visibleFamilies
+    : visibleFamilies.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const pageNumbers = (() => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
@@ -2782,7 +2881,7 @@ function App() {
   const avgBill       = totalBills > 0 ? totalRevenue / totalBills : 0;
 
   return (
-    <div className={`app-layout${sidebarOpen ? ' sidebar-open' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`} onClick={() => { showNotif && setShowNotif(false); }}>
+    <div className={`app-layout${sidebarOpen ? ' sidebar-open' : ''}${sidebarCollapsed ? ' sidebar-collapsed' : ''}`} onClick={() => { showNotif && setShowNotif(false); invMenuOpen && setInvMenuOpen(null); }}>
 
       {/* Mobile sidebar overlay */}
       {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
@@ -2960,10 +3059,11 @@ function App() {
               placeholder="Scan barcode or enter SKU"
               autoFocus
               value={barcode}
+              disabled={scanLoading}
               onChange={e => setBarcode(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && scanBarcode()}
             />
-            <button onClick={scanBarcode}>Add to Cart</button>
+            <button onClick={scanBarcode} disabled={scanLoading}>{scanLoading ? 'Looking up…' : 'Add to Cart'}</button>
           </div>
           {scanError && <p className="error-msg">{scanError}</p>}
 
@@ -3654,45 +3754,65 @@ function App() {
               ])}>⬇ Export CSV</button>
             </div>
             <div className="table-meta">
+              <b>{uniqueProductCount}</b> product{uniqueProductCount !== 1 ? 's' : ''} · <b>{totalVariantCount}</b> variant{totalVariantCount !== 1 ? 's' : ''} total
+              <span className="inv-meta-sep">—</span>
               {isSearching
-                ? `${filteredProducts.length} result${filteredProducts.length !== 1 ? 's' : ''} found`
-                : `Showing ${productFamilies.length === 0 ? 0 : (currentPage-1)*PAGE_SIZE+1}–${Math.min(currentPage*PAGE_SIZE, productFamilies.length)} of ${productFamilies.length}${productFamilies.length !== filteredProducts.length ? ` entries (${filteredProducts.length} variants total)` : ' products'}`}
+                ? `${visibleFamilies.length} matching product${visibleFamilies.length !== 1 ? 's' : ''} found`
+                : `Showing ${visibleFamilies.length === 0 ? 0 : (currentPage-1)*PAGE_SIZE+1}–${Math.min(currentPage*PAGE_SIZE, visibleFamilies.length)} of ${visibleFamilies.length} products`}
             </div>
             <div className="table-scroll-wrap">
-            <table>
+            <table className="inv-table">
               <thead>
-                <tr><th>Name</th><th>Category</th><th>Variants</th><th>SKU</th><th>Barcode</th><th>Stock</th><th>Price</th><th>Barcode Image</th><th>Label</th><th>Edit</th><th>Delete</th></tr>
+                <tr>
+                  <th>SKU / Product Code</th><th>Name</th><th>Category</th><th>Variants</th>
+                  <th className="inv-barcode-col">Barcode</th><th className="inv-stock-col">Stock</th>
+                  <th className="inv-price-col">Price</th><th className="inv-action-col">Action</th>
+                </tr>
               </thead>
               <tbody>
                 {displayedFamilies.length === 0 && (
-                  <tr><td colSpan={11} style={{textAlign:'center',color:'#888',padding:'16px'}}>No products found</td></tr>
+                  <tr><td colSpan={8} style={{textAlign:'center',color:'#888',padding:'16px'}}>No products found</td></tr>
                 )}
-                {displayedFamilies.map(family => {
+                {displayedFamilies.map((family, familyIdx) => {
                   if (family.isSingle) {
                     const p = family.products[0];
                     const isLow = (p.stockQty ?? 0) < 5;
                     const isOut = p.stockQty === 0;
                     return (
-                      <tr key={p.id} className={isOut ? 'row-critical' : isLow ? 'row-warning' : ''}>
-                        <td>{p.name}</td><td>{p.category}{p.subcategory ? <div style={{fontSize:'11px',color:'#888'}}>{p.subcategory}</div> : ''}</td>
-                        <td>{variantLabel(p) || '—'}</td>
-                        <td>{p.sku}</td><td>{p.barcode}</td>
-                        <td><span className={isOut ? 'stock-out' : isLow ? 'stock-low' : ''}>{isOut ? '⚠ OUT' : p.stockQty}</span></td>
-                        <td>{p.productType === 'RENTAL' ? `Dep ₹${p.depositAmount ?? 0} + Rent ₹${p.rentAmount ?? 0}` : `₹${p.sellingPrice}`}</td>
-                        <td><img src={`${API}/barcodes/${p.barcode}`} alt={p.barcode} /></td>
-                        <td><button className="label-btn" onClick={() => setLabelModal({product:p, stickerType:'two-row', qty:1})}>🏷 Print</button></td>
-                        <td><button className="edit-btn" onClick={() => openEdit(p)}>✏ Edit</button></td>
-                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); }}>🗑 Delete</button></td>
+                      <tr key={p.id} className={`inv-row${familyIdx % 2 === 1 ? ' inv-row-alt' : ''} ${isOut ? 'row-critical' : isLow ? 'row-warning' : ''}`}>
+                        <td className="inv-sku">{p.sku}</td>
+                        <td className="inv-name-cell">{p.name}</td>
+                        <td className="inv-cat">{p.category}{p.subcategory ? <div className="inv-subcat">{p.subcategory}</div> : ''}</td>
+                        <td className="inv-var">{variantLabel(p) || '—'}</td>
+                        <td className="inv-barcode-cell">
+                          <div className="inv-barcode-wrap">
+                            <img className="inv-barcode-img" src={`${API}/barcodes/${p.barcode}`} alt={p.barcode} />
+                            <span className="inv-barcode-num">{p.barcode}</span>
+                          </div>
+                        </td>
+                        <td className="inv-stock-cell"><span className={isOut ? 'stock-out' : isLow ? 'stock-low' : ''}>{isOut ? 'OUT OF STOCK' : p.stockQty}</span></td>
+                        <td className="inv-price-cell">{p.productType === 'RENTAL' ? `Dep ₹${p.depositAmount ?? 0} + Rent ₹${p.rentAmount ?? 0}` : `₹${p.sellingPrice}`}</td>
+                        <td className="inv-action-cell">
+                          <RowActionMenu id={`p-${p.id}`} openId={invMenuOpen} setOpenId={setInvMenuOpen} items={[
+                            { icon: 'edit', label: 'Edit Product', onClick: () => openEdit(p) },
+                            { icon: 'print', label: 'Print Label', onClick: () => setLabelModal({product:p, stickerType:'two-row', qty:1}) },
+                            { icon: 'trash', label: 'Delete Product', danger: true, onClick: () => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); } },
+                          ]} />
+                        </td>
                       </tr>
                     );
                   }
-                  // Multi-colour variant family — grouped row with expandable sub-rows
+                  // Multi-colour variant family — one parent row grouped by category + base SKU
+                  // (the product's parent identity, never its display name), expandable below.
                   const rep = family.products[0];
                   const famKey = `${rep.category ?? ''}|${baseSkuOf(rep.sku)}`;
-                  const isExpanded = expandedFamilies.has(famKey);
+                  const isExpanded = expandedFamilies.has(famKey) || isSearching;
                   const totalStock = family.products.reduce((s, v) => s + (v.stockQty ?? 0), 0);
                   const isFamLow = totalStock < 5;
                   const isFamOut = totalStock === 0;
+                  const famPrices = family.products.map(v => Number(v.sellingPrice) || 0);
+                  const famMinPrice = Math.min(...famPrices);
+                  const famMaxPrice = Math.max(...famPrices);
                   const toggleFamily = () => setExpandedFamilies(prev => {
                     const n = new Set(prev);
                     n.has(famKey) ? n.delete(famKey) : n.add(famKey);
@@ -3700,12 +3820,19 @@ function App() {
                   });
                   return (
                     <React.Fragment key={famKey}>
-                      {/* Family summary row */}
-                      <tr className={isFamOut ? 'row-critical' : isFamLow ? 'row-warning' : ''} style={{background:'#f0f4ff'}}>
-                        <td style={{fontWeight:600}}>{rep.name}</td>
-                        <td>{rep.category}</td>
-                        <td>
-                          <div style={{display:'flex',flexWrap:'wrap',gap:4,alignItems:'center'}}>
+                      {/* Parent product row */}
+                      <tr className={`inv-row inv-fam-row${familyIdx % 2 === 1 ? ' inv-row-alt' : ''} ${isFamOut ? 'row-critical' : isFamLow ? 'row-warning' : ''}`}>
+                        <td className="inv-sku">{baseSkuOf(rep.sku)}</td>
+                        <td className="inv-name-cell">
+                          <button type="button" className="inv-name-toggle" onClick={toggleFamily} aria-expanded={isExpanded}
+                            title={isExpanded ? 'Collapse colour variants' : 'Expand colour variants'}>
+                            <span className={`inv-chevron${isExpanded ? ' open' : ''}`}><RowIcon name="chevron" /></span>
+                            {rep.name}
+                          </button>
+                        </td>
+                        <td className="inv-cat">{rep.category}</td>
+                        <td className="inv-var">
+                          <div className="inv-swatch-row">
                             {family.products.map(v => (
                               <span key={v.id} title={v.color} style={{display:'inline-flex',alignItems:'center',gap:3,background:'#fff',border:'1px solid #e2e8f0',borderRadius:12,padding:'2px 7px',fontSize:11,fontWeight:600,whiteSpace:'nowrap'}}>
                                 <span style={{width:8,height:8,borderRadius:'50%',background:COLOR_CSS[v.color]||'#ccc',display:'inline-block',border:'1px solid #ccc',flexShrink:0}}></span>
@@ -3713,40 +3840,46 @@ function App() {
                               </span>
                             ))}
                           </div>
+                          <div className="inv-var-count">{family.products.length} variants</div>
                         </td>
-                        <td style={{color:'#64748b',fontSize:12}}>{baseSkuOf(rep.sku)}</td>
-                        <td style={{color:'#9ca3af',fontSize:12}}>—</td>
-                        <td><span className={isFamOut ? 'stock-out' : isFamLow ? 'stock-low' : ''}>{isFamOut ? '⚠ OUT' : totalStock} total</span></td>
-                        <td>₹{rep.sellingPrice}</td>
-                        <td style={{color:'#9ca3af'}}>—</td>
-                        <td><button className="label-btn" onClick={() => setCatalogVariantModal({ canonical: rep, variants: family.products })}>🏷 Print</button></td>
-                        <td>
-                          <button className="edit-btn" onClick={toggleFamily} style={{minWidth:80}}>
-                            {isExpanded ? '▾' : '▸'} {family.products.length} colours
-                          </button>
+                        <td className="inv-barcode-cell" style={{color:'#9ca3af'}}>—</td>
+                        <td className="inv-stock-cell"><span className={isFamOut ? 'stock-out' : isFamLow ? 'stock-low' : ''}>{isFamOut ? 'OUT OF STOCK' : `${totalStock} total`}</span></td>
+                        <td className="inv-price-cell">{famMinPrice === famMaxPrice ? `₹${famMinPrice}` : `₹${famMinPrice} – ₹${famMaxPrice}`}</td>
+                        <td className="inv-action-cell">
+                          <RowActionMenu id={`f-${famKey}`} openId={invMenuOpen} setOpenId={setInvMenuOpen} items={[
+                            { icon: 'print', label: 'Print Label', onClick: () => setCatalogVariantModal({ canonical: rep, variants: family.products }) },
+                            { icon: 'trash', label: 'Delete All Variants', danger: true, onClick: () => { if(window.confirm(`Delete all ${family.products.length} colour variants of "${rep.name}"?`)) Promise.all(family.products.map(v => axios.delete(`${API}/products/${v.id}`))).then(() => { loadProducts(); showToast('All variants deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); } },
+                          ]} />
                         </td>
-                        <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete all ${family.products.length} colour variants of "${rep.name}"?`)) Promise.all(family.products.map(v => axios.delete(`${API}/products/${v.id}`))).then(() => { loadProducts(); showToast('All variants deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑 All</button></td>
                       </tr>
-                      {/* Expanded variant sub-rows */}
+                      {/* Expanded variant child rows — one per colour, no limit */}
                       {isExpanded && family.products.map(v => {
                         const isLowV = (v.stockQty ?? 0) < 5;
                         const isOutV = v.stockQty === 0;
                         return (
-                          <tr key={v.id} className={isOutV ? 'row-critical' : isLowV ? 'row-warning' : ''} style={{background:'#fafbff'}}>
-                            <td style={{paddingLeft:20,fontSize:13}}>
-                              <span style={{width:10,height:10,borderRadius:'50%',background:COLOR_CSS[v.color]||'#ccc',display:'inline-block',border:'1px solid #ccc',marginRight:6,verticalAlign:'middle',flexShrink:0}}></span>
-                              {v.color}
+                          <tr key={v.id} className={`inv-row inv-subrow inv-row-anim${familyIdx % 2 === 1 ? ' inv-row-alt' : ''} ${isOutV ? 'row-critical' : isLowV ? 'row-warning' : ''}`}>
+                            <td className="inv-sku">{v.sku}</td>
+                            <td className="inv-name-cell inv-subcell">{v.name}</td>
+                            <td className="inv-cat inv-subcell">{v.category}</td>
+                            <td className="inv-var">
+                              <span style={{width:9,height:9,borderRadius:'50%',background:COLOR_CSS[v.color]||'#ccc',display:'inline-block',border:'1px solid #ccc',marginRight:6,verticalAlign:'middle',flexShrink:0}}></span>
+                              {variantLabel(v) || '—'}
                             </td>
-                            <td></td>
-                            <td style={{fontSize:12,color:'#6b7280'}}>{variantLabel(v) || '—'}</td>
-                            <td style={{fontSize:12}}>{v.sku}</td>
-                            <td style={{fontSize:12}}>{v.barcode}</td>
-                            <td><span className={isOutV ? 'stock-out' : isLowV ? 'stock-low' : ''}>{isOutV ? '⚠ OUT' : v.stockQty}</span></td>
-                            <td>₹{v.sellingPrice}</td>
-                            <td><img src={`${API}/barcodes/${v.barcode}`} alt={v.barcode} /></td>
-                            <td><button className="label-btn" onClick={() => setLabelModal({product:v, stickerType:'two-row', qty:1})}>🏷 Print</button></td>
-                            <td><button className="edit-btn" onClick={() => openEdit(v)}>✏ Edit</button></td>
-                            <td><button className="delete-btn" onClick={() => { if(window.confirm(`Delete "${v.name}" (${v.color})?`)) axios.delete(`${API}/products/${v.id}`).then(() => { loadProducts(); showToast('Variant deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); }}>🗑</button></td>
+                            <td className="inv-barcode-cell">
+                              <div className="inv-barcode-wrap">
+                                <img className="inv-barcode-img" src={`${API}/barcodes/${v.barcode}`} alt={v.barcode} />
+                                <span className="inv-barcode-num">{v.barcode}</span>
+                              </div>
+                            </td>
+                            <td className="inv-stock-cell"><span className={isOutV ? 'stock-out' : isLowV ? 'stock-low' : ''}>{isOutV ? 'OUT OF STOCK' : v.stockQty}</span></td>
+                            <td className="inv-price-cell">₹{v.sellingPrice}</td>
+                            <td className="inv-action-cell">
+                              <RowActionMenu id={`v-${v.id}`} openId={invMenuOpen} setOpenId={setInvMenuOpen} items={[
+                                { icon: 'edit', label: 'Edit Product', onClick: () => openEdit(v) },
+                                { icon: 'print', label: 'Print Label', onClick: () => setLabelModal({product:v, stickerType:'two-row', qty:1}) },
+                                { icon: 'trash', label: 'Delete Product', danger: true, onClick: () => { if(window.confirm(`Delete "${v.name}" (${v.color})?`)) axios.delete(`${API}/products/${v.id}`).then(() => { loadProducts(); showToast('Variant deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); } },
+                              ]} />
+                            </td>
                           </tr>
                         );
                       })}
@@ -6798,13 +6931,16 @@ function App() {
 
             <div className="ss-body">
               {/* ── Shop branding ── */}
-              <section className="ss-sec">
+              <section className="ss-sec ss-sec--branding">
                 <div className="ss-sec-head">
-                  <h4>Shop Branding</h4>
-                  <p>Your logo and banner appear on your storefront and login page.</p>
+                  <span className="ss-sec-icon"><SSIcon name="branding" /></span>
+                  <div>
+                    <h4>Shop Branding</h4>
+                    <p>Your logo and banner appear on your storefront and login page.</p>
+                  </div>
                 </div>
                 <div className="ss-media">
-                  <div className="ss-field">
+                  <div className="ss-field ss-media-logo">
                     <span className="ss-label">Shop logo</span>
                     <div className="ss-logo-box"><img src={shopLogoPreview || logoSrc} alt="Shop logo" /></div>
                     <label className="ss-btn-up">
@@ -6819,7 +6955,7 @@ function App() {
                     <span className="ss-hint"><b>512 × 512 px</b> · square (1:1) · PNG, JPG or SVG · up to 10 MB</span>
                   </div>
 
-                  <div className="ss-field">
+                  <div className="ss-field ss-media-banner">
                     <span className="ss-label">Store banner</span>
                     <div className={`ss-banner-box${(shopBannerPreview || bannerSrc) ? '' : ' empty'}`}>
                       {(shopBannerPreview || bannerSrc)
@@ -6842,10 +6978,13 @@ function App() {
               </section>
 
               {/* ── Shop details ── */}
-              <section className="ss-sec">
+              <section className="ss-sec ss-sec--details">
                 <div className="ss-sec-head">
-                  <h4>Shop Details</h4>
-                  <p>Basic information customers and shipping labels use.</p>
+                  <span className="ss-sec-icon"><SSIcon name="details" /></span>
+                  <div>
+                    <h4>Shop Details</h4>
+                    <p>Basic information customers and shipping labels use.</p>
+                  </div>
                 </div>
                 <div className="ss-grid">
                   <div className="ss-field">
@@ -6871,10 +7010,13 @@ function App() {
               </section>
 
               {/* ── Bank details ── */}
-              <section className="ss-sec">
+              <section className="ss-sec ss-sec--bank">
                 <div className="ss-sec-head">
-                  <h4>Bank Details</h4>
-                  <p>Used for payouts.</p>
+                  <span className="ss-sec-icon"><SSIcon name="bank" /></span>
+                  <div>
+                    <h4>Bank Details</h4>
+                    <p>Used for payouts.</p>
+                  </div>
                 </div>
                 <div className="ss-grid">
                   <div className="ss-field">
@@ -6908,15 +7050,18 @@ function App() {
               </section>
 
               {/* ── Razorpay — customer payments settle straight to the shop's own account, not ours ── */}
-              <section className="ss-sec">
+              <section className="ss-sec ss-sec--razorpay">
                 <div className="ss-sec-head ss-sec-head-row">
-                  <div>
-                    <h4 style={{display:'flex',alignItems:'center',gap:8}}>
-                      Razorpay Payments
-                      <button type="button" className={`ss-info${rzpHelpOpen ? ' on' : ''}`} onClick={() => setRzpHelpOpen(v => !v)}
-                        title="How do I connect Razorpay?" aria-label="How do I connect Razorpay?">i</button>
-                    </h4>
-                    <p>Connect your own Razorpay account so customer payments go straight to you.</p>
+                  <div className="ss-sec-head-main">
+                    <span className="ss-sec-icon"><SSIcon name="razorpay" /></span>
+                    <div>
+                      <h4>
+                        Razorpay Payments
+                        <button type="button" className={`ss-info${rzpHelpOpen ? ' on' : ''}`} onClick={() => setRzpHelpOpen(v => !v)}
+                          title="How do I connect Razorpay?" aria-label="How do I connect Razorpay?">i</button>
+                      </h4>
+                      <p>Connect your own Razorpay account so customer payments go straight to you.</p>
+                    </div>
                   </div>
                   <span className={`ss-status ${tenantInfo?.razorpayMerchantConnected ? 'ok' : 'warn'}`}>
                     <i className="ss-dot" />
@@ -6959,10 +7104,13 @@ function App() {
               </section>
 
               {/* ── GST ── */}
-              <section className="ss-sec">
+              <section className="ss-sec ss-sec--gst">
                 <div className="ss-sec-head">
-                  <h4>GST Settings</h4>
-                  <p>Set the applicable GST rate per product in the Products page.</p>
+                  <span className="ss-sec-icon"><SSIcon name="gst" /></span>
+                  <div>
+                    <h4>GST Settings</h4>
+                    <p>Set the applicable GST rate per product in the Products page.</p>
+                  </div>
                 </div>
                 <label className="ss-toggle-row">
                   <span>
