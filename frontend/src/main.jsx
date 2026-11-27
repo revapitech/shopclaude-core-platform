@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createPortal } from 'react-dom';
 import axios from 'axios';
@@ -621,21 +621,58 @@ function RowIcon({ name }) {
   }
 }
 
-// Compact "⋮" action menu used on Inventory rows — renders via a portal so it's
-// never clipped by the table's horizontal-scroll wrapper.
+// Compact "⋮" action menu used on Inventory rows — renders via a portal so it's never
+// clipped by the table's horizontal-scroll wrapper. Flips above the button when there
+// isn't enough room below, re-measuring on scroll/resize so it never drifts off target.
+const ROW_MENU_WIDTH = 200;
+const ROW_MENU_GAP = 6;
+
 function RowActionMenu({ id, openId, setOpenId, items }) {
   const btnRef = useRef(null);
+  const menuRef = useRef(null);
   const [pos, setPos] = useState(null);
   const isOpen = openId === id;
+
+  const computePos = () => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const menuH = menuRef.current?.offsetHeight ?? (items.length * 46 + 16);
+    const spaceBelow = window.innerHeight - r.bottom;
+    const spaceAbove = r.top;
+    const placement = (spaceBelow < menuH + ROW_MENU_GAP && spaceAbove > spaceBelow) ? 'up' : 'down';
+    const top = placement === 'up'
+      ? Math.max(8, r.top - menuH - ROW_MENU_GAP)
+      : r.bottom + ROW_MENU_GAP;
+    const left = Math.max(8, Math.min(r.right - ROW_MENU_WIDTH, window.innerWidth - ROW_MENU_WIDTH - 8));
+    setPos({ top, left, placement });
+  };
 
   const toggle = (e) => {
     e.stopPropagation();
     if (isOpen) { setOpenId(null); return; }
-    const r = btnRef.current.getBoundingClientRect();
-    const menuW = 190;
-    setPos({ top: r.bottom + 6, left: Math.max(8, Math.min(r.right - menuW, window.innerWidth - menuW - 8)) });
+    computePos();
     setOpenId(id);
   };
+
+  // Re-measure once the menu has actually mounted (real height, not the estimate),
+  // then keep it pinned to the button through scrolling/resizing, and support Escape.
+  useLayoutEffect(() => {
+    if (isOpen) computePos();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const reposition = () => computePos();
+    const onKeyDown = (e) => { if (e.key === 'Escape') setOpenId(null); };
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isOpen]);
 
   return (
     <>
@@ -644,9 +681,10 @@ function RowActionMenu({ id, openId, setOpenId, items }) {
         <RowIcon name="kebab" />
       </button>
       {isOpen && pos && createPortal(
-        <div className="inv-action-menu" style={{ top: pos.top, left: pos.left, width: 190 }} onClick={e => e.stopPropagation()}>
+        <div ref={menuRef} className={`inv-action-menu inv-action-menu-${pos.placement}`}
+          style={{ top: pos.top, left: pos.left, width: ROW_MENU_WIDTH }} onClick={e => e.stopPropagation()}>
           {items.map((it, i) => (
-            <button key={i} type="button" className={`inv-action-item${it.danger ? ' danger' : ''}`}
+            <button key={i} type="button" className={`inv-action-item inv-action-item--${it.icon}`}
               onClick={() => { setOpenId(null); it.onClick(); }}>
               <RowIcon name={it.icon} />{it.label}
             </button>
@@ -3796,7 +3834,7 @@ function App() {
                           <RowActionMenu id={`p-${p.id}`} openId={invMenuOpen} setOpenId={setInvMenuOpen} items={[
                             { icon: 'edit', label: 'Edit Product', onClick: () => openEdit(p) },
                             { icon: 'print', label: 'Print Label', onClick: () => setLabelModal({product:p, stickerType:'two-row', qty:1}) },
-                            { icon: 'trash', label: 'Delete Product', danger: true, onClick: () => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); } },
+                            { icon: 'trash', label: 'Delete Product', onClick: () => { if(window.confirm(`Delete "${p.name}"?`)) axios.delete(`${API}/products/${p.id}`).then(() => { loadProducts(); showToast('Product deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete product.', 'error')); } },
                           ]} />
                         </td>
                       </tr>
@@ -3848,7 +3886,7 @@ function App() {
                         <td className="inv-action-cell">
                           <RowActionMenu id={`f-${famKey}`} openId={invMenuOpen} setOpenId={setInvMenuOpen} items={[
                             { icon: 'print', label: 'Print Label', onClick: () => setCatalogVariantModal({ canonical: rep, variants: family.products }) },
-                            { icon: 'trash', label: 'Delete All Variants', danger: true, onClick: () => { if(window.confirm(`Delete all ${family.products.length} colour variants of "${rep.name}"?`)) Promise.all(family.products.map(v => axios.delete(`${API}/products/${v.id}`))).then(() => { loadProducts(); showToast('All variants deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); } },
+                            { icon: 'trash', label: 'Delete All Variants', onClick: () => { if(window.confirm(`Delete all ${family.products.length} colour variants of "${rep.name}"?`)) Promise.all(family.products.map(v => axios.delete(`${API}/products/${v.id}`))).then(() => { loadProducts(); showToast('All variants deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); } },
                           ]} />
                         </td>
                       </tr>
@@ -3877,7 +3915,7 @@ function App() {
                               <RowActionMenu id={`v-${v.id}`} openId={invMenuOpen} setOpenId={setInvMenuOpen} items={[
                                 { icon: 'edit', label: 'Edit Product', onClick: () => openEdit(v) },
                                 { icon: 'print', label: 'Print Label', onClick: () => setLabelModal({product:v, stickerType:'two-row', qty:1}) },
-                                { icon: 'trash', label: 'Delete Product', danger: true, onClick: () => { if(window.confirm(`Delete "${v.name}" (${v.color})?`)) axios.delete(`${API}/products/${v.id}`).then(() => { loadProducts(); showToast('Variant deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); } },
+                                { icon: 'trash', label: 'Delete Product', onClick: () => { if(window.confirm(`Delete "${v.name}" (${v.color})?`)) axios.delete(`${API}/products/${v.id}`).then(() => { loadProducts(); showToast('Variant deleted'); }).catch(err => showToast(err.response?.data?.error || 'Failed to delete.', 'error')); } },
                               ]} />
                             </td>
                           </tr>
@@ -7827,6 +7865,10 @@ function ShopApp() {
   const [trackError, setTrackError]       = useState('');
   const [copied, setCopied] = useState(false);
   const [shopTab, setShopTab] = useState('all');  // 'all' | 'new' | 'popular' | 'featured'
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileCatOpen, setMobileCatOpen] = useState(false);
+  const [catMenuOpen, setCatMenuOpen] = useState(false); // desktop/tablet Categories dropdown
+  const catMenuRef = useRef(null);
   const [detailProduct, setDetailProduct] = useState(null);
   const [detailQty, setDetailQty] = useState(1);
   const [detailImgIdx, setDetailImgIdx] = useState(0);
@@ -7864,6 +7906,25 @@ function ShopApp() {
     axios.get(`${API}/public/digital/products?subdomain=${sub}`).then(r => setDigitalProducts(r.data)).catch(() => {});
     axios.get(`${API}/public/offers?subdomain=${sub}`).then(r => setPublicOffers(r.data)).catch(() => {});
   }, []);
+
+  // Close the desktop/tablet Categories dropdown on outside click or Escape.
+  useEffect(() => {
+    if (!catMenuOpen) return;
+    const onDocClick = (e) => { if (catMenuRef.current && !catMenuRef.current.contains(e.target)) setCatMenuOpen(false); };
+    const onKeyDown = (e) => { if (e.key === 'Escape') setCatMenuOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [catMenuOpen]);
+
+  // Lock page scroll while the mobile nav drawer is open.
+  useEffect(() => {
+    document.body.style.overflow = mobileNavOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [mobileNavOpen]);
 
   const addToCart = (p, selectedColor, selectedSize) => {
     const key = p.barcode + (selectedColor||'') + (selectedSize||'');
@@ -8760,6 +8821,10 @@ function ShopApp() {
       {/* ── Top header ── */}
       <header className="s2-header">
         <div className="s2-header-inner">
+          <button type="button" className="s2-hamburger" aria-label="Open menu" aria-expanded={mobileNavOpen}
+            onClick={() => setMobileNavOpen(o => !o)}>
+            <span/><span/><span/>
+          </button>
           <div className="s2-brand">
             <img src={shopLogoSrc} alt={shopName} className="s2-logo" onError={e=>{e.currentTarget.onerror=null;e.currentTarget.src='/logo.png';}} />
             <div className="s2-brand-text">
@@ -8769,19 +8834,38 @@ function ShopApp() {
           <nav className="s2-nav">
             <button className={`s2-nav-link ${!filterCat&&shopView==='shop'?'s2-nav-active':''}`}
               onClick={() => { setShopView('shop'); setFilterCat(''); setSearch(''); }}>HOME</button>
-            {cats.map(c => (
-              <button key={c} className={`s2-nav-link ${filterCat===c&&shopView==='shop'?'s2-nav-active':''}`}
-                onClick={() => { setShopView('shop'); setFilterCat(c); }}>
-                {c.toUpperCase()}
+            <div className="s2-nav-dd" ref={catMenuRef}>
+              <button type="button" className={`s2-nav-link s2-nav-dd-trigger ${filterCat && shopView==='shop' ? 's2-nav-active' : ''}`}
+                aria-haspopup="true" aria-expanded={catMenuOpen} onClick={() => setCatMenuOpen(o => !o)}>
+                CATEGORIES <span className={`s2-nav-caret ${catMenuOpen ? 'open' : ''}`}>▾</span>
               </button>
-            ))}
+              {catMenuOpen && (
+                <div className="s2-nav-dd-panel" role="menu">
+                  {cats.length === 0 && <div className="s2-nav-dd-empty">No categories yet</div>}
+                  {cats.map(c => (
+                    <button key={c} type="button" role="menuitem"
+                      className={`s2-nav-dd-item ${filterCat===c && shopView==='shop' ? 's2-nav-dd-item-active' : ''}`}
+                      onClick={() => { setShopView('shop'); setFilterCat(c); setCatMenuOpen(false); }}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {publicOffers.length > 0 && (
+              <button className="s2-nav-link s2-nav-offer" onClick={() => {
+                setShopView('shop');
+                setTimeout(() => document.getElementById('s2-offers')?.scrollIntoView({ behavior: 'smooth' }), 0);
+              }}>🎁 OFFER ZONE</button>
+            )}
           </nav>
+          <span className="s2-powered-nav">Powered by <b>theshopclaude</b></span>
           <div className="s2-header-actions">
             <button className="s2-icon-btn" title="Search" aria-label="Search" onClick={() => document.getElementById('s2-search-input')?.focus()}>
               🔍
             </button>
             <button
-              className={`s2-icon-btn ${shopView==='track'?'s2-icon-active':''}`}
+              className={`s2-icon-btn s2-icon-track ${shopView==='track'?'s2-icon-active':''}`}
               title="Track Order"
               aria-label="Track Order"
               onClick={() => { setShopView(shopView==='track'?'shop':'track'); setTrackedOrders(null); setTrackError(''); setTrackInput(''); }}
@@ -8800,6 +8884,42 @@ function ShopApp() {
               value={search} onChange={e => setSearch(e.target.value)} />
           </div>
         )}
+
+        {/* ── Mobile nav drawer ── */}
+        {mobileNavOpen && <div className="s2-mobile-overlay" onClick={() => setMobileNavOpen(false)} />}
+        <nav className={`s2-mobile-drawer ${mobileNavOpen ? 'open' : ''}`} aria-hidden={!mobileNavOpen}>
+          <button type="button" className="s2-mobile-link"
+            onClick={() => { setShopView('shop'); setFilterCat(''); setSearch(''); setMobileNavOpen(false); }}>
+            Home
+          </button>
+          <button type="button" className="s2-mobile-accordion-trigger" aria-expanded={mobileCatOpen}
+            onClick={() => setMobileCatOpen(o => !o)}>
+            Categories <span className={`s2-nav-caret ${mobileCatOpen ? 'open' : ''}`}>▾</span>
+          </button>
+          <div className={`s2-mobile-accordion-panel ${mobileCatOpen ? 'open' : ''}`}>
+            {cats.map(c => (
+              <button key={c} type="button"
+                className={`s2-mobile-sublink ${filterCat===c && shopView==='shop' ? 's2-mobile-link-active' : ''}`}
+                onClick={() => { setShopView('shop'); setFilterCat(c); setMobileNavOpen(false); }}>
+                {c}
+              </button>
+            ))}
+            {cats.length === 0 && <div className="s2-mobile-sublink s2-nav-dd-empty">No categories yet</div>}
+          </div>
+          {publicOffers.length > 0 && (
+            <button type="button" className="s2-mobile-link s2-mobile-offer" onClick={() => {
+              setShopView('shop'); setMobileNavOpen(false);
+              setTimeout(() => document.getElementById('s2-offers')?.scrollIntoView({ behavior: 'smooth' }), 0);
+            }}>
+              🎁 Offer Zone
+            </button>
+          )}
+          <button type="button" className="s2-mobile-link"
+            onClick={() => { setShopView(shopView==='track'?'shop':'track'); setTrackedOrders(null); setTrackError(''); setTrackInput(''); setMobileNavOpen(false); }}>
+            📦 Track Order
+          </button>
+          <div className="s2-mobile-powered">Powered by <b>theshopclaude</b></div>
+        </nav>
       </header>
 
       {/* ── Track Order page ── */}
@@ -8881,7 +9001,7 @@ function ShopApp() {
 
         {/* ── Offers & Combos section ── */}
         {publicOffers.length > 0 && (
-          <div className="s2-offers-festive-wrap">
+          <div className="s2-offers-festive-wrap" id="s2-offers">
             <div className="s2-festive-bg" aria-hidden="true"/>
             <section className="s2-offers-section">
             <div className="s2-section-hdr" style={{padding:'0 0 8px'}}>
@@ -9341,7 +9461,7 @@ function ShopApp() {
         </div>
         <div className="s2-footer-bottom">
           © {new Date().getFullYear()} {shopName} · All rights reserved
-          <span className="s2-powered-by"> · Powered by <a href="https://theshopclaude.com" target="_blank" rel="noopener noreferrer" className="s2-powered-link">ShopClaude</a></span>
+          <span className="s2-powered-by"> · Powered by <a href="https://theshopclaude.com" target="_blank" rel="noopener noreferrer" className="s2-powered-link">TheShopClaude</a></span>
         </div>
       </footer>
 
