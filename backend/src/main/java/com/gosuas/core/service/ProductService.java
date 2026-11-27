@@ -121,6 +121,61 @@ public class ProductService {
         return productRepository.findBySkuAndTenantId(sku, TenantContext.getTenantId());
     }
 
+    /**
+     * Unified Offline Billing lookup: resolves a scanned/typed code as, in order,
+     * an exact barcode, an exact (variant) SKU, or a base SKU shared by multiple
+     * colour/size variants ("RB4" resolving "RB4-BLU"/"RB4-BLK"). Never guesses a
+     * variant on the caller's behalf: an AMBIGUOUS result is returned whenever more
+     * than one row could satisfy the typed/scanned code.
+     *
+     * A scanned BARCODE always resolves directly, even if the product has colour
+     * siblings — it is physically tied to one specific unit, so there is nothing
+     * to disambiguate.
+     *
+     * A typed SKU is different: one colour variant's own SKU is sometimes the bare
+     * base SKU itself (e.g. "UTC-HD-103" = Black, with siblings "UTC-HD-103-GRE" /
+     * "UTC-HD-103-SIL"). Typing that SKU must still show the picker rather than
+     * silently landing on Black just because it happened to be an exact match —
+     * so an exact SKU match is also checked for siblings before resolving directly.
+     */
+    public java.util.Optional<com.gosuas.core.dto.ProductLookupResponse> lookup(String rawCode) {
+        String code = rawCode == null ? "" : rawCode.strip();
+        if (code.isBlank()) return java.util.Optional.empty();
+        UUID tenantId = TenantContext.getTenantId();
+
+        java.util.Optional<Product> byBarcode = productRepository.findByBarcodeAndTenantId(code, tenantId);
+        if (byBarcode.isPresent()) {
+            return java.util.Optional.of(com.gosuas.core.dto.ProductLookupResponse.exact(byBarcode.get()));
+        }
+
+        java.util.Optional<Product> bySku = productRepository.findBySkuAndTenantId(code, tenantId);
+        if (bySku.isPresent()) {
+            Product matched = bySku.get();
+            List<Product> siblings = productRepository.findByTenantIdAndSkuStartingWith(tenantId, matched.getSku() + "-");
+            if (siblings.isEmpty()) {
+                return java.util.Optional.of(com.gosuas.core.dto.ProductLookupResponse.exact(matched));
+            }
+            List<Product> family = new java.util.ArrayList<>(siblings);
+            family.add(matched);
+            return java.util.Optional.of(com.gosuas.core.dto.ProductLookupResponse.ambiguous(sortByColor(family)));
+        }
+
+        List<Product> siblings = productRepository.findByTenantIdAndSkuStartingWith(tenantId, code + "-");
+        if (siblings.size() == 1) {
+            return java.util.Optional.of(com.gosuas.core.dto.ProductLookupResponse.exact(siblings.get(0)));
+        }
+        if (siblings.size() > 1) {
+            return java.util.Optional.of(com.gosuas.core.dto.ProductLookupResponse.ambiguous(sortByColor(siblings)));
+        }
+        return java.util.Optional.empty();
+    }
+
+    private static List<Product> sortByColor(List<Product> products) {
+        return products.stream()
+                .sorted(java.util.Comparator.comparing(p -> p.getColor() == null ? "" : p.getColor()))
+                .toList();
+    }
+
     private String generateEan13() {
         String base = String.format("%012d", Math.abs(System.nanoTime()) % 1_000_000_000_000L);
         int sum = 0;
