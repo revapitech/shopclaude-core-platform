@@ -13,13 +13,17 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/api/tenant")
@@ -36,6 +40,71 @@ public class TenantController {
     private String razorpayKeySecret;
 
     private static final Set<String> UPGRADABLE_PLANS = Set.of("STARTER", "PRO");
+
+    // ── Logo / banner image validation ──────────────────────────────────────────
+    private static final long MAX_IMAGE_BYTES = 10L * 1024 * 1024; // 10 MB
+    private static final Set<String> RASTER_CONTENT_TYPES = Set.of("image/jpeg", "image/jpg", "image/png");
+    private static final double ASPECT_TOLERANCE = 0.02; // 2%
+
+    private static final double BANNER_ASPECT = 16.0 / 5.0;
+    private static final int BANNER_MIN_W = 800;  // half of the recommended 1600 x 500
+    private static final int BANNER_MIN_H = 250;
+    private static final String BANNER_RATIO_MSG =
+            "Please upload a banner with a 16:5 aspect ratio. Recommended size: 1600 × 500 px. You can crop your image to fit the required dimensions.";
+    private static final String BANNER_LOWRES_MSG =
+            "This image is too small and would look blurry as a banner. Please upload an image at least " + BANNER_MIN_W + " × " + BANNER_MIN_H + " px (recommended 1600 × 500 px).";
+
+    private static final double LOGO_ASPECT = 1.0;
+    private static final int LOGO_MIN_W = 256; // half of the recommended 512 x 512
+    private static final int LOGO_MIN_H = 256;
+    private static final String LOGO_RATIO_MSG =
+            "Please upload a logo with a 1:1 (square) aspect ratio. Recommended size: 512 × 512 px. You can crop your image to fit the required dimensions.";
+    private static final String LOGO_LOWRES_MSG =
+            "This image is too small and would look blurry as a logo. Please upload an image at least " + LOGO_MIN_W + " × " + LOGO_MIN_H + " px (recommended 512 × 512 px).";
+
+    private static final Pattern SVG_EVENT_ATTR = Pattern.compile("\\son\\w+\\s*=", Pattern.CASE_INSENSITIVE);
+
+    /** Validates a JPG/PNG upload against a target aspect ratio and minimum resolution. Returns an error message, or null if valid. */
+    private String validateRasterImage(MultipartFile file, double targetAspect, int minWidth, int minHeight,
+                                        String formatMsg, String lowResMsg, String ratioMsg) throws IOException {
+        if (file.isEmpty()) return "Please choose a file to upload.";
+        if (file.getSize() > MAX_IMAGE_BYTES) return "File is too large. Maximum allowed size is 10 MB.";
+        String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
+        if (!RASTER_CONTENT_TYPES.contains(contentType)) return formatMsg;
+        BufferedImage img;
+        try (InputStream in = file.getInputStream()) {
+            img = ImageIO.read(in);
+        }
+        if (img == null) return "This file could not be read as an image. Please upload a valid JPG or PNG.";
+        int w = img.getWidth(), h = img.getHeight();
+        if (w < minWidth || h < minHeight) return lowResMsg;
+        double ratio = (double) w / (double) h;
+        if (Math.abs(ratio - targetAspect) / targetAspect > ASPECT_TOLERANCE) return ratioMsg;
+        return null;
+    }
+
+    /** Validates a logo upload: JPG/PNG (square, min resolution) or a security-checked SVG. Returns an error message, or null if valid. */
+    private String validateLogoFile(MultipartFile file) throws IOException {
+        if (file.isEmpty()) return "Please choose a file to upload.";
+        if (file.getSize() > MAX_IMAGE_BYTES) return "File is too large. Maximum allowed size is 10 MB.";
+        String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase();
+        String original = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        boolean isSvg = contentType.contains("svg") || original.endsWith(".svg");
+
+        if (isSvg) {
+            String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+            String lower = content.toLowerCase();
+            if (!lower.contains("<svg")) return "This SVG file could not be verified. Please upload a valid SVG, PNG or JPG.";
+            if (lower.contains("<script") || lower.contains("javascript:") || lower.contains("<foreignobject")
+                    || SVG_EVENT_ATTR.matcher(lower).find()) {
+                return "This SVG contains unsupported content. Please upload a plain SVG, PNG or JPG.";
+            }
+            return null; // vector — no fixed pixel dimensions to validate
+        }
+
+        return validateRasterImage(file, LOGO_ASPECT, LOGO_MIN_W, LOGO_MIN_H,
+                "Unsupported file format. Please upload a PNG, JPG, JPEG or SVG image.", LOGO_LOWRES_MSG, LOGO_RATIO_MSG);
+    }
 
     @GetMapping("/info")
     public ResponseEntity<Tenant> getTenantInfo() {
@@ -71,7 +140,11 @@ public class TenantController {
     }
 
     @PostMapping("/logo")
-    public ResponseEntity<Tenant> uploadLogo(@RequestParam("file") MultipartFile file) throws IOException {
+    public ResponseEntity<?> uploadLogo(@RequestParam("file") MultipartFile file) throws IOException {
+        String validationError = validateLogoFile(file);
+        if (validationError != null) {
+            return ResponseEntity.badRequest().body(Map.of("error", validationError));
+        }
         return tenantRepository.findById(TenantContext.getTenantId()).map(tenant -> {
             try {
                 Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
@@ -90,7 +163,12 @@ public class TenantController {
     }
 
     @PostMapping("/banner")
-    public ResponseEntity<Tenant> uploadBanner(@RequestParam("file") MultipartFile file) throws IOException {
+    public ResponseEntity<?> uploadBanner(@RequestParam("file") MultipartFile file) throws IOException {
+        String validationError = validateRasterImage(file, BANNER_ASPECT, BANNER_MIN_W, BANNER_MIN_H,
+                "Unsupported file format. Please upload a JPG, JPEG or PNG image.", BANNER_LOWRES_MSG, BANNER_RATIO_MSG);
+        if (validationError != null) {
+            return ResponseEntity.badRequest().body(Map.of("error", validationError));
+        }
         return tenantRepository.findById(TenantContext.getTenantId()).map(tenant -> {
             try {
                 Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();

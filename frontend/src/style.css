@@ -2489,6 +2489,10 @@ section {
   0%,100% { background-position: 0% 50%; }
   50%      { background-position: 100% 50%; }
 }
+/* A real uploaded banner photo must stay centred (object-position: center) —
+   CSS animations win over inline styles in the cascade, so the decorative
+   gradient-drift above would otherwise keep panning a real photo off-centre. */
+.s2-hero-photo { animation: none; background-position: center; }
 .s2-hero::before {
   background:
     radial-gradient(ellipse at 68% 42%, rgba(245,151,30,.17) 0%, transparent 55%),
@@ -2604,8 +2608,10 @@ section {
 .ss-logo-box img { width:100%; height:100%; object-fit:contain; display:block; }
 .ss-banner-box { position:relative; width:100%; max-width:448px; height:140px; aspect-ratio:16 / 5; border:1.5px solid #e2e8f0; border-radius:14px; background:#fff; overflow:hidden; display:flex; align-items:center; justify-content:center; color:#94a3b8; font-size:12.5px; }
 .ss-banner-box.empty { border-style:dashed; border-color:#cbd5e1; }
-.ss-banner-box img { width:100%; height:100%; object-fit:contain; display:block; }
+.ss-banner-box img { width:100%; height:100%; object-fit:cover; object-position:center; display:block; }
 .ss-new { position:absolute; top:8px; right:10px; background:#16a34a; color:#fff; font-size:10px; padding:2px 8px; border-radius:99px; font-weight:700; }
+/* Shop address — auto-grows with content (via JS), so no resize handle or stray scrollbar when short/empty */
+.ss-address-ta { resize:none; overflow-y:hidden; min-height:44px; max-height:240px; line-height:1.5; }
 .ss-btn-up { align-self:flex-start; display:inline-flex; align-items:center; padding:8px 16px; background:#fff; color:#1E3A5F; border:1.5px solid #1E3A5F; border-radius:9px; cursor:pointer; font-size:13px; font-weight:600; transition:background .15s, color .15s; margin-top:10px; }
 .ss-btn-up:hover { background:#1E3A5F; color:#fff; }
 /* razorpay */
@@ -2649,6 +2655,23 @@ section {
   .ss-media-logo, .ss-media-banner { width:100%; max-width:100%; }
   .ss-banner-box { width:100%; max-width:100%; height:auto; }
   .ss-foot button { flex:1; }
+}
+
+/* ── Image crop modal (logo / banner) — reuses .modal-overlay / .modal-box ── */
+.icm-overlay { z-index:1100; }
+.icm-box { width:auto; max-width:94vw; display:flex; flex-direction:column; align-items:center; }
+.icm-msg { text-align:center; }
+.icm-frame { position:relative; overflow:hidden; border-radius:10px; border:1.5px solid #e2e8f0; background:#0f172a; margin:4px auto 0; cursor:grab; touch-action:none; max-width:100%; }
+.icm-frame.icm-dragging { cursor:grabbing; }
+.icm-frame img { position:absolute; user-select:none; -webkit-user-drag:none; pointer-events:none; }
+.icm-loading { display:flex; align-items:center; justify-content:center; height:180px; width:300px; max-width:100%; color:#94a3b8; font-size:13px; }
+.icm-zoom-row { display:flex; align-items:center; gap:10px; margin-top:14px; font-size:16px; color:#64748b; width:100%; max-width:320px; }
+.icm-zoom-row input[type=range] { flex:1; accent-color:#1E3A5F; }
+.icm-caption { font-size:11.5px; color:#94a3b8; text-align:center; margin:10px 0 0; max-width:320px; }
+.icm-foot { display:flex; gap:12px; justify-content:flex-end; margin-top:18px; width:100%; }
+.icm-foot button { min-width:110px; padding:10px 18px; border-radius:10px; font-size:14px; font-weight:700; margin:0; }
+@media (max-width: 480px) {
+  .icm-foot button { flex:1; }
 }
 
 /* ── Home page: responsive polish (tablet + mobile) ── */
