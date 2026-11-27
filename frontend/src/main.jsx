@@ -16,6 +16,44 @@ function maxPhotosForPlan(plan) {
   return plan === 'PRO' ? 6 : 2; // STARTER (₹999) → 2, PRO (₹1,699) → 6, FREE defaults to 2
 }
 
+// ── Shop logo / banner upload validation ────────────────────────────────────
+// Mirrors the backend checks in TenantController so users get the same message
+// instantly, before a request even goes out.
+const IMG_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+const BANNER_ASPECT = 16 / 5;
+const BANNER_OUTPUT_W = 1600, BANNER_OUTPUT_H = 500;
+const BANNER_MIN_W = 800, BANNER_MIN_H = 250; // half the recommended size — below this it would look blurry
+const BANNER_RATIO_MSG = 'Please upload a banner with a 16:5 aspect ratio. Recommended size: 1600 × 500 px. You can crop your image to fit the required dimensions.';
+const BANNER_LOWRES_MSG = `This image is too small and would look blurry as a banner. Please upload an image at least ${BANNER_MIN_W} × ${BANNER_MIN_H} px (recommended 1600 × 500 px).`;
+
+const LOGO_ASPECT = 1;
+const LOGO_OUTPUT_W = 512, LOGO_OUTPUT_H = 512;
+const LOGO_MIN_W = 256, LOGO_MIN_H = 256;
+const LOGO_RATIO_MSG = 'Please upload a logo with a 1:1 (square) aspect ratio. Recommended size: 512 × 512 px. You can crop your image to fit the required dimensions.';
+const LOGO_LOWRES_MSG = `This image is too small and would look blurry as a logo. Please upload an image at least ${LOGO_MIN_W} × ${LOGO_MIN_H} px (recommended 512 × 512 px).`;
+
+const RASTER_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
+
+function readImageDimensions(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight, url });
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read image.')); };
+    img.src = url;
+  });
+}
+
+// Auto-grows a textarea to fit its content (up to maxPx), only scrolling internally beyond that cap.
+function autoGrowTextarea(el, maxPx = 240) {
+  if (!el) return;
+  el.style.height = 'auto';
+  const h = Math.min(el.scrollHeight, maxPx);
+  el.style.height = h + 'px';
+  el.style.overflowY = el.scrollHeight > maxPx ? 'auto' : 'hidden';
+}
+
 // Attach JWT to every axios request
 axios.interceptors.request.use(config => {
   const token = localStorage.getItem('gosuas_token');
@@ -579,6 +617,130 @@ function SecretInput({ value, onChange, placeholder }) {
       <button type="button" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide key secret' : 'Show key secret'}>
         {show ? 'Hide' : 'Show'}
       </button>
+    </div>
+  );
+}
+
+// Dependency-free crop modal: drag to reposition, slider to zoom, locked aspect ratio.
+// The visible frame is rendered at a fixed size that always matches the target aspect
+// ratio, so it doubles as an exact live preview of what gets exported on confirm.
+function ImageCropModal({ url, aspect, outputW, outputH, outputMime, ratioMsg, kind, onCancel, onConfirm }) {
+  // Size the frame to fit the current viewport (matches .icm-box's max-width:94vw,
+  // minus its padding) so drag/zoom math always lines up with what's rendered —
+  // computed once at mount rather than tracked live, since resizing mid-crop is rare.
+  const [{ frameW, frameH }] = useState(() => {
+    const capW = kind === 'logo' ? 320 : 460;
+    const available = Math.min(window.innerWidth * 0.94, 520) - 48;
+    const w = Math.max(180, Math.min(capW, available));
+    return { frameW: w, frameH: w / aspect };
+  });
+  const [natural, setNatural] = useState(null); // { w, h }
+  const [scale, setScale] = useState(1);
+  const [minScale, setMinScale] = useState(1);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const dragRef = useRef(null);
+
+  const clampPos = (p, s, nat) => {
+    if (!nat) return p;
+    const dw = nat.w * s, dh = nat.h * s;
+    const minX = Math.min(0, frameW - dw), minY = Math.min(0, frameH - dh);
+    return { x: Math.min(0, Math.max(minX, p.x)), y: Math.min(0, Math.max(minY, p.y)) };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      const nat = { w: img.naturalWidth, h: img.naturalHeight };
+      const cover = Math.max(frameW / nat.w, frameH / nat.h);
+      setNatural(nat);
+      setMinScale(cover);
+      setScale(cover);
+      setPos({ x: (frameW - nat.w * cover) / 2, y: (frameH - nat.h * cover) / 2 });
+    };
+    img.src = url;
+    return () => { cancelled = true; };
+  }, [url, frameW, frameH]);
+
+  const onPointerDown = (e) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origin: pos };
+  };
+  const onPointerMove = (e) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    setPos(clampPos({ x: dragRef.current.origin.x + dx, y: dragRef.current.origin.y + dy }, scale, natural));
+  };
+  const endDrag = (e) => {
+    dragRef.current = null;
+    setDragging(false);
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  };
+
+  const onZoom = (e) => {
+    const next = Number(e.target.value);
+    setScale(next);
+    setPos(p => clampPos(p, next, natural));
+  };
+
+  const confirm = () => {
+    if (!natural) return;
+    setExporting(true);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = outputW;
+      canvas.height = outputH;
+      const ctx = canvas.getContext('2d');
+      const sx = -pos.x / scale, sy = -pos.y / scale;
+      const sw = frameW / scale, sh = frameH / scale;
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outputW, outputH);
+      canvas.toBlob(blob => {
+        setExporting(false);
+        if (blob) onConfirm(blob);
+      }, outputMime, 0.92);
+    };
+    img.src = url;
+  };
+
+  const dw = natural ? natural.w * scale : 0;
+  const dh = natural ? natural.h * scale : 0;
+
+  return (
+    <div className="modal-overlay icm-overlay" onClick={onCancel}>
+      <div className="modal-box icm-box" onClick={e => e.stopPropagation()}>
+        <h3>{kind === 'banner' ? 'Crop your banner' : 'Crop your logo'}</h3>
+        <p className="ss-hint icm-msg">{ratioMsg}</p>
+        {natural ? (
+          <>
+            <div className={`icm-frame${dragging ? ' icm-dragging' : ''}`} style={{ width: frameW, height: frameH }}
+              onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerLeave={endDrag}>
+              <img src={url} draggable={false} alt=""
+                style={{ position: 'absolute', left: pos.x, top: pos.y, width: dw, height: dh, maxWidth: 'none' }} />
+            </div>
+            <div className="icm-zoom-row">
+              <span aria-hidden="true">－</span>
+              <input type="range" aria-label="Zoom" min={minScale} max={minScale * 4}
+                step={Math.max((minScale * 4 - minScale) / 100, 0.0001)} value={scale} onChange={onZoom} />
+              <span aria-hidden="true">＋</span>
+            </div>
+            <p className="icm-caption">Drag to reposition — the frame above is an exact live preview of what will be saved.</p>
+          </>
+        ) : (
+          <div className="icm-loading">Loading image…</div>
+        )}
+        <div className="icm-foot">
+          <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-primary" onClick={confirm} disabled={!natural || exporting}>
+            {exporting ? 'Processing…' : 'Apply crop'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1651,6 +1813,16 @@ function App() {
   const [shopLogoPreview, setShopLogoPreview] = useState(null);
   const [shopBannerFile, setShopBannerFile] = useState(null);
   const [shopBannerPreview, setShopBannerPreview] = useState(null);
+  const [shopLogoError, setShopLogoError] = useState('');
+  const [shopBannerError, setShopBannerError] = useState('');
+  const [shopImageBusy, setShopImageBusy] = useState(false); // reading dimensions, or crop modal open/exporting
+  const [cropModal, setCropModal] = useState(null); // { kind, file, url, frameW, frameH, outputW, outputH, outputMime, ratioMsg }
+  const addressTaRef = useRef(null);
+
+  // Size the shop-address textarea to its saved content as soon as the modal opens.
+  useEffect(() => {
+    if (shopEditModal) autoGrowTextarea(addressTaRef.current);
+  }, [shopEditModal]);
 
   // ── Rental register (Gosuas tenant only) ──
   const [rentals, setRentals] = useState([]);
@@ -1814,17 +1986,30 @@ function App() {
     }
     setShopEditSaving(true);
     try {
+      // If the server rejects an upload (e.g. it bypassed the client-side crop/
+      // validation), surface that field's error and stop — the shop's existing
+      // saved logo/banner is untouched since tenantInfo is only updated on success.
       if (shopLogoFile) {
-        const fd = new FormData();
-        fd.append('file', shopLogoFile);
-        const res = await axios.post(`${API}/tenant/logo`, fd);
-        setTenantInfo(res.data);
+        try {
+          const fd = new FormData();
+          fd.append('file', shopLogoFile);
+          const res = await axios.post(`${API}/tenant/logo`, fd);
+          setTenantInfo(res.data);
+        } catch (err) {
+          setShopLogoError(err.response?.data?.error || 'Failed to upload logo.');
+          throw err;
+        }
       }
       if (shopBannerFile) {
-        const fd = new FormData();
-        fd.append('file', shopBannerFile);
-        const res = await axios.post(`${API}/tenant/banner`, fd);
-        setTenantInfo(res.data);
+        try {
+          const fd = new FormData();
+          fd.append('file', shopBannerFile);
+          const res = await axios.post(`${API}/tenant/banner`, fd);
+          setTenantInfo(res.data);
+        } catch (err) {
+          setShopBannerError(err.response?.data?.error || 'Failed to upload banner.');
+          throw err;
+        }
       }
       const infoUpdate = {};
       if (shopEditModal?.name?.trim()) infoUpdate.name = shopEditModal.name.trim();
@@ -6955,7 +7140,101 @@ function App() {
       {/* ── Shop Settings Modal ── */}
       {shopEditModal && (() => {
         const bannerSrc = tenantInfo?.bannerUrl ? `${BACKEND}${tenantInfo.bannerUrl}` : null;
-        const closeModal = () => { setShopEditModal(null); setShopLogoFile(null); setShopLogoPreview(null); setShopBannerFile(null); setShopBannerPreview(null); };
+        const closeModal = () => {
+          setShopEditModal(null);
+          setShopLogoFile(null); setShopLogoPreview(null); setShopLogoError('');
+          setShopBannerFile(null); setShopBannerPreview(null); setShopBannerError('');
+          if (cropModal) URL.revokeObjectURL(cropModal.url);
+          setCropModal(null);
+        };
+
+        const onPickLogo = async (e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (!f) return;
+          setShopLogoError('');
+          const isSvg = f.type === 'image/svg+xml' || /\.svg$/i.test(f.name || '');
+          if (!isSvg && !RASTER_MIME_TYPES.includes(f.type)) {
+            setShopLogoError('Unsupported file format. Please upload a PNG, JPG, JPEG or SVG image.');
+            return;
+          }
+          if (f.size > IMG_MAX_BYTES) {
+            setShopLogoError('File is too large. Maximum allowed size is 10 MB.');
+            return;
+          }
+          setShopImageBusy(true);
+          try {
+            if (isSvg) {
+              const text = await f.text();
+              const lower = text.toLowerCase();
+              if (!lower.includes('<svg')) {
+                setShopLogoError('This SVG file could not be verified. Please upload a valid SVG, PNG or JPG.');
+                return;
+              }
+              if (lower.includes('<script') || lower.includes('javascript:') || lower.includes('<foreignobject') || /\son\w+\s*=/.test(lower)) {
+                setShopLogoError('This SVG contains unsupported content. Please upload a plain SVG, PNG or JPG.');
+                return;
+              }
+              setShopLogoFile(f);
+              setShopLogoPreview(URL.createObjectURL(f));
+              return;
+            }
+            const { width, height, url } = await readImageDimensions(f);
+            if (width < LOGO_MIN_W || height < LOGO_MIN_H) {
+              setShopLogoError(LOGO_LOWRES_MSG);
+              URL.revokeObjectURL(url);
+              return;
+            }
+            setCropModal({ kind: 'logo', url, aspect: LOGO_ASPECT, outputW: LOGO_OUTPUT_W, outputH: LOGO_OUTPUT_H, outputMime: 'image/png', ratioMsg: LOGO_RATIO_MSG });
+          } catch {
+            setShopLogoError('Could not read this image. Please try a different file.');
+          } finally {
+            setShopImageBusy(false);
+          }
+        };
+
+        const onPickBanner = async (e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (!f) return;
+          setShopBannerError('');
+          if (!RASTER_MIME_TYPES.includes(f.type)) {
+            setShopBannerError('Unsupported file format. Please upload a JPG, JPEG or PNG image.');
+            return;
+          }
+          if (f.size > IMG_MAX_BYTES) {
+            setShopBannerError('File is too large. Maximum allowed size is 10 MB.');
+            return;
+          }
+          setShopImageBusy(true);
+          try {
+            const { width, height, url } = await readImageDimensions(f);
+            if (width < BANNER_MIN_W || height < BANNER_MIN_H) {
+              setShopBannerError(BANNER_LOWRES_MSG);
+              URL.revokeObjectURL(url);
+              return;
+            }
+            setCropModal({ kind: 'banner', url, aspect: BANNER_ASPECT, outputW: BANNER_OUTPUT_W, outputH: BANNER_OUTPUT_H, outputMime: 'image/jpeg', ratioMsg: BANNER_RATIO_MSG });
+          } catch {
+            setShopBannerError('Could not read this image. Please try a different file.');
+          } finally {
+            setShopImageBusy(false);
+          }
+        };
+
+        const onCropConfirm = (blob) => {
+          const ext = cropModal.outputMime === 'image/png' ? 'png' : 'jpg';
+          const namedFile = new File([blob], `${cropModal.kind}-cropped.${ext}`, { type: cropModal.outputMime });
+          const previewUrl = URL.createObjectURL(blob);
+          if (cropModal.kind === 'banner') {
+            setShopBannerFile(namedFile); setShopBannerPreview(previewUrl); setShopBannerError('');
+          } else {
+            setShopLogoFile(namedFile); setShopLogoPreview(previewUrl); setShopLogoError('');
+          }
+          URL.revokeObjectURL(cropModal.url);
+          setCropModal(null);
+        };
+        const onCropCancel = () => { URL.revokeObjectURL(cropModal.url); setCropModal(null); };
         return (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-box shop-settings-box ss-box" role="dialog" aria-label="Shop Settings" onClick={e => e.stopPropagation()}>
@@ -6983,14 +7262,10 @@ function App() {
                     <div className="ss-logo-box"><img src={shopLogoPreview || logoSrc} alt="Shop logo" /></div>
                     <label className="ss-btn-up">
                       {shopLogoPreview || shopLogoFile ? 'Change logo' : 'Choose logo'}
-                      <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        setShopLogoFile(f);
-                        setShopLogoPreview(URL.createObjectURL(f));
-                      }} />
+                      <input type="file" accept="image/png,image/jpeg,image/jpg,image/svg+xml" style={{display:'none'}} onChange={onPickLogo} />
                     </label>
                     <span className="ss-hint"><b>512 × 512 px</b> · square (1:1) · PNG, JPG or SVG · up to 10 MB</span>
+                    {shopLogoError && <span className="ss-err">{shopLogoError}</span>}
                   </div>
 
                   <div className="ss-field ss-media-banner">
@@ -7003,14 +7278,10 @@ function App() {
                     </div>
                     <label className="ss-btn-up">
                       {(shopBannerPreview || bannerSrc) ? 'Change banner' : 'Upload banner'}
-                      <input type="file" accept="image/*" style={{display:'none'}} onChange={e => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        setShopBannerFile(f);
-                        setShopBannerPreview(URL.createObjectURL(f));
-                      }} />
+                      <input type="file" accept="image/png,image/jpeg,image/jpg" style={{display:'none'}} onChange={onPickBanner} />
                     </label>
                     <span className="ss-hint"><b>1600 × 500 px</b> · wide (16:5) · PNG or JPG · up to 10 MB. Keep key content centred — edges may be cropped on small screens.</span>
+                    {shopBannerError && <span className="ss-err">{shopBannerError}</span>}
                   </div>
                 </div>
               </section>
@@ -7039,10 +7310,10 @@ function App() {
                   </div>
                   <div className="ss-field ss-full">
                     <label className="ss-label">Shop address</label>
-                    <textarea value={shopEditModal.address || ''} onChange={e => setShopEditModal(m => ({...m, address: e.target.value}))}
-                      rows={3} placeholder={'e.g.\n12 MG Road, Indiranagar\nBengaluru, Karnataka - 560038\nPhone: 9876543210'}
-                      style={{resize:'vertical'}} />
-                    <span className="ss-hint">Printed on shipping labels.</span>
+                    <textarea ref={addressTaRef} className="ss-address-ta" value={shopEditModal.address || ''}
+                      onChange={e => { setShopEditModal(m => ({...m, address: e.target.value})); autoGrowTextarea(e.target); }}
+                      rows={1} placeholder="Enter your complete shop address" />
+                    <span className="ss-hint">Include building name, street, locality, city, state and PIN code. This address will appear on shipping labels.</span>
                   </div>
                 </div>
               </section>
@@ -7182,11 +7453,20 @@ function App() {
 
             <div className="ss-foot">
               <button className="btn-secondary ss-cancel" onClick={closeModal}>Cancel</button>
-              <button className="btn-primary ss-save" onClick={saveShopSettings} disabled={shopEditSaving}>
-                {shopEditSaving ? 'Saving…' : 'Save changes'}
+              <button className="btn-primary ss-save" onClick={saveShopSettings}
+                disabled={shopEditSaving || shopImageBusy || !!cropModal || !!shopLogoError || !!shopBannerError}>
+                {shopEditSaving ? 'Saving…' : shopImageBusy ? 'Processing image…' : 'Save changes'}
               </button>
             </div>
           </div>
+          {cropModal && (
+            <ImageCropModal
+              url={cropModal.url} kind={cropModal.kind} aspect={cropModal.aspect}
+              outputW={cropModal.outputW} outputH={cropModal.outputH}
+              outputMime={cropModal.outputMime} ratioMsg={cropModal.ratioMsg}
+              onCancel={onCropCancel} onConfirm={onCropConfirm}
+            />
+          )}
         </div>
         );
       })()}
@@ -8930,7 +9210,7 @@ function ShopApp() {
             <p className="s2-track-sub">Enter your Order ID or the mobile number you used while ordering.</p>
             <form className="s2-track-form" onSubmit={trackOrder}>
               <input className="s2-track-input"
-                placeholder="e.g. WEB-20260612-0001 or 9747303943"
+                placeholder="e.g. WEB-XXXXXXXX-XXXX or XXXXXXX943"
                 value={trackInput} onChange={e => setTrackInput(e.target.value)} />
               <button type="submit" className="s2-track-submit">Track Order</button>
             </form>
@@ -8981,7 +9261,7 @@ function ShopApp() {
         {(() => {
           const bannerImg = shopInfo.bannerUrl ? `${BACKEND}${shopInfo.bannerUrl}` : null;
           return (
-            <section className="s2-hero" style={bannerImg ? {
+            <section className={`s2-hero${bannerImg ? ' s2-hero-photo' : ''}`} style={bannerImg ? {
               backgroundImage: `url(${bannerImg})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
